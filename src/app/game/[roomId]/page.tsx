@@ -189,9 +189,12 @@ export default function GameRoomPage() {
     roomStore.completeMiniGame(roomId, game, pointsEarned);
   };
 
-  const handleFinishRoast = () => {
+  // Memoised: RoastIntermission's countdown effect keys off this, so a new
+  // identity each render would restart the 15s timer every time the room
+  // updated — i.e. every time anyone reacted.
+  const handleFinishRoast = useCallback(() => {
     roomStore.finishRoast(roomId);
-  };
+  }, [roomId]);
 
   const handleFinishShopping = () => {
     roomStore.finishShopping(roomId);

@@ -78,14 +78,19 @@ export default function RoastIntermission({
   const socialRound = room.socialRound;
   const reactions = socialRound?.reactions ?? [];
 
-  // 15-second countdown timer
+  // Keep the callback in a ref so the countdown effect has no changing
+  // dependency — otherwise a re-render mid-roast restarts the 15 seconds.
+  const finishRef = useRef(onFinishRoast);
+  finishRef.current = onFinishRoast;
+
+  // 15-second countdown. Runs once per performer, not once per render.
   useEffect(() => {
     setTimeLeft(15);
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          onFinishRoast();
+          finishRef.current();
           return 0;
         }
         return prev - 1;
@@ -93,7 +98,7 @@ export default function RoastIntermission({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [onFinishRoast]);
+  }, [activePlayer.id]);
 
   const triggerSound = (action: () => void) => {
     action();

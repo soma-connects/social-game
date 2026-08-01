@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Volume2, VolumeX, Mic, MicOff, Share2, Zap } from 'lucide-react';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
+import { micStream } from '@/lib/micStream';
 import { MapTheme } from '@/lib/types';
 import ThemeSelector from './ThemeSelector';
 
@@ -17,6 +18,13 @@ interface GameHeaderProps {
 export default function GameHeader({ roomId, currentTheme, onSelectTheme, onOpenTrapPicker }: GameHeaderProps) {
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState(() => speechEngine.getIsMicMuted());
+
+  React.useEffect(() => {
+    const unsub = micStream.onMuteChange((muted) => {
+      setIsMicMuted(muted);
+    });
+    return unsub;
+  }, []);
 
   const toggleSound = () => {
     const muted = audioSFX.toggleMute();

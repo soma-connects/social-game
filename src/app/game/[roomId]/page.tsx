@@ -189,12 +189,12 @@ export default function GameRoomPage() {
     roomStore.completeMiniGame(roomId, game, pointsEarned);
   };
 
-  // Memoised: RoastIntermission's countdown effect keys off this, so a new
-  // identity each render would restart the 15s timer every time the room
-  // updated — i.e. every time anyone reacted.
-  const handleFinishRoast = useCallback(() => {
+  // Deliberately not memoised — this sits after the component's early returns,
+  // so a hook here would break the Rules of Hooks. RoastIntermission holds it
+  // in a ref instead, so its countdown does not care about this identity.
+  const handleFinishRoast = () => {
     roomStore.finishRoast(roomId);
-  }, [roomId]);
+  };
 
   const handleFinishShopping = () => {
     roomStore.finishShopping(roomId);

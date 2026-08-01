@@ -23,12 +23,16 @@ import {
 import { Player, RoomState, SocialReactionId } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
+import { VoiceClip } from '@/hooks/useVoiceRecorder';
 import AvatarIllustration from './AvatarIllustration';
+import VoiceReplay from './VoiceReplay';
 
 interface RoastIntermissionProps {
   room: RoomState;
   activePlayer: Player;
   myPlayer: Player;
+  /** The attempt this client just captured, for the room to hear again. */
+  replayClip: VoiceClip | null;
   onFinishRoast: () => void;
 }
 
@@ -64,6 +68,7 @@ export default function RoastIntermission({
   room,
   activePlayer,
   myPlayer,
+  replayClip,
   onFinishRoast,
 }: RoastIntermissionProps) {
   const [timeLeft, setTimeLeft] = useState<number>(15);
@@ -178,6 +183,18 @@ export default function RoastIntermission({
             </div>
           </div>
         </div>
+
+        {/* The replay — the reason the roast is funny. Sits above everything
+            else so the room hears the attempt before reacting to it. */}
+        <VoiceReplay
+          clip={replayClip}
+          performerName={activePlayer.name}
+          emptyHint={
+            isPerformer
+              ? 'Your attempt was not captured — check the mic is on.'
+              : `Join the voice call to capture ${activePlayer.name}'s attempts.`
+          }
+        />
 
         {/* 15-Second Progress Timer Bar */}
         <div className="w-full bg-partyDark h-3 rounded-full overflow-hidden border border-white/10 p-0.5">

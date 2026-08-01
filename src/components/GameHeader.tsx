@@ -13,9 +13,21 @@ interface GameHeaderProps {
   currentTheme: MapTheme;
   onSelectTheme: (theme: MapTheme) => void;
   onOpenTrapPicker?: () => void;
+  /** Back to the landing page, keeping this player in the room. */
+  onGoHome: () => void;
+  /** Leaves the room properly so the others are not left waiting on a ghost. */
+  onLeaveGame: () => void;
 }
 
-export default function GameHeader({ roomId, currentTheme, onSelectTheme, onOpenTrapPicker }: GameHeaderProps) {
+export default function GameHeader({
+  roomId,
+  currentTheme,
+  onSelectTheme,
+  onOpenTrapPicker,
+  onGoHome,
+  onLeaveGame,
+}: GameHeaderProps) {
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState(() => speechEngine.getIsMicMuted());
 
@@ -47,11 +59,15 @@ export default function GameHeader({ roomId, currentTheme, onSelectTheme, onOpen
   return (
     <header className="w-full glass-card border-b border-white/10 px-4 py-2.5 sticky top-0 z-40 backdrop-blur-xl bg-slate-900/80">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-        {/* Brand & Room Info */}
+        {/* Brand & Room Info — the logo doubles as the way home */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-partyYellow via-terracotta to-partyPink flex items-center justify-center text-xl shadow-lg glow-yellow">
+          <button
+            onClick={onGoHome}
+            title="Back to home"
+            className="w-10 h-10 rounded-2xl bg-gradient-to-br from-partyYellow via-terracotta to-partyPink flex items-center justify-center text-xl shadow-lg glow-yellow hover:scale-105 transition-transform active:scale-95"
+          >
             🎙️
-          </div>
+          </button>
           <div>
             <h1 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5">
               VOICE PARTY <span className="bg-emerald-500 text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">ARCADE</span>

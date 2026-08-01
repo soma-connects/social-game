@@ -26,6 +26,13 @@ export type Player = {
   name: string;
   avatar: AvatarStyle;
   score: number;
+  /**
+   * Epoch ms of this player's last heartbeat. A player who closes the tab stops
+   * updating it, which is the only way to tell them apart from someone thinking.
+   */
+  lastSeen?: number;
+  /** Set when they left on purpose, or were dropped for going quiet. */
+  connected?: boolean;
   /** Social progression, mostly earned from making the room react. */
   level?: number;
   vibeScore?: number;
@@ -104,6 +111,14 @@ export type TurnResult = {
   steps: number;
 };
 
+/** One player's mini-game result within the current round. */
+export type RoundResult = TurnResult & {
+  playerId: string;
+  playerName: string;
+  /** Cleared once they have rolled, so a round cannot be rolled twice. */
+  rolled?: boolean;
+};
+
 export type SocialReactionId = 'laugh' | 'fire' | 'almost' | 'drama';
 
 export type SocialReaction = {
@@ -156,4 +171,17 @@ export type RoomState = {
   turnResult?: TurnResult | null;
   /** Laugh meter and peer judge votes for the active voice-related round. */
   socialRound?: SocialRound | null;
+
+  // ── Round-based loop ──────────────────────────────────────────────────────
+  // A round is: every player takes the mini-game one at a time, then everyone
+  // shops together, then everyone rolls — best mini-game score rolling first.
+  roundNumber?: number;
+  /** Mini-game results for the round in progress, one per player who has played. */
+  roundResults?: RoundResult[];
+  /** Player ids in roll order, best mini-game performance first. */
+  rollOrder?: string[];
+  /** How far through rollOrder the board phase has got. */
+  rollIndex?: number;
+  /** Players who have finished buying this round. */
+  shopReady?: string[];
 };

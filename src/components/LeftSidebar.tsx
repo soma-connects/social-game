@@ -16,7 +16,7 @@ interface LeftSidebarProps {
 
 export default function LeftSidebar({ roomId, players, activePlayerId, leaderId, myPlayerId }: LeftSidebarProps) {
   return (
-    <aside className="w-full lg:w-64 glass-card rounded-3xl p-5 border border-white/15 space-y-6 backdrop-blur-xl bg-slate-900/70 shadow-2xl flex flex-col justify-between shrink-0">
+    <aside className="hidden lg:flex w-64 glass-card rounded-3xl p-5 border border-white/15 space-y-6 backdrop-blur-xl bg-slate-900/70 shadow-2xl flex-col justify-between shrink-0">
       <div className="space-y-5">
         <div className="space-y-2 pb-4 border-b border-white/10">
           <div className="flex items-center justify-between">

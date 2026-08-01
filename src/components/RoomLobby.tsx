@@ -13,6 +13,7 @@ import {
   Sparkles,
   Shirt,
   Users,
+  X,
 } from 'lucide-react';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
@@ -48,6 +49,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProp
   const [mathEnabled, setMathEnabled] = useState(room.mathEnabled);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
+  const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
   );
@@ -55,14 +57,18 @@ export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProp
     0,
     AVATARS.findIndex((avatar) => avatar.id === myPlayer.avatar.id)
   );
+  /**
+   * Build-stage switch. Avatars carry `unlockLevel`/`unlockCost` and the grid
+   * shows the level badge, but nothing is actually gated yet — flip this to
+   * false to enforce it and wire the check into the tile's onClick.
+   */
   const BUILD_MODE_UNLOCKS = true;
 
-  const canSelectAvatar = (avatar: AvatarStyle) => {
-    const requiredLevel = avatar.unlockLevel ?? 1;
-    return BUILD_MODE_UNLOCKS || (myPlayer.level ?? 1) >= requiredLevel;
-  };
+  const canSelectAvatar = (avatar: AvatarStyle) =>
+    BUILD_MODE_UNLOCKS || (myPlayer.level ?? 1) >= (avatar.unlockLevel ?? 1);
 
   const selectAvatar = async (avatarId: string) => {
+    if (!canSelectAvatar(AVATARS.find((a) => a.id === avatarId) ?? AVATARS[0])) return;
     await roomStore.setAvatar(room.roomId, myPlayer.id, avatarId);
     audioSFX.playStreetVendorBell();
   };
@@ -174,68 +180,91 @@ export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProp
             </span>
           </div>
 
-          {/* auto-fill rather than sm:grid-cols-2 — Tailwind breakpoints watch the
-              viewport, not this column, so a fixed 2-up squeezed each card to
-              ~130px and wrapped every label. */}
-          <div className="rounded-2xl bg-partyDark/70 border border-partyCyan/25 p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
+          {/* Compact Profile & Avatar Bar (No page clutter!) */}
+          <div className="rounded-2xl bg-partyDark/70 border border-partyCyan/25 p-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <AvatarIllustration avatar={myPlayer.avatar} size="md" />
               <div>
-                <h4 className="text-sm font-black text-white">YOUR AVATAR ROTATION</h4>
-                <p className="text-[11px] text-gray-400">Future unlocks are marked, but free while we build.</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => rotateAvatar(-1)}
-                  title="Previous avatar"
-                  className="w-9 h-9 rounded-xl bg-white/10 border border-white/15 text-white flex items-center justify-center hover:border-partyYellow transition-colors"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => rotateAvatar(1)}
-                  title="Next avatar"
-                  className="w-9 h-9 rounded-xl bg-white/10 border border-white/15 text-white flex items-center justify-center hover:border-partyYellow transition-colors"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+                <span className="text-[10px] font-black text-partyYellow uppercase tracking-wider block">YOUR ACTIVE AVATAR</span>
+                <h4 className="text-base font-black text-white">{myPlayer.avatar.name}</h4>
+                <p className="text-[11px] text-partyCyan font-bold">{myPlayer.avatar.role ?? 'Party Contestant'}</p>
               </div>
             </div>
 
-            <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(86px,1fr))]">
-              {AVATARS.map((avatar) => {
-                const selected = avatar.id === myPlayer.avatar.id;
-                const futureLocked = (avatar.unlockLevel ?? 1) > (myPlayer.level ?? 1);
-                return (
-                  <button
-                    key={avatar.id}
-                    type="button"
-                    onClick={() => selectAvatar(avatar.id)}
-                    className={`rounded-2xl border p-2 text-center transition-all ${
-                      selected
-                        ? 'bg-partyYellow/20 border-partyYellow text-partyYellow'
-                        : 'bg-white/5 border-white/10 text-gray-300 hover:border-partyCyan'
-                    }`}
-                  >
-                    <div className="flex justify-center">
-                      <AvatarIllustration avatar={avatar} size="sm" />
-                    </div>
-                    <p className="text-[10px] font-black mt-1 truncate">{avatar.name}</p>
-                    {futureLocked ? (
-                      <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-white/10 px-1.5 py-0.5 text-[8px] font-black text-gray-300">
-                        <LockKeyhole className="w-2.5 h-2.5" /> L{avatar.unlockLevel} FREE
-                      </span>
-                    ) : (
-                      <span className="mt-1 inline-block rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[8px] font-black text-emerald-300">
-                        READY
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowAvatarModal(true)}
+              className="bg-partyPurple hover:bg-purple-600 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-md active:scale-95 border border-partyPink/40"
+            >
+              <Shirt className="w-4 h-4 text-partyYellow" />
+              <span>CHANGE AVATAR</span>
+            </button>
           </div>
+
+          {/* Avatar Selection Pop-up Modal */}
+          {showAvatarModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+              <div className="glass-card rounded-3xl p-6 border border-partyYellow/50 max-w-xl w-full space-y-4 bg-slate-900/95 relative shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-black text-white flex items-center gap-2">
+                      <Shirt className="w-5 h-5 text-partyYellow" /> CHOOSE YOUR CHARACTER
+                    </h3>
+                    <p className="text-xs text-gray-400">All avatars unlocked during build testing!</p>
+                  </div>
+                  <button
+                    onClick={() => setShowAvatarModal(false)}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-gray-300"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-h-[60vh] overflow-y-auto p-1">
+                  {AVATARS.map((avatar) => {
+                    const selected = avatar.id === myPlayer.avatar.id;
+                    const futureLocked = (avatar.unlockLevel ?? 1) > (myPlayer.level ?? 1);
+                    return (
+                      <button
+                        key={avatar.id}
+                        type="button"
+                        onClick={() => {
+                          selectAvatar(avatar.id);
+                          setShowAvatarModal(false);
+                        }}
+                        className={`rounded-2xl border p-3 text-center transition-all ${
+                          selected
+                            ? 'bg-partyYellow/25 border-partyYellow text-partyYellow ring-2 ring-partyYellow/50'
+                            : 'bg-white/5 border-white/10 text-gray-300 hover:border-partyCyan hover:bg-white/10'
+                        }`}
+                      >
+                        <div className="flex justify-center">
+                          <AvatarIllustration avatar={avatar} size="md" />
+                        </div>
+                        <p className="text-xs font-black mt-2 truncate">{avatar.name}</p>
+                        {futureLocked ? (
+                          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-black text-gray-300">
+                            <LockKeyhole className="w-2.5 h-2.5" /> L{avatar.unlockLevel} FREE
+                          </span>
+                        ) : (
+                          <span className="mt-1 inline-block rounded-full bg-emerald-500/20 px-2 py-0.5 text-[9px] font-black text-emerald-300">
+                            SELECT
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  onClick={() => setShowAvatarModal(false)}
+                  className="w-full bg-partyYellow text-partyDark font-black text-sm py-3 rounded-xl hover:bg-yellow-400 transition-all"
+                >
+                  DONE
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
             {room.players.map((player) => (

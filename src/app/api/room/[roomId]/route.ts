@@ -90,6 +90,156 @@ function pickSocialBadge(round: SocialRound | null, performance: number): string
   return 'Voice Rookie';
 }
 
+/** How long a player can go without a heartbeat before we treat them as gone. */
+const PRESENCE_TIMEOUT_MS = 25000;
+
+/**
+ * Players the game should still wait for.
+ *
+ * Anyone who closed the tab stops sending heartbeats. Without this the room
+ * sits forever on a turn belonging to somebody who is not there.
+ */
+function activePlayers(room: RoomState): Player[] {
+  const now = Date.now();
+  return room.players.filter(
+    (p) => p.connected !== false && now - (p.lastSeen ?? now) < PRESENCE_TIMEOUT_MS
+  );
+}
+
+/** Drops players who have gone quiet, and hands the host role on if needed. */
+function prunePresence(room: RoomState): boolean {
+  const now = Date.now();
+  let changed = false;
+
+  for (const player of room.players) {
+    const gone = now - (player.lastSeen ?? now) >= PRESENCE_TIMEOUT_MS;
+    if (gone && player.connected !== false) {
+      player.connected = false;
+      changed = true;
+      pushEvent(room, `📴 ${player.name} dropped out`, 'system');
+    }
+  }
+
+  // If the host vanished, promote someone so the room is not left unstartable.
+  const host = room.players.find((p) => p.id === room.hostId);
+  if (host?.connected === false) {
+    const heir = activePlayers(room)[0];
+    if (heir) {
+      host.isHost = false;
+      heir.isHost = true;
+      room.hostId = heir.id;
+      changed = true;
+      pushEvent(room, `👑 ${heir.name} is now the host`, 'system');
+    }
+  }
+
+  if (changed) unstickPhase(room);
+  return changed;
+}
+
+/**
+ * Nudges the room forward if the phase is now waiting on somebody who left.
+ * Called whenever the player set changes.
+ */
+function unstickPhase(room: RoomState): void {
+  const live = activePlayers(room);
+  if (live.length === 0 || room.phase === 'lobby' || room.phase === 'game_over') return;
+
+  // Mid mini-game: if the performer is gone, skip their turn.
+  if (room.phase === 'qualifying_voice' || room.phase === 'pitch_bird' || room.phase === 'roast_intermission') {
+    const performer = room.players[room.activePlayerIndex];
+    if (!performer || performer.connected === false) {
+      advanceRoundOrOpenShop(room);
+    }
+    return;
+  }
+
+  // Shopping: a departed player can no longer press done.
+  if (room.phase === 'powerup_shop') {
+    const waiting = live.filter((p) => !(room.shopReady ?? []).includes(p.id));
+    if (waiting.length === 0) openBoardPhase(room);
+    return;
+  }
+
+  // Board: drop absentees out of the roll order.
+  if (room.phase === 'roadmap_turn') {
+    room.rollOrder = (room.rollOrder ?? []).filter((id) =>
+      live.some((p) => p.id === id)
+    );
+    if ((room.rollIndex ?? 0) >= room.rollOrder.length) {
+      startNextRound(room);
+    } else {
+      syncActiveToRollOrder(room);
+    }
+  }
+}
+
+/** Moves to the next player's mini-game, or opens the shop once all have played. */
+function advanceRoundOrOpenShop(room: RoomState): void {
+  const live = activePlayers(room);
+  const played = new Set((room.roundResults ?? []).map((r) => r.playerId));
+  const next = live.find((p) => !played.has(p.id));
+
+  if (next) {
+    room.activePlayerIndex = room.players.findIndex((p) => p.id === next.id);
+    room.turnResult = null;
+    const game = pickMiniGame(room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']);
+    room.currentMiniGame = game;
+    room.phase = game === 'pitch_bird' ? 'pitch_bird' : 'qualifying_voice';
+    room.socialRound = { targetPlayerId: next.id, reactions: [], judgeVotes: [] };
+    pushEvent(room, `${game === 'pitch_bird' ? '🐦' : '🎙️'} ${next.name} is up — ${MINIGAME_LABELS[game]}`, 'system');
+    return;
+  }
+
+  // Everyone has played: the whole room shops together.
+  room.phase = 'powerup_shop';
+  room.shopReady = [];
+  pushEvent(room, `🛒 Round ${room.roundNumber ?? 1}: everyone to the buff shop`, 'system');
+}
+
+/** Opens the board, ordering rolls by this round's mini-game performance. */
+function openBoardPhase(room: RoomState): void {
+  const live = activePlayers(room);
+  const results = (room.roundResults ?? []).filter((r) => live.some((p) => p.id === r.playerId));
+
+  // Winner of the mini-game round rolls first.
+  room.rollOrder = [...results]
+    .sort((a, b) => b.performance - a.performance || b.pointsEarned - a.pointsEarned)
+    .map((r) => r.playerId);
+
+  // Anyone with no result (joined mid-round) still gets to roll, at the back.
+  for (const p of live) {
+    if (!room.rollOrder.includes(p.id)) room.rollOrder.push(p.id);
+  }
+
+  room.rollIndex = 0;
+  room.phase = 'roadmap_turn';
+  syncActiveToRollOrder(room);
+
+  const leader = results.length > 0 ? results.sort((a, b) => b.performance - a.performance)[0] : null;
+  if (leader) {
+    pushEvent(room, `🥇 ${leader.playerName} won the mini-game round and rolls first`, 'buff');
+  }
+}
+
+function syncActiveToRollOrder(room: RoomState): void {
+  const id = (room.rollOrder ?? [])[room.rollIndex ?? 0];
+  const idx = room.players.findIndex((p) => p.id === id);
+  if (idx !== -1) room.activePlayerIndex = idx;
+}
+
+/** Wipes round state and sends everyone back to the mini-game. */
+function startNextRound(room: RoomState): void {
+  room.roundNumber = (room.roundNumber ?? 0) + 1;
+  room.roundResults = [];
+  room.rollOrder = [];
+  room.rollIndex = 0;
+  room.shopReady = [];
+  room.turnResult = null;
+  pushEvent(room, `🔄 Round ${room.roundNumber} — back to the mini-games`, 'system');
+  advanceRoundOrOpenShop(room);
+}
+
 function createRoom(roomId: string, hostName: string): { room: RoomState; playerId: string } {
   const host = makePlayer(hostName, 0, true);
   const room: RoomState = {
@@ -111,6 +261,11 @@ function createRoom(roomId: string, hostName: string): { room: RoomState; player
     currentMiniGame: 'voice_arena',
     turnResult: null,
     socialRound: null,
+    roundNumber: 0,
+    roundResults: [],
+    rollOrder: [],
+    rollIndex: 0,
+    shopReady: [],
   };
   pushEvent(room, `🎮 ${host.name} opened room ${roomId}`, 'system');
   writeRoom(room);
@@ -341,7 +496,21 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         pushEvent(room, `${active.name} earned badge: ${badge}`, 'social');
       }
 
-      // Open 15-second open-mic roast intermission so players can laugh & roast each other.
+      // Bank it against the round. Everyone plays the mini-game before anyone
+      // shops or rolls, so results accumulate here rather than being spent
+      // immediately.
+      room.roundResults = (room.roundResults ?? []).filter((r) => r.playerId !== active.id);
+      room.roundResults.push({
+        playerId: active.id,
+        playerName: active.name,
+        game,
+        pointsEarned: points,
+        performance,
+        steps,
+        rolled: false,
+      });
+
+      // Open the roast so the room can laugh at what just happened.
       room.phase = 'roast_intermission';
       return NextResponse.json({
         room: writeRoom(room),
@@ -362,50 +531,68 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         }
       }
 
-      room.phase = 'powerup_shop';
+      // Hand over to the next player who has not taken the mini-game yet. Only
+      // once everybody has played does the room move on to shopping.
+      advanceRoundOrOpenShop(room);
       return NextResponse.json({ room: writeRoom(room) });
     }
 
     case 'buy_powerup': {
-      const active = room.players[room.activePlayerIndex];
-      if (!active) return NextResponse.json({ error: 'No active player' }, { status: 409 });
+      // Everyone shops at the same time now, so the buyer is whoever asked —
+      // not whoever happens to be the active player.
+      const buyer = room.players.find((p) => p.id === body.playerId);
+      if (!buyer) return NextResponse.json({ error: 'Player not found' }, { status: 404 });
 
       const item = getShopItem(String(body.powerupId ?? ''));
       if (!item) return NextResponse.json({ error: 'Unknown item' }, { status: 400 });
-      if (active.score < item.price) {
+      if (buyer.score < item.price) {
         return NextResponse.json({ error: `Not enough points for ${item.name}` }, { status: 409 });
       }
 
-      active.score -= item.price;
-      active.inventory.push(item.id);
-      pushEvent(room, `🛒 ${active.name} bought ${item.name} (-${item.price} pts)`, 'buff');
+      buyer.score -= item.price;
+      buyer.inventory.push(item.id);
+      pushEvent(room, `🛒 ${buyer.name} bought ${item.name} (-${item.price} pts)`, 'buff');
       return NextResponse.json({ room: writeRoom(room) });
     }
 
     case 'finish_shopping': {
-      room.phase = 'roadmap_turn';
-      return NextResponse.json({ room: writeRoom(room) });
+      const playerId = String(body.playerId ?? '');
+      if (!room.players.some((p) => p.id === playerId)) {
+        return NextResponse.json({ error: 'Player not found' }, { status: 404 });
+      }
+
+      room.shopReady = [...new Set([...(room.shopReady ?? []), playerId])];
+
+      // The board opens when everyone still connected has finished buying.
+      const waitingOn = activePlayers(room).filter((p) => !room.shopReady!.includes(p.id));
+      if (waitingOn.length === 0) {
+        openBoardPhase(room);
+      }
+      return NextResponse.json({ room: writeRoom(room), waitingOn: waitingOn.map((p) => p.name) });
     }
 
     case 'roll_dice': {
       const active = room.players[room.activePlayerIndex];
       if (!active) return NextResponse.json({ error: 'No active player' }, { status: 409 });
 
-      // Not random. The dice reveals the movement the mini-game earned, so a
-      // good round is worth six nodes and a missed one is worth one.
-      if (!room.turnResult) {
+      // Not random. The dice reveals the movement this player's mini-game
+      // earned earlier in the round.
+      const entry = (room.roundResults ?? []).find((r) => r.playerId === active.id);
+      if (!entry) {
         return NextResponse.json(
           { error: 'Play the mini-game first — the roll comes from your score' },
           { status: 409 }
         );
       }
+      if (entry.rolled) {
+        return NextResponse.json({ error: 'Already rolled this round' }, { status: 409 });
+      }
 
-      const roll = room.turnResult.steps;
+      const roll = entry.steps;
+      entry.rolled = true;
       const landed = Math.min(TOTAL_TILES - 1, active.boardPosition + roll);
       const outcome = resolveTile(landed);
       active.boardPosition = outcome.position;
-      // Consumed, so the turn cannot be rolled twice.
-      room.turnResult = null;
 
       pushEvent(room, `🎲 ${active.name} rolled ${roll} → node #${outcome.position + 1}`, 'system');
       if (outcome.banner) {
@@ -470,26 +657,88 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       return NextResponse.json({ room: writeRoom(room) });
     }
 
-    // Starting the match and ending a turn both hand the next player a freshly
-    // picked mini-game, so the qualifying round always comes before the board.
-    case 'start_match':
-    case 'advance_turn': {
-      if (action === 'advance_turn') {
-        room.activePlayerIndex = (room.activePlayerIndex + 1) % room.players.length;
-      }
-
+    case 'start_match': {
+      room.roundNumber = 1;
+      room.roundResults = [];
+      room.rollOrder = [];
+      room.rollIndex = 0;
+      room.shopReady = [];
       room.turnResult = null;
-      const game = pickMiniGame(room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']);
-      room.currentMiniGame = game;
-      room.phase = game === 'pitch_bird' ? 'pitch_bird' : 'qualifying_voice';
+      pushEvent(room, `🚀 Round 1 begins`, 'system');
+      advanceRoundOrOpenShop(room);
+      return NextResponse.json({ room: writeRoom(room) });
+    }
 
-      const next = room.players[room.activePlayerIndex];
-      if (next) {
-        room.socialRound = { targetPlayerId: next.id, reactions: [], judgeVotes: [] };
+    /** Hands the dice to the next player in the round's roll order. */
+    case 'advance_turn': {
+      room.rollIndex = (room.rollIndex ?? 0) + 1;
+      if (room.rollIndex >= (room.rollOrder ?? []).length) {
+        startNextRound(room);
+      } else {
+        syncActiveToRollOrder(room);
+        const next = room.players[room.activePlayerIndex];
+        if (next) pushEvent(room, `🎲 ${next.name} is up to roll`, 'system');
       }
-      if (next) {
-        pushEvent(room, `${game === 'pitch_bird' ? '🐦' : '🎙️'} ${next.name}'s turn — ${MINIGAME_LABELS[game]}`, 'system');
+      return NextResponse.json({ room: writeRoom(room) });
+    }
+
+    // ── Presence ─────────────────────────────────────────────────────────────
+
+    /** Called on a timer by every client, so the server can tell who is still here. */
+    case 'heartbeat': {
+      const me = room.players.find((p) => p.id === body.playerId);
+      if (me) {
+        me.lastSeen = Date.now();
+        if (me.connected === false) {
+          me.connected = true;
+          pushEvent(room, `🔌 ${me.name} reconnected`, 'system');
+        }
       }
+      return NextResponse.json({ room: writeRoom(room) });
+    }
+
+    case 'leave_room':
+    case 'kick_player': {
+      const targetId = String(body.playerId ?? '');
+      const target = room.players.find((p) => p.id === targetId);
+      if (!target) return NextResponse.json({ error: 'Player not found' }, { status: 404 });
+
+      if (action === 'kick_player') {
+        // Only the host removes other people.
+        if (body.requesterId !== room.hostId) {
+          return NextResponse.json({ error: 'Only the host can remove players' }, { status: 403 });
+        }
+        if (targetId === room.hostId) {
+          return NextResponse.json({ error: 'The host cannot be removed' }, { status: 400 });
+        }
+      }
+
+      room.players = room.players.filter((p) => p.id !== targetId);
+      room.roundResults = (room.roundResults ?? []).filter((r) => r.playerId !== targetId);
+      room.rollOrder = (room.rollOrder ?? []).filter((id) => id !== targetId);
+      room.shopReady = (room.shopReady ?? []).filter((id) => id !== targetId);
+      pushEvent(
+        room,
+        action === 'kick_player' ? `🚫 ${target.name} was removed` : `👋 ${target.name} left the game`,
+        'system'
+      );
+
+      if (room.players.length === 0) {
+        // Nobody left — park it back in the lobby rather than a broken turn.
+        room.phase = 'lobby';
+        return NextResponse.json({ room: writeRoom(room) });
+      }
+
+      // Hand on the host badge if the host is the one who left.
+      if (targetId === room.hostId) {
+        const heir = room.players[0];
+        heir.isHost = true;
+        room.hostId = heir.id;
+        pushEvent(room, `👑 ${heir.name} is now the host`, 'system');
+      }
+
+      if (room.activePlayerIndex >= room.players.length) room.activePlayerIndex = 0;
+      unstickPhase(room);
       return NextResponse.json({ room: writeRoom(room) });
     }
 

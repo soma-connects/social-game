@@ -17,6 +17,7 @@ import AvatarIllustration from '@/components/AvatarIllustration';
 import VoiceCallBar from '@/components/VoiceCallBar';
 import SocialVoicePanel from '@/components/SocialVoicePanel';
 import RoastIntermission from '@/components/RoastIntermission';
+import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
 import { MAX_PLAYERS } from '@/lib/gameRules';
@@ -24,7 +25,7 @@ import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { voiceChat } from '@/lib/voiceChat';
 import { micStream } from '@/lib/micStream';
-import { UserPlus, Sparkles, AlertTriangle, Trophy, RotateCcw } from 'lucide-react';
+import { UserPlus, Sparkles, AlertTriangle, Trophy, RotateCcw, Users, ScrollText, Zap, X } from 'lucide-react';
 
 export default function GameRoomPage() {
   const params = useParams();
@@ -33,6 +34,8 @@ export default function GameRoomPage() {
 
   const [snapshot, setSnapshot] = useState<RoomSnapshot>({ room: null, status: 'connecting', error: null });
   const [showTrapPicker, setShowTrapPicker] = useState(false);
+  const [showMobilePlayers, setShowMobilePlayers] = useState(false);
+  const [showMobileFeed, setShowMobileFeed] = useState(false);
   const [activeDareTarget, setActiveDareTarget] = useState<Player | null>(null);
   const [guestNameInput, setGuestNameInput] = useState('');
   const [isJoining, setIsJoining] = useState(false);
@@ -51,6 +54,65 @@ export default function GameRoomPage() {
   }, [roomId]);
 
   const { room, status, error } = snapshot;
+
+  // ── Voice replay ──────────────────────────────────────────────────────────
+  // Everyone records the performer independently, from whichever source they
+  // already have: the performer captures their own mic, listeners capture the
+  // peer audio they are hearing anyway. No clip is ever transmitted — each tab
+  // ends up with its own local copy of the same moment.
+  //
+  // Declared above the early returns: these are hooks.
+  const myPlayerId = roomStore.getMyPlayerId();
+  const performer = room?.players[room.activePlayerIndex] ?? null;
+  const isPerformer = !!performer && performer.id === myPlayerId;
+  const isAttemptPhase = room?.phase === 'qualifying_voice' || room?.phase === 'pitch_bird';
+
+  const [captureStream, setCaptureStream] = useState<MediaStream | null>(null);
+
+  useEffect(() => {
+    if (!isAttemptPhase || !performer) {
+      setCaptureStream(null);
+      return;
+    }
+    // The peer stream can arrive a beat after the turn starts, so poll briefly
+    // rather than sampling once and giving up.
+    const resolve = () =>
+      setCaptureStream(isPerformer ? micStream.getStream() : voiceChat.getRemoteStream(performer.id));
+    resolve();
+    const timer = setInterval(resolve, 600);
+    return () => clearInterval(timer);
+  }, [isAttemptPhase, isPerformer, performer?.id]);
+
+  const { clip: replayClip, isRecording: isCapturing } = useVoiceRecorder({
+    stream: captureStream,
+    active: isAttemptPhase && !!captureStream,
+  });
+
+  // ── Presence ──────────────────────────────────────────────────────────────
+  // A closed tab is indistinguishable from a slow player unless we say so.
+  // Beat every 8s against a 25s server timeout, and fire a beacon on unload so
+  // a deliberate close is noticed immediately rather than 25 seconds later.
+  useEffect(() => {
+    if (!myPlayerId) return;
+
+    void roomStore.heartbeat(roomId, myPlayerId);
+    const timer = setInterval(() => void roomStore.heartbeat(roomId, myPlayerId), 8000);
+
+    const onUnload = () => roomStore.leaveOnUnload(roomId, myPlayerId);
+    window.addEventListener('pagehide', onUnload);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('pagehide', onUnload);
+    };
+  }, [roomId, myPlayerId]);
+
+  const handleLeaveGame = useCallback(async () => {
+    if (myPlayerId) await roomStore.leaveRoom(roomId, myPlayerId);
+    voiceChat.leave();
+    micStream.stop();
+    router.push('/');
+  }, [roomId, myPlayerId, router]);
 
   const handleJoinAsGuest = useCallback(
     async (e: React.FormEvent) => {
@@ -108,7 +170,6 @@ export default function GameRoomPage() {
     );
   }
 
-  const myPlayerId = roomStore.getMyPlayerId();
   const myPlayer = room.players.find((p) => p.id === myPlayerId);
 
   // ------------------------------------------------------------- guest join
@@ -250,7 +311,10 @@ export default function GameRoomPage() {
             myPlayer={myPlayer}
             // Quiet the others while this player is being scored, so the speech
             // recogniser hears them and not the call coming out of the speaker.
-            duckRemote={(room.phase === 'qualifying_voice' || room.phase === 'pitch_bird') && isMyTurn}
+            duckRemote={isAttemptPhase && isMyTurn}
+            // Everyone but the performer is closed while an attempt is scored;
+            // the reaction buttons are the room's channel for those seconds.
+            autoMute={isAttemptPhase && !isMyTurn}
           />
 
           {room.phase === 'lobby' && <RoomLobby room={room} myPlayer={myPlayer} onStartGame={handleStartMatch} />}
@@ -292,6 +356,7 @@ export default function GameRoomPage() {
                 room={room}
                 activePlayer={activePlayer}
                 myPlayer={myPlayer}
+                replayClip={replayClip}
                 onFinishRoast={handleFinishRoast}
               />
               <MapRenderer theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
@@ -351,6 +416,133 @@ export default function GameRoomPage() {
           onUsePowerup={handleUsePowerup}
         />
       </div>
+
+      {/* Mobile-Only Bottom Action Bar (Keeps mobile game view 100% clean & decluttered!) */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 border-t border-white/15 p-2 px-4 flex items-center justify-around backdrop-blur-xl shadow-2xl">
+        <button
+          onClick={() => setShowMobilePlayers(true)}
+          className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyYellow active:scale-95 transition-all"
+        >
+          <Users className="w-5 h-5 text-partyYellow" />
+          <span className="text-[10px] font-black uppercase">ROSTER ({room.players.length})</span>
+        </button>
+
+        <button
+          onClick={() => setShowMobileFeed(true)}
+          className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyCyan active:scale-95 transition-all"
+        >
+          <ScrollText className="w-5 h-5 text-partyCyan" />
+          <span className="text-[10px] font-black uppercase">FEED ({room.events?.length ?? 0})</span>
+        </button>
+
+        <button
+          onClick={() => setShowTrapPicker(true)}
+          className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyPink active:scale-95 transition-all"
+        >
+          <Zap className="w-5 h-5 text-partyPink" />
+          <span className="text-[10px] font-black uppercase">TRAPS</span>
+        </button>
+      </div>
+
+      {/* Mobile Player Roster Pop-up Modal */}
+      {showMobilePlayers && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn lg:hidden">
+          <div className="glass-card rounded-3xl p-5 border border-partyYellow/50 max-w-md w-full space-y-4 bg-slate-900/95 relative shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-white/10">
+              <h3 className="text-base font-black text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-partyYellow" /> PLAYERS ({room.players.length}/{MAX_PLAYERS})
+              </h3>
+              <button
+                onClick={() => setShowMobilePlayers(false)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {room.players.map((player) => {
+                const isTurn = player.id === activePlayer.id;
+                const isLeader = player.id === leaderPlayer.id && player.score > 0;
+                const isMe = player.id === myPlayer.id;
+
+                return (
+                  <div
+                    key={player.id}
+                    className={`p-3 rounded-2xl border flex items-center justify-between gap-3 ${
+                      isTurn
+                        ? 'bg-partyPurple/40 border-partyCyan shadow-lg'
+                        : 'bg-white/5 border-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <AvatarIllustration avatar={player.avatar} size="sm" isSpeaking={isTurn} />
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <h4 className="font-extrabold text-xs text-white">{player.name}</h4>
+                          {isMe && <span className="bg-partyCyan text-partyDark text-[8px] px-1 rounded font-black">YOU</span>}
+                          {isLeader && <span>👑</span>}
+                        </div>
+                        <p className="text-[10px] text-partyYellow font-mono">Node #{player.boardPosition + 1}</p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-black text-partyYellow font-mono">{player.score} pts</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setShowMobilePlayers(false)}
+              className="w-full bg-partyYellow text-partyDark font-black text-sm py-3 rounded-xl"
+            >
+              CLOSE
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Event Feed Pop-up Modal */}
+      {showMobileFeed && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn lg:hidden">
+          <div className="glass-card rounded-3xl p-5 border border-partyCyan/50 max-w-md w-full space-y-4 bg-slate-900/95 relative shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-white/10">
+              <h3 className="text-base font-black text-white flex items-center gap-2">
+                <ScrollText className="w-5 h-5 text-partyCyan" /> LIVE GAME FEED
+              </h3>
+              <button
+                onClick={() => setShowMobileFeed(false)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+              {(room.events ?? []).length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-4">No game events yet.</p>
+              ) : (
+                (room.events ?? []).map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-200 font-bold flex items-start gap-2"
+                  >
+                    <span>{ev.type === 'buff' ? '🚀' : ev.type === 'debuff' ? '💥' : ev.type === 'social' ? '🤣' : '🎮'}</span>
+                    <span>{ev.text}</span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowMobileFeed(false)}
+              className="w-full bg-partyCyan text-partyDark font-black text-sm py-3 rounded-xl"
+            >
+              CLOSE
+            </button>
+          </div>
+        </div>
+      )}
 
       {showTrapPicker && (
         <TrapWordPicker

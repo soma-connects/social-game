@@ -261,12 +261,47 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'finish_roast' });
   }
 
-  public buyPowerup(roomId: string, powerupId: string) {
-    return this.post(roomId, { action: 'buy_powerup', powerupId });
+  public buyPowerup(roomId: string, playerId: string, powerupId: string) {
+    return this.post(roomId, { action: 'buy_powerup', playerId, powerupId });
   }
 
-  public finishShopping(roomId: string) {
-    return this.post(roomId, { action: 'finish_shopping' });
+  /** Everyone shops at once; the board opens when the last player is done. */
+  public finishShopping(roomId: string, playerId: string) {
+    return this.post(roomId, { action: 'finish_shopping', playerId });
+  }
+
+  // ── Presence ──────────────────────────────────────────────────────────────
+
+  /**
+   * Tells the server this player is still here. Without it a closed tab looks
+   * identical to somebody taking a long turn, and the room waits forever.
+   */
+  public heartbeat(roomId: string, playerId: string) {
+    return this.post(roomId, { action: 'heartbeat', playerId });
+  }
+
+  public leaveRoom(roomId: string, playerId: string) {
+    return this.post(roomId, { action: 'leave_room', playerId });
+  }
+
+  public kickPlayer(roomId: string, playerId: string, requesterId: string) {
+    return this.post(roomId, { action: 'kick_player', playerId, requesterId });
+  }
+
+  /**
+   * Best-effort "I'm closing the tab" ping. Uses sendBeacon because a normal
+   * fetch is cancelled when the page unloads.
+   */
+  public leaveOnUnload(roomId: string, playerId: string): void {
+    if (typeof navigator === 'undefined' || !navigator.sendBeacon) return;
+    try {
+      navigator.sendBeacon(
+        `/api/room/${roomId}`,
+        new Blob([JSON.stringify({ action: 'leave_room', playerId })], { type: 'application/json' })
+      );
+    } catch {
+      /* the heartbeat timeout is the fallback */
+    }
   }
 
   public addSocialReaction(

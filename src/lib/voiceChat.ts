@@ -47,6 +47,8 @@ interface Peer {
   id: string;
   pc: RTCPeerConnection;
   audio: HTMLAudioElement;
+  /** Remote audio, kept so listeners can record the performer for the replay. */
+  stream: MediaStream | null;
   analyser: AnalyserNode | null;
   speaking: boolean;
   /** Candidates that arrived before the remote description was set. */
@@ -194,6 +196,17 @@ class VoiceChatManager {
    * Lowers everyone else while the local player is being scored, so the speech
    * recogniser hears them rather than the room.
    */
+  /**
+   * The live audio arriving from one peer.
+   *
+   * Listeners record this to build their own copy of the performer's attempt,
+   * so the replay works without shipping audio anywhere — everyone captures
+   * what they already heard.
+   */
+  public getRemoteStream(playerId: string): MediaStream | null {
+    return this.peers.get(playerId)?.stream ?? null;
+  }
+
   public setRemoteVolume(volume: number): void {
     this.remoteVolume = Math.min(1, Math.max(0, volume));
     this.peers.forEach((peer) => {
@@ -239,6 +252,7 @@ class VoiceChatManager {
       id: peerId,
       pc,
       audio,
+      stream: null,
       analyser: null,
       speaking: false,
       pendingCandidates: [],
@@ -261,6 +275,7 @@ class VoiceChatManager {
     pc.ontrack = (event) => {
       const [stream] = event.streams;
       if (!stream) return;
+      peer.stream = stream;
       audio.srcObject = stream;
       // Autoplay can be refused until the page has been interacted with; the
       // player has already clicked "join voice", so this normally succeeds.

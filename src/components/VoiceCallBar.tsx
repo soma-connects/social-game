@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneCall, PhoneOff, Loader2, AlertTriangle } from 'lucide-react';
 import { Player } from '@/lib/types';
 import { voiceChat, VoiceState } from '@/lib/voiceChat';
+import { micStream } from '@/lib/micStream';
 import AvatarIllustration from './AvatarIllustration';
 
 interface VoiceCallBarProps {
@@ -12,9 +13,11 @@ interface VoiceCallBarProps {
   myPlayer: Player;
   /** Ducks everyone else while the local player is being scored. */
   duckRemote: boolean;
+  /** Closes this player's mic while somebody else is performing. */
+  autoMute: boolean;
 }
 
-export default function VoiceCallBar({ roomId, players, myPlayer, duckRemote }: VoiceCallBarProps) {
+export default function VoiceCallBar({ roomId, players, myPlayer, duckRemote, autoMute }: VoiceCallBarProps) {
   const [state, setState] = useState<VoiceState>(voiceChat.getState());
   const [joining, setJoining] = useState(false);
 
@@ -35,6 +38,29 @@ export default function VoiceCallBar({ roomId, players, myPlayer, duckRemote }: 
   useEffect(() => {
     voiceChat.setRemoteVolume(duckRemote ? 0.15 : 1);
   }, [duckRemote]);
+
+  // Voice-first turn gating.
+  //
+  // The game is meant to be talked over, but not *while* someone is being
+  // scored — a room laughing into their mics is what the recogniser hears
+  // instead of the performer. So during an attempt everyone else is closed,
+  // and the reaction buttons carry the room for those few seconds. When the
+  // roast opens, mics come back and people talk again.
+  //
+  // Tracked separately from the mute button: if a player muted themselves we
+  // must not helpfully unmute them when the roast starts.
+  const autoMutedRef = useRef(false);
+  useEffect(() => {
+    if (!voiceChat.isJoined()) return;
+
+    if (autoMute && !micStream.isMuted()) {
+      voiceChat.setMuted(true);
+      autoMutedRef.current = true;
+    } else if (!autoMute && autoMutedRef.current) {
+      voiceChat.setMuted(false);
+      autoMutedRef.current = false;
+    }
+  }, [autoMute, state.status]);
 
   const handleJoin = async () => {
     setJoining(true);

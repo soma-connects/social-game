@@ -36,7 +36,7 @@ export default function RightSidebar({ activePlayer, myPlayer, events, onUsePowe
   }));
 
   return (
-    <aside className="w-full lg:w-80 glass-card rounded-3xl p-5 border border-white/15 space-y-6 backdrop-blur-xl bg-slate-900/70 shadow-2xl shrink-0">
+    <aside className="hidden lg:block w-80 glass-card rounded-3xl p-5 border border-white/15 space-y-6 backdrop-blur-xl bg-slate-900/70 shadow-2xl shrink-0">
       <div className="space-y-3">
         <div className="flex items-center justify-between pb-2 border-b border-white/10">
           <h3 className="font-extrabold text-sm text-white flex items-center gap-2">

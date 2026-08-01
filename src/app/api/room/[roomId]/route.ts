@@ -277,6 +277,9 @@ export async function GET(_request: Request, { params }: { params: { roomId: str
   if (!room) {
     return NextResponse.json({ error: 'Room not found' }, { status: 404 });
   }
+  // Every client polls this, so it is the natural place to notice that somebody
+  // stopped reporting and to unstick a phase that is waiting on them.
+  if (prunePresence(room)) writeRoom(room);
   return NextResponse.json(room);
 }
 

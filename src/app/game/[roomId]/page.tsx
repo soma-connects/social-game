@@ -258,7 +258,7 @@ export default function GameRoomPage() {
   };
 
   const handleFinishShopping = () => {
-    roomStore.finishShopping(roomId);
+    roomStore.finishShopping(roomId, myPlayer.id);
   };
 
   const handleFinishRoadmapTurn = () => {
@@ -284,6 +284,8 @@ export default function GameRoomPage() {
         currentTheme={currentTheme}
         onSelectTheme={(t) => roomStore.setTheme(roomId, t)}
         onOpenTrapPicker={() => setShowTrapPicker(true)}
+        onGoHome={() => router.push('/')}
+        onLeaveGame={handleLeaveGame}
       />
 
       {/* Connection trouble is surfaced rather than swallowed */}
@@ -302,6 +304,8 @@ export default function GameRoomPage() {
           activePlayerId={activePlayer.id}
           leaderId={leaderPlayer.id}
           myPlayerId={myPlayer.id}
+          canManage={myPlayer.isHost}
+          onKickPlayer={(p) => roomStore.kickPlayer(roomId, p.id, myPlayer.id)}
         />
 
         <main className="flex-1 space-y-6">
@@ -366,16 +370,17 @@ export default function GameRoomPage() {
           {/* Step 2 — spend the points the mini-game just earned */}
           {room.phase === 'powerup_shop' && (
             <div className="space-y-6">
-              {isMyTurn ? (
-                <PowerupShop
-                  roomId={roomId}
-                  activePlayer={activePlayer}
-                  turnResult={room.turnResult ?? null}
-                  onDone={handleFinishShopping}
-                />
-              ) : (
-                <WaitingPanel activePlayer={activePlayer} label="is shopping for buffs" />
-              )}
+              {/* Everyone shops at the same time — no waiting your turn. */}
+              <PowerupShop
+                roomId={roomId}
+                myPlayer={myPlayer}
+                myResult={(room.roundResults ?? []).find((r) => r.playerId === myPlayer.id) ?? null}
+                ready={(room.shopReady ?? []).includes(myPlayer.id)}
+                waitingOn={room.players
+                  .filter((p) => !(room.shopReady ?? []).includes(p.id) && p.id !== myPlayer.id)
+                  .map((p) => p.name)}
+                onDone={handleFinishShopping}
+              />
               <MapRenderer theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
             </div>
           )}

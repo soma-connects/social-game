@@ -1,17 +1,32 @@
 # Deploying
 
+## Presence
+
+Every client heartbeats every 8s; the server drops a player after 25s of
+silence (`PRESENCE_TIMEOUT_MS`) and calls `unstickPhase`, which skips their
+mini-game turn, stops waiting for their shop confirmation, or removes them from
+the roll order. `pagehide` also fires a `sendBeacon` so a deliberate close is
+noticed immediately. Without this a closed tab is indistinguishable from a slow
+player and the round hangs forever. If the host drops, the badge is handed to
+the first remaining player.
+
 ## The turn loop
 
 The board is the main game; the voice rounds are the qualifying mini-games that
-feed it. Each turn runs:
+feed it. The loop is **round-based**, not per-player:
 
-1. **Mini-game** — Voice Arena or PitchBird, picked at random per turn from
-   whatever the host enabled in the lobby.
-2. **Points + movement** — the score is banked as points *and* converted into
-   board steps. The dice is a reveal of what was earned, not a random roll.
-3. **Buff shop** — points are the currency, so buying is a trade-off against
-   staying top of the table.
-4. **Board move** — tile effects, dares, powerups.
+1. **Mini-game, one player at a time** — every player takes a turn (Voice Arena
+   or PitchBird), each followed by a roast intermission. Results accumulate in
+   `roundResults`.
+2. **Buff shop, everyone together** — all players buy simultaneously and press
+   done; the board opens when the last one is ready (`shopReady`).
+3. **Board, best mini-game score rolls first** — `rollOrder` is sorted by that
+   round's performance, so winning the mini-game buys you first move as well as
+   the most steps.
+4. When the roll order is exhausted, `startNextRound` wipes round state and
+   returns to step 1.
+
+The dice is a reveal of what the mini-game earned, never a random roll.
 
 Score → steps lives in `performanceToSteps` in `src/lib/gameRules.ts`. The two
 mini-games score on different scales (`MINIGAME_MAX_SCORE`), so both are

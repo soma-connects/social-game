@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Volume2, VolumeX, Mic, MicOff, Share2, Zap } from 'lucide-react';
+import { Volume2, VolumeX, Mic, MicOff, Share2, Zap, Home, LogOut } from 'lucide-react';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { micStream } from '@/lib/micStream';
@@ -121,8 +121,52 @@ export default function GameHeader({
           >
             {isAudioMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-partyYellow" />}
           </button>
+
+          <button
+            onClick={onGoHome}
+            className="glass-pill hover:bg-white/20 text-white p-2 rounded-xl transition-all"
+            title="Home"
+          >
+            <Home className="w-4 h-4 text-partyCyan" />
+          </button>
+
+          <button
+            onClick={() => setConfirmLeave(true)}
+            className="bg-red-500/25 hover:bg-red-500/40 text-red-300 border border-red-500/40 font-black text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all active:scale-95"
+            title="Leave this game"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">LEAVE</span>
+          </button>
         </div>
       </div>
+
+      {/* Leaving drops you out of the turn order, so make it deliberate. */}
+      {confirmLeave && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="glass-card max-w-sm w-full rounded-3xl p-6 border border-red-500/40 space-y-4 text-center bg-slate-900/95">
+            <LogOut className="w-10 h-10 text-red-400 mx-auto" />
+            <h3 className="text-xl font-black text-white">LEAVE THIS GAME?</h3>
+            <p className="text-xs text-gray-300">
+              You will be removed from the player list and the round will carry on without you.
+            </p>
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setConfirmLeave(false)}
+                className="flex-1 glass-pill hover:bg-white/20 text-white font-bold text-sm py-3 rounded-2xl border border-white/20"
+              >
+                STAY
+              </button>
+              <button
+                onClick={onLeaveGame}
+                className="flex-1 bg-red-500 hover:bg-red-400 text-white font-black text-sm py-3 rounded-2xl transition-all"
+              >
+                LEAVE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

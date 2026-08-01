@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Mic, Users, Trophy, MapPin } from 'lucide-react';
+import { Mic, Users, Trophy, MapPin, UserMinus, WifiOff } from 'lucide-react';
 import { Player } from '@/lib/types';
 import { MAX_PLAYERS, TOTAL_TILES } from '@/lib/gameRules';
 import AvatarIllustration from './AvatarIllustration';
@@ -12,9 +12,20 @@ interface LeftSidebarProps {
   activePlayerId: string;
   leaderId: string;
   myPlayerId: string;
+  /** Only the host gets the remove control. */
+  canManage?: boolean;
+  onKickPlayer?: (player: Player) => void;
 }
 
-export default function LeftSidebar({ roomId, players, activePlayerId, leaderId, myPlayerId }: LeftSidebarProps) {
+export default function LeftSidebar({
+  roomId,
+  players,
+  activePlayerId,
+  leaderId,
+  myPlayerId,
+  canManage = false,
+  onKickPlayer,
+}: LeftSidebarProps) {
   return (
     <aside className="hidden lg:flex w-64 glass-card rounded-3xl p-5 border border-white/15 space-y-6 backdrop-blur-xl bg-slate-900/70 shadow-2xl flex-col justify-between shrink-0">
       <div className="space-y-5">
@@ -84,6 +95,23 @@ export default function LeftSidebar({ roomId, players, activePlayerId, leaderId,
                   <span className="text-[9px] font-mono text-gray-400 flex items-center gap-0.5">
                     <MapPin className="w-2.5 h-2.5" /> {player.boardPosition + 1}/{TOTAL_TILES}
                   </span>
+
+                  {/* Presence — a dropped player is why a round would otherwise hang */}
+                  {player.connected === false && (
+                    <span className="text-[8px] font-black text-amber-300 bg-amber-500/20 border border-amber-500/40 px-1 rounded flex items-center gap-0.5">
+                      <WifiOff className="w-2 h-2" /> GONE
+                    </span>
+                  )}
+
+                  {canManage && !player.isHost && !isMe && (
+                    <button
+                      onClick={() => onKickPlayer?.(player)}
+                      title={`Remove ${player.name}`}
+                      className="text-gray-500 hover:text-red-400 transition-colors p-0.5 rounded"
+                    >
+                      <UserMinus className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             );

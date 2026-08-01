@@ -1,5 +1,41 @@
 # Deploying
 
+## Screen budget during a round
+
+A phone screen is the constraint, not the desktop layout. During an attempt the
+main column must stay at roughly one screen, so anything not usable *in that
+moment* is collapsed:
+
+- `SocialVoicePanel` renders a one-line meter for the performer. Every control
+  in it is `disabled={isPerformer}` — showing the full panel put ~500px of dead
+  UI under the thing they are trying to do.
+- `VoiceCallBar` takes `compact` during an attempt. Nobody joins or leaves a
+  call mid-round.
+- The board is behind `BoardPeek`, collapsed by default outside `roadmap_turn`.
+  It is ~600px and nobody looks at the map while somebody is speaking.
+
+Before adding anything to a live phase, measure it at 375px wide. The layout was
+1.9 screens before this pass.
+
+## Teams
+
+Optional, off by default. Everyone still performs solo — the energy comes from
+one person on the mic with the room watching, and splitting that in half would
+waste it. What teams change is who you perform *for*:
+
+- Points feed a shared crew total; the finish line is won by a crew, with the
+  player who crossed it credited.
+- `alternateByTeam` weaves the roll order so the sides swap instead of one crew
+  rolling three times in a row.
+- **Judging crosses the divide** — teammates would wave each other through, so
+  only the opposing crew can pass/fail you. Reactions stay open to everyone;
+  cheering your own crew on is the point of having one.
+- Late joiners land on the smaller crew.
+
+`MAX_PLAYERS` is 6. The voice call is a full mesh, so that is 15 peer
+connections — about the ceiling for mobile. Going higher needs an SFU, not a
+bigger constant.
+
 ## Presence
 
 Every client heartbeats every 8s; the server drops a player after 25s of

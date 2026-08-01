@@ -21,11 +21,15 @@ export type AvatarStyle = {
   unlockCost?: number;
 };
 
+export type TeamId = 'red' | 'blue';
+
 export type Player = {
   id: string;
   name: string;
   avatar: AvatarStyle;
   score: number;
+  /** Only set when the room is in team mode. */
+  teamId?: TeamId;
   /**
    * Epoch ms of this player's last heartbeat. A player who closes the tab stops
    * updating it, which is the only way to tell them apart from someone thinking.
@@ -161,6 +165,10 @@ export type RoomState = {
     passed?: boolean;
   } | null;
   winner: Player | null;
+  /** Set instead of a solo winner when the room is in team mode. */
+  winningTeam?: TeamId | null;
+  /** Players are split into two crews; everyone still performs solo. */
+  teamMode?: boolean;
   theme?: MapTheme;
   events?: EventLog[];
   /** Mini-games the host enabled for this match. */

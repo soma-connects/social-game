@@ -20,12 +20,24 @@ import RoastIntermission from '@/components/RoastIntermission';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
-import { MAX_PLAYERS } from '@/lib/gameRules';
+import { MAX_PLAYERS, getTeam } from '@/lib/gameRules';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { voiceChat } from '@/lib/voiceChat';
 import { micStream } from '@/lib/micStream';
-import { UserPlus, Sparkles, AlertTriangle, Trophy, RotateCcw, Users, ScrollText, Zap, X } from 'lucide-react';
+import {
+  UserPlus,
+  Sparkles,
+  AlertTriangle,
+  Trophy,
+  RotateCcw,
+  Users,
+  ScrollText,
+  Zap,
+  X,
+  Map,
+  ChevronDown,
+} from 'lucide-react';
 
 export default function GameRoomPage() {
   const params = useParams();
@@ -98,7 +110,7 @@ export default function GameRoomPage() {
     void roomStore.heartbeat(roomId, myPlayerId);
     const timer = setInterval(() => void roomStore.heartbeat(roomId, myPlayerId), 8000);
 
-    const onUnload = () => roomStore.leaveOnUnload(roomId, myPlayerId);
+    const onUnload = () => roomStore.markAwayOnUnload(roomId, myPlayerId);
     window.addEventListener('pagehide', onUnload);
 
     return () => {
@@ -304,6 +316,7 @@ export default function GameRoomPage() {
           activePlayerId={activePlayer.id}
           leaderId={leaderPlayer.id}
           myPlayerId={myPlayer.id}
+          teamMode={room.teamMode}
           canManage={myPlayer.isHost}
           onKickPlayer={(p) => roomStore.kickPlayer(roomId, p.id, myPlayer.id)}
         />
@@ -319,6 +332,8 @@ export default function GameRoomPage() {
             // Everyone but the performer is closed while an attempt is scored;
             // the reaction buttons are the room's channel for those seconds.
             autoMute={isAttemptPhase && !isMyTurn}
+            // Nobody joins or leaves the call mid-attempt; shrink it out of the way.
+            compact={isAttemptPhase}
           />
 
           {room.phase === 'lobby' && <RoomLobby room={room} myPlayer={myPlayer} onStartGame={handleStartMatch} />}
@@ -336,7 +351,7 @@ export default function GameRoomPage() {
                 <WaitingPanel activePlayer={activePlayer} label="is in the Voice Arena" />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
-              <MapRenderer theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
             </div>
           )}
 
@@ -349,7 +364,7 @@ export default function GameRoomPage() {
                 <WaitingPanel activePlayer={activePlayer} label="is flying in PitchBird 🐦" />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
-              <MapRenderer theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
             </div>
           )}
 
@@ -363,7 +378,7 @@ export default function GameRoomPage() {
                 replayClip={replayClip}
                 onFinishRoast={handleFinishRoast}
               />
-              <MapRenderer theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
             </div>
           )}
 
@@ -381,7 +396,7 @@ export default function GameRoomPage() {
                   .map((p) => p.name)}
                 onDone={handleFinishShopping}
               />
-              <MapRenderer theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
             </div>
           )}
 
@@ -396,22 +411,62 @@ export default function GameRoomPage() {
             />
           )}
 
-          {room.phase === 'game_over' && room.winner && (
-            <div className="glass-card rounded-3xl p-8 border border-partyYellow/60 text-center space-y-5 glow-yellow">
-              <Trophy className="w-16 h-16 text-partyYellow mx-auto animate-bounce" />
-              <h2 className="text-4xl font-black text-white">{room.winner.name} WINS!</h2>
-              <div className="flex justify-center">
-                <AvatarIllustration avatar={room.winner.avatar} variant="card" size="md" />
-              </div>
-              <p className="text-sm text-partyCyan font-bold">Final score: {room.winner.score} points</p>
-              <button
-                onClick={() => router.push('/')}
-                className="bg-partyYellow hover:bg-yellow-400 text-partyDark font-black text-base px-8 py-3.5 rounded-2xl transition-all"
+          {room.phase === 'game_over' && room.winner && (() => {
+            // In team mode the crew takes the win, with the player who crossed
+            // the line credited underneath.
+            const team = room.teamMode && room.winningTeam ? getTeam(room.winningTeam) : null;
+            const crew = team ? room.players.filter((p) => p.teamId === team.id) : [];
+
+            return (
+              <div
+                className="glass-card rounded-3xl p-8 border text-center space-y-5 glow-yellow"
+                style={{ borderColor: team ? team.color : undefined }}
               >
-                BACK TO HOME
-              </button>
-            </div>
-          )}
+                <Trophy
+                  className="w-16 h-16 mx-auto animate-bounce"
+                  style={{ color: team ? team.color : '#FFD000' }}
+                />
+                <h2 className="text-4xl font-black text-white">
+                  {team ? `${team.icon} ${team.name.toUpperCase()} WINS!` : `${room.winner.name} WINS!`}
+                </h2>
+
+                {team ? (
+                  <>
+                    <div className="flex justify-center flex-wrap gap-3">
+                      {crew.map((member) => (
+                        <div key={member.id} className="text-center">
+                          <AvatarIllustration avatar={member.avatar} variant="card" size="sm" />
+                          <p className="text-[11px] font-black text-white mt-1">{member.name}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-sm font-bold" style={{ color: team.color }}>
+                      Crew total: {crew.reduce((sum, m) => sum + m.score, 0)} points
+                    </p>
+                    <p className="text-xs text-gray-300">
+                      {room.winner.name} crossed the finish line
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-center">
+                      <AvatarIllustration avatar={room.winner.avatar} variant="card" size="md" />
+                    </div>
+                    <p className="text-sm text-partyCyan font-bold">
+                      Final score: {room.winner.score} points
+                    </p>
+                  </>
+                )}
+
+                <button
+                  onClick={() => router.push('/')}
+                  className="bg-partyYellow hover:bg-yellow-400 text-partyDark font-black text-base px-8 py-3.5 rounded-2xl transition-all"
+                >
+                  BACK TO HOME
+                </button>
+              </div>
+            );
+          })()}
         </main>
 
         <RightSidebar
@@ -564,6 +619,44 @@ export default function GameRoomPage() {
           challengerPlayer={activePlayer}
           onResolveDare={handleResolveDare}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The board, collapsed by default outside the board phase.
+ *
+ * It is ~600px tall — on a phone that pushed the actual mini-game controls off
+ * screen during a round nobody spends looking at the map. Still one tap away
+ * for anyone who wants to check positions.
+ */
+function BoardPeek({
+  theme,
+  players,
+  activePlayerId,
+}: {
+  theme: MapTheme;
+  players: Player[];
+  activePlayerId: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="space-y-3">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full glass-pill hover:bg-white/15 text-gray-200 font-bold text-xs py-2.5 rounded-2xl border border-white/15 flex items-center justify-center gap-2 transition-all"
+      >
+        <Map className="w-4 h-4 text-partyCyan" />
+        <span>{open ? 'HIDE BOARD' : 'PEEK AT THE BOARD'}</span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="animate-fadeIn">
+          <MapRenderer theme={theme} players={players} activePlayerId={activePlayerId} />
+        </div>
       )}
     </div>
   );

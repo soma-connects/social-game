@@ -1,7 +1,13 @@
 import { MiniGameId, PowerupType, SocialReactionId, TileNodeType } from './types';
 
-/** Shared between the client, the board renderer and the server. */
-export const MAX_PLAYERS = 4;
+/**
+ * Shared between the client, the board renderer and the server.
+ *
+ * The voice call is a full mesh — every player holds a peer connection to every
+ * other — so this is 15 connections at 6 players. That is about the ceiling for
+ * mobile devices; going higher needs an SFU rather than a bigger number here.
+ */
+export const MAX_PLAYERS = 6;
 export const TOTAL_TILES = 20;
 export const DEFAULT_TURN_SECONDS = 8;
 
@@ -116,6 +122,48 @@ export function sumReactionBonus(reactions: { reaction: SocialReactionId }[]): n
     MAX_REACTION_BONUS,
     reactions.reduce((sum, r) => sum + REACTION_POINTS[r.reaction], 0)
   );
+}
+
+// ─── Teams ──────────────────────────────────────────────────────────────────
+//
+// Team mode keeps everyone performing solo — the energy of the game comes from
+// one person on the mic with the room watching, and splitting that in half
+// would waste it. What teams change is who you are performing *for*: your
+// points feed a shared total, the opposing side judges you, and the finish line
+// is won by a team rather than a person.
+
+export type TeamId = 'red' | 'blue';
+
+export const TEAMS: { id: TeamId; name: string; color: string; icon: string }[] = [
+  { id: 'red', name: 'Red Crew', color: '#EF4444', icon: '🔴' },
+  { id: 'blue', name: 'Blue Crew', color: '#38BDF8', icon: '🔵' },
+];
+
+export function getTeam(id: TeamId | undefined) {
+  return TEAMS.find((t) => t.id === id) ?? TEAMS[0];
+}
+
+/** Spreads players evenly, preserving anyone already placed. */
+export function balanceTeams<T extends { id: string; teamId?: TeamId }>(players: T[]): T[] {
+  return players.map((player, index) => ({
+    ...player,
+    teamId: (index % 2 === 0 ? 'red' : 'blue') as TeamId,
+  }));
+}
+
+/** Interleaves the roll order so the sides alternate instead of batching. */
+export function alternateByTeam<T extends { teamId?: TeamId }>(ordered: T[]): T[] {
+  const red = ordered.filter((p) => p.teamId === 'red');
+  const blue = ordered.filter((p) => p.teamId === 'blue');
+  // The side whose best player scored highest keeps the first slot.
+  const [first, second] = ordered[0]?.teamId === 'blue' ? [blue, red] : [red, blue];
+
+  const woven: T[] = [];
+  for (let i = 0; i < Math.max(first.length, second.length); i++) {
+    if (first[i]) woven.push(first[i]);
+    if (second[i]) woven.push(second[i]);
+  }
+  return woven;
 }
 
 /** Picks the mini-game for a turn from whatever the host enabled. */

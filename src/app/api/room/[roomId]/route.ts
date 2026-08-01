@@ -8,8 +8,11 @@ import {
   MINIGAME_LABELS,
   REACTION_POINTS,
   TOTAL_TILES,
+  alternateByTeam,
+  balanceTeams,
   describePerformance,
   getShopItem,
+  getTeam,
   performanceToSteps,
   pickMiniGame,
   resolveTile,
@@ -212,6 +215,15 @@ function openBoardPhase(room: RoomState): void {
     if (!room.rollOrder.includes(p.id)) room.rollOrder.push(p.id);
   }
 
+  // In team mode the sides alternate, otherwise one crew rolls three times in a
+  // row and the board swings wildly before the other side touches it.
+  if (room.teamMode) {
+    const byId = new Map(room.players.map((p) => [p.id, p]));
+    room.rollOrder = alternateByTeam(
+      room.rollOrder.map((id) => ({ id, teamId: byId.get(id)?.teamId }))
+    ).map((entry) => entry.id);
+  }
+
   room.rollIndex = 0;
   room.phase = 'roadmap_turn';
   syncActiveToRollOrder(room);
@@ -323,6 +335,12 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         return NextResponse.json({ error: `Room is full (max ${MAX_PLAYERS} players)` }, { status: 409 });
       }
       const player = makePlayer(name, room.players.length, false);
+      if (room.teamMode) {
+        // Drop them on the smaller crew so a late joiner does not lopside it.
+        const red = room.players.filter((p) => p.teamId === 'red').length;
+        const blue = room.players.filter((p) => p.teamId === 'blue').length;
+        player.teamId = red <= blue ? 'red' : 'blue';
+      }
       room.players.push(player);
       pushEvent(room, `🎮 ${player.name} joined the room`, 'system');
       return NextResponse.json({ room: writeRoom(room), playerId: player.id });
@@ -434,6 +452,15 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       }
       if (voter.id === target.id) {
         return NextResponse.json({ error: 'Players cannot judge their own round' }, { status: 400 });
+      }
+      // Teammates would simply wave each other through, so judging crosses the
+      // divide. Reactions stay open to everyone — cheering your own crew on is
+      // the point of having one.
+      if (room.teamMode && voter.teamId && voter.teamId === target.teamId) {
+        return NextResponse.json(
+          { error: 'Your own crew cannot judge you — the other side decides' },
+          { status: 400 }
+        );
       }
 
       if (!room.socialRound || room.socialRound.targetPlayerId !== target.id) {
@@ -605,7 +632,14 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       if (outcome.isFinish) {
         room.winner = active;
         room.phase = 'game_over';
-        pushEvent(room, `🏆 ${active.name} won the roadmap!`, 'system');
+        if (room.teamMode && active.teamId) {
+          // One player crossing the line wins it for their whole crew.
+          room.winningTeam = active.teamId;
+          const team = getTeam(active.teamId);
+          pushEvent(room, `🏆 ${active.name} took ${team.name} across the finish line!`, 'system');
+        } else {
+          pushEvent(room, `🏆 ${active.name} won the roadmap!`, 'system');
+        }
       }
 
       return NextResponse.json({ room: writeRoom(room), roll, outcome });
@@ -647,6 +681,46 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         pushEvent(room, `⚡ ${active.name} used ${powerupId}`, 'buff');
       }
 
+      return NextResponse.json({ room: writeRoom(room) });
+    }
+
+    case 'set_team_mode': {
+      const on = body.teamMode === true;
+      room.teamMode = on;
+      if (on) {
+        // Balance on the way in so nobody has to sort six people by hand.
+        const balanced = balanceTeams(room.players);
+        room.players.forEach((p, i) => {
+          p.teamId = balanced[i].teamId;
+        });
+        pushEvent(room, `🤝 Team mode on — Red Crew vs Blue Crew`, 'system');
+      } else {
+        room.players.forEach((p) => {
+          p.teamId = undefined;
+        });
+        room.winningTeam = null;
+        pushEvent(room, `👤 Team mode off — every player for themselves`, 'system');
+      }
+      return NextResponse.json({ room: writeRoom(room) });
+    }
+
+    case 'set_team': {
+      const player = room.players.find((p) => p.id === body.playerId);
+      const teamId = body.teamId === 'red' || body.teamId === 'blue' ? body.teamId : null;
+      if (!player || !teamId) {
+        return NextResponse.json({ error: 'Invalid team change' }, { status: 400 });
+      }
+      player.teamId = teamId;
+      pushEvent(room, `${getTeam(teamId).icon} ${player.name} joined ${getTeam(teamId).name}`, 'system');
+      return NextResponse.json({ room: writeRoom(room) });
+    }
+
+    case 'balance_teams': {
+      const balanced = balanceTeams(room.players);
+      room.players.forEach((p, i) => {
+        p.teamId = balanced[i].teamId;
+      });
+      pushEvent(room, `⚖️ Teams rebalanced`, 'system');
       return NextResponse.json({ room: writeRoom(room) });
     }
 
@@ -696,6 +770,24 @@ export async function POST(request: Request, { params }: { params: { roomId: str
           me.connected = true;
           pushEvent(room, `🔌 ${me.name} reconnected`, 'system');
         }
+      }
+      return NextResponse.json({ room: writeRoom(room) });
+    }
+
+    /**
+     * "This tab is going away" — sent by the unload beacon.
+     *
+     * Deliberately does NOT remove the player: `pagehide` also fires on a plain
+     * refresh, and ejecting someone from their own game because they reloaded
+     * is far worse than waiting out the heartbeat. Marking them away skips their
+     * turn immediately, and a reload re-registers them within a second.
+     */
+    case 'mark_away': {
+      const me = room.players.find((p) => p.id === body.playerId);
+      if (me && me.connected !== false) {
+        me.connected = false;
+        me.lastSeen = 0;
+        unstickPhase(room);
       }
       return NextResponse.json({ room: writeRoom(room) });
     }

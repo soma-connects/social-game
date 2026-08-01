@@ -1,4 +1,13 @@
-import { GamePhase, LanguageCode, MapTheme, MiniGameId, RoomState, SocialReactionId, TurnResult } from './types';
+import {
+  GamePhase,
+  LanguageCode,
+  MapTheme,
+  MiniGameId,
+  RoomState,
+  SocialReactionId,
+  TeamId,
+  TurnResult,
+} from './types';
 
 const ROOM_CACHE_PREFIX = 'voice_party_room_';
 const MY_PLAYER_ID_KEY = 'voice_party_my_player_id';
@@ -239,6 +248,20 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'update_minigames', miniGames });
   }
 
+  // ── Teams ─────────────────────────────────────────────────────────────────
+
+  public setTeamMode(roomId: string, teamMode: boolean) {
+    return this.post(roomId, { action: 'set_team_mode', teamMode });
+  }
+
+  public setTeam(roomId: string, playerId: string, teamId: TeamId) {
+    return this.post(roomId, { action: 'set_team', playerId, teamId });
+  }
+
+  public balanceTeams(roomId: string) {
+    return this.post(roomId, { action: 'balance_teams' });
+  }
+
   /** Starts the match and deals the host their first mini-game. */
   public startMatch(roomId: string) {
     return this.post(roomId, { action: 'start_match' });
@@ -289,15 +312,20 @@ class RoomStoreManager {
   }
 
   /**
-   * Best-effort "I'm closing the tab" ping. Uses sendBeacon because a normal
-   * fetch is cancelled when the page unloads.
+   * Best-effort "this tab is going away" ping, via sendBeacon because a normal
+   * fetch is cancelled during unload.
+   *
+   * Marks the player away rather than removing them — `pagehide` also fires on
+   * an ordinary refresh, and a reload must not eject somebody from their own
+   * game. The next heartbeat undoes it; a real close leaves it standing and the
+   * round skips them.
    */
-  public leaveOnUnload(roomId: string, playerId: string): void {
+  public markAwayOnUnload(roomId: string, playerId: string): void {
     if (typeof navigator === 'undefined' || !navigator.sendBeacon) return;
     try {
       navigator.sendBeacon(
         `/api/room/${roomId}`,
-        new Blob([JSON.stringify({ action: 'leave_room', playerId })], { type: 'application/json' })
+        new Blob([JSON.stringify({ action: 'mark_away', playerId })], { type: 'application/json' })
       );
     } catch {
       /* the heartbeat timeout is the fallback */

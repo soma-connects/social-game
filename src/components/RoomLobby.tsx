@@ -14,11 +14,13 @@ import {
   Shirt,
   Users,
   X,
+  Swords,
+  Scale,
 } from 'lucide-react';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
 import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState } from '@/lib/types';
-import { MAX_PLAYERS } from '@/lib/gameRules';
+import { MAX_PLAYERS, TEAMS } from '@/lib/gameRules';
 
 const MINI_GAMES: { id: MiniGameId; name: string; icon: string; blurb: string }[] = [
   { id: 'voice_arena', name: 'Voice Arena', icon: '🎙️', blurb: 'Say the prompt before the timer dies' },
@@ -393,6 +395,74 @@ export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProp
             >
               <div className="w-4 h-4 rounded-full bg-white shadow-md" />
             </button>
+          </div>
+
+          {/* Crews — everyone still performs solo, they just perform for a side */}
+          <div className="space-y-3 pt-1 border-t border-white/10">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                  <Swords className="w-4 h-4 text-partyPink" /> TEAM MODE
+                </h4>
+                <p className="text-xs text-gray-400">
+                  Red Crew vs Blue Crew. You still perform alone — the other crew judges you.
+                </p>
+              </div>
+              <button
+                onClick={() => roomStore.setTeamMode(room.roomId, !room.teamMode)}
+                className={`w-12 h-6 rounded-full transition-colors p-1 flex items-center shrink-0 ${
+                  room.teamMode ? 'bg-partyPink justify-end' : 'bg-gray-700 justify-start'
+                }`}
+                aria-label="Toggle team mode"
+              >
+                <div className="w-4 h-4 rounded-full bg-white shadow-md" />
+              </button>
+            </div>
+
+            {room.teamMode && (
+              <div className="space-y-3 animate-fadeIn">
+                <div className="grid grid-cols-2 gap-3">
+                  {TEAMS.map((team) => {
+                    const members = room.players.filter((p) => p.teamId === team.id);
+                    const iAmHere = myPlayer.teamId === team.id;
+                    return (
+                      <button
+                        key={team.id}
+                        onClick={() => roomStore.setTeam(room.roomId, myPlayer.id, team.id)}
+                        className={`p-3 rounded-2xl border text-left transition-all ${
+                          iAmHere ? 'border-2 shadow-lg' : 'border-white/10 bg-white/5 hover:border-white/30'
+                        }`}
+                        style={
+                          iAmHere
+                            ? { borderColor: team.color, backgroundColor: `${team.color}22` }
+                            : undefined
+                        }
+                      >
+                        <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                          {team.icon} {team.name}
+                          {iAmHere && (
+                            <span className="bg-white/20 text-[8px] px-1 rounded font-black">YOU</span>
+                          )}
+                        </span>
+                        <p className="text-[10px] text-gray-300 mt-1 truncate">
+                          {members.length > 0 ? members.map((m) => m.name).join(', ') : 'Empty — tap to join'}
+                        </p>
+                        <p className="text-[10px] font-black mt-0.5" style={{ color: team.color }}>
+                          {members.reduce((sum, m) => sum + m.score, 0)} pts
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  onClick={() => roomStore.balanceTeams(room.roomId)}
+                  className="w-full glass-pill hover:bg-white/20 text-gray-200 font-bold text-[11px] py-2 rounded-xl border border-white/15 flex items-center justify-center gap-1.5"
+                >
+                  <Scale className="w-3.5 h-3.5" /> AUTO-BALANCE CREWS
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Which qualifying mini-games feed the board */}

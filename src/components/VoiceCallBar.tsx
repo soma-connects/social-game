@@ -15,9 +15,23 @@ interface VoiceCallBarProps {
   duckRemote: boolean;
   /** Closes this player's mic while somebody else is performing. */
   autoMute: boolean;
+  /** Shrinks to a status line so it stops competing with the live round. */
+  compact?: boolean;
 }
 
-export default function VoiceCallBar({ roomId, players, myPlayer, duckRemote, autoMute }: VoiceCallBarProps) {
+/**
+ * Collapses to a single status line while a round is being scored. Joining or
+ * leaving the call mid-attempt is not something anyone does, and the full bar
+ * was ~106px of the phone screen competing with the challenge itself.
+ */
+export default function VoiceCallBar({
+  roomId,
+  players,
+  myPlayer,
+  duckRemote,
+  autoMute,
+  compact = false,
+}: VoiceCallBarProps) {
   const [state, setState] = useState<VoiceState>(voiceChat.getState());
   const [joining, setJoining] = useState(false);
 
@@ -73,6 +87,29 @@ export default function VoiceCallBar({ roomId, players, myPlayer, duckRemote, au
   const connectedIds = new Set(
     state.peers.filter((p) => p.connection === 'connected').map((p) => p.playerId)
   );
+
+  // Mid-attempt: one status line, not the full bar.
+  if (compact) {
+    return (
+      <div className="glass-card rounded-xl px-3 py-1.5 border border-white/10 bg-slate-900/70 flex items-center justify-between gap-2">
+        <span className="text-[11px] font-bold text-gray-300 flex items-center gap-1.5 truncate">
+          <PhoneCall className={`w-3 h-3 ${isLive ? 'text-emerald-400' : 'text-gray-500'}`} />
+          {isLive ? 'Group voice live' : 'Group voice off'}
+        </span>
+        <span className="text-[11px] font-black flex items-center gap-1 shrink-0">
+          {state.muted ? (
+            <span className="text-amber-300 flex items-center gap-1">
+              <MicOff className="w-3 h-3" /> MUTED
+            </span>
+          ) : (
+            <span className="text-emerald-400 flex items-center gap-1">
+              <Mic className="w-3 h-3" /> OPEN
+            </span>
+          )}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="glass-card rounded-2xl px-4 py-3 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-3 bg-slate-900/70">

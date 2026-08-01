@@ -1,0 +1,3 @@
+# Robots.txt for Voice Party Roadmap Game
+User-agent: *
+Allow: /

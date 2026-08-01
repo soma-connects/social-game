@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0B0E1B;
+  --foreground: #F8FAFC;
+  --terracotta: #FF5722;
+  --emerald: #00E676;
+  --yellow: #FFD000;
+  --purple: #8A2BE2;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Ankara & Adire Geometric Subtle Pattern Background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.06;
+  background-image: radial-gradient(#FFD000 1px, transparent 1px), radial-gradient(#FF5722 1px, #0B0E1B 1px);
+  background-size: 40px 40px;
+  background-position: 0 0, 20px 20px;
+}
+
+/* Glassmorphism Cards */
+.glass-card {
+  background: rgba(22, 27, 51, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* Localized Color Glows */
+.glow-yellow {
+  box-shadow: 0 0 24px rgba(255, 208, 0, 0.5);
+}
+
+.glow-terracotta {
+  box-shadow: 0 0 24px rgba(255, 87, 34, 0.5);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 24px rgba(0, 230, 118, 0.5);
+}
+
+.glow-purple {
+  box-shadow: 0 0 24px rgba(138, 43, 226, 0.5);
+}
+
+/* Audio Wave Ring Animation for Avatar Frames */
+@keyframes wavePulse {
+  0% {
+    box-shadow: 0 0 0 0px rgba(0, 230, 118, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 14px rgba(0, 230, 118, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0px rgba(0, 230, 118, 0);
+  }
+}
+
+.audio-wave-ring {
+  animation: wavePulse 1.2s infinite ease-out;
+}
+
+/* Panic Screen Shake & Timer Animations */
+@keyframes panicShake {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  20% { transform: translate(-4px, 2px) rotate(-1deg); }
+  40% { transform: translate(4px, -2px) rotate(1deg); }
+  60% { transform: translate(-4px, -2px) rotate(-1deg); }
+  80% { transform: translate(4px, 2px) rotate(1deg); }
+}
+
+.animate-panic {
+  animation: panicShake 0.3s ease-in-out infinite;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(11, 14, 27, 0.9);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 208, 0, 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 208, 0, 0.9);
+}

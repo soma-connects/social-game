@@ -1,0 +1,9 @@
+.gcloudignore
+.git
+.gitignore
+.next/
+.next/**
+node_modules/
+node_modules/**
+npm-debug.log
+PROJECT_GOALS.md

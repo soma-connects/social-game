@@ -369,21 +369,28 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
 
         // Each type parks the window in a different third of the vocal range,
         // far enough from the edges that the target stays reachable.
-        let centreY: number;
-        if (gateType === 'high') {
-          centreY = bandTop + 55 + (Math.random() - 0.5) * 30;
-        } else if (gateType === 'low') {
-          centreY = bandBottom - 55 + (Math.random() - 0.5) * 30;
-        } else {
-          centreY = (bandTop + bandBottom) / 2 + (Math.random() - 0.5) * 40;
-        }
+        // Calculate clear, guaranteed-passable maneuvering gaps for each gate type.
+        // CANVAS_H = 500. A gap of 180px-240px leaves generous space for the avatar (radius 22px).
+        let gapTop: number;
+        let gapBottom: number;
 
-        // Walls sit one player-radius outside the safe window. A wall pushed
-        // past the canvas edge simply means there is no pillar on that side.
-        let gapTop = centreY - safeHalf - PLAYER_RADIUS;
-        let gapBottom = centreY + safeHalf + PLAYER_RADIUS;
-        if (gapTop < 0) gapTop = 0;
-        if (gapBottom > CANVAS_H) gapBottom = CANVAS_H;
+        if (gateType === 'high') {
+          // RAISE VOICE ⬆️: Single bottom pillar standing up from gapTop to CANVAS_H.
+          // Open sky passage above: 0 to gapTop (190px–240px open air!).
+          gapTop = 210 + (Math.random() - 0.5) * 40;
+          gapBottom = CANVAS_H;
+        } else if (gateType === 'low') {
+          // LOWER VOICE ⬇️: Single top pillar hanging down from 0 to gapTop.
+          // Open ground passage below: gapTop to CANVAS_H (200px–240px open passage!).
+          gapTop = 280 + (Math.random() - 0.5) * 40;
+          gapBottom = CANVAS_H;
+        } else {
+          // HOLD STEADY 🎵: Double pillar (top 0..gapTop, bottom gapBottom..CANVAS_H).
+          // Open middle passage: gapTop to gapBottom (190px generous opening!).
+          const center = 250 + (Math.random() - 0.5) * 40;
+          gapTop = center - 95;
+          gapBottom = center + 95;
+        }
 
         s.gates.push({
           x: CANVAS_W + GATE_WIDTH,

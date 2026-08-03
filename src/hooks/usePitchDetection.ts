@@ -60,8 +60,8 @@ const UNVOICED_HOLD_MS = 100;
  */
 const MIN_RANGE_HZ = 140;
 
-/** Where the player floats when no voice is detected at all. */
-const NEUTRAL_LIFT = 0.5;
+/** Where the player floats when no voice is detected at all (0.0 = fall to floor with gravity). */
+const NEUTRAL_LIFT = 0.0;
 
 /**
  * Calibration window. Long enough to genuinely sweep low → high; three seconds

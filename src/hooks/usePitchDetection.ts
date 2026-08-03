@@ -70,7 +70,7 @@ export function usePitchDetection() {
 
   const startCalibration = useCallback(async (): Promise<boolean> => {
     try {
-      const stream = await micStream.getAudioTrackStream();
+      const { stream } = await micStream.acquire();
       if (!stream) return false;
 
       const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
@@ -182,8 +182,11 @@ export function usePitchDetection() {
     };
   }, [stopDetection]);
 
+  const getRange = useCallback(() => calibrationRef.current, []);
+
   return {
     ...data,
+    getRange,
     startCalibration,
     stopDetection,
   };

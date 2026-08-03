@@ -256,8 +256,8 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
     s.floatingTexts = [];
     s.frameCount = 0;
     s.scrollSpeed = INITIAL_SPEED;
-    // A beat of clear air first, so the player finds their voice before a gate.
-    s.nextGateIn = 210;
+    // First gate spawns quickly (~1.2s) so player doesn't wait in empty air.
+    s.nextGateIn = 75;
     s.spawnedGateCount = 0;
     s.cityLayers = makeCityLayers();
 
@@ -271,17 +271,21 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
       const currentLift = liftRef.current;
       const currentVolume = volumeRef.current;
 
-      // ── Pitch → position ─────────────────────────────────────────
-      // lift 0 (lowest note) sits at the bottom of the band, 1 (highest) at the
-      // top. The spring gives the motion weight without taking control away:
-      // wherever you hold your voice, the bird settles there.
-      const lowY = CANVAS_H - BOTTOM_MARGIN - PLAYER_RADIUS;
-      const highY = TOP_MARGIN + PLAYER_RADIUS;
-      const targetY = lowY - currentLift * (lowY - highY);
+      // ── Pitch & Volume → Responsive Flight Physics ─────────────
+      if (currentLift > 0.01) {
+        const lowY = CANVAS_H - BOTTOM_MARGIN - PLAYER_RADIUS;
+        const highY = TOP_MARGIN + PLAYER_RADIUS;
+        // Pitch/Volume drives target height with instant 0.12 spring factor
+        const targetY = lowY - currentLift * (lowY - highY);
+        s.vy += (targetY - s.playerY) * 0.12;
+        s.vy *= 0.82;
+      } else {
+        // Gravity pulls bird down instantly when voice stops
+        s.vy += 0.55;
+        s.vy *= 0.88;
+      }
 
-      s.vy += (targetY - s.playerY) * SPRING;
-      s.vy *= DAMPING;
-      s.vy = Math.max(-MAX_VY, Math.min(MAX_VY, s.vy));
+      s.vy = Math.max(-8, Math.min(8, s.vy));
       s.playerY += s.vy;
 
       // Clamp to canvas bounds

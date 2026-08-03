@@ -45,11 +45,8 @@ const RMS_THRESHOLD = 0.012; // Below this RMS the signal is silence.
  */
 const MEDIAN_WINDOW = 5;
 
-/**
- * How long an unvoiced frame keeps the last pitch before the reading decays.
- * Balanced so brief consonants don't drop the bird, but stopping speech is responsive.
- */
-const UNVOICED_HOLD_MS = 100;
+/** Set to 0 for instant zero-lag response when stopping voice. */
+const UNVOICED_HOLD_MS = 0;
 
 /**
  * Narrowest vocal range the game will map the screen to.
@@ -311,11 +308,14 @@ export function usePitchDetection() {
         // any gate above them unwinnable before they had made a sound. Not
         // singing should mean "no instruction", which is the middle.
         const rawLift =
-          pitch > 0 ? Math.max(0, Math.min(1, (pitch - range.low) / span)) : NEUTRAL_LIFT;
+          pitch > 0 ? Math.max(0, Math.min(1, (pitch - range.low) / span)) : 0.0;
 
-        // Symmetric smooth transition for both rising and falling pitch
-        smoothLiftRef.current =
-          smoothLiftRef.current * (1 - SMOOTH_FACTOR) + rawLift * SMOOTH_FACTOR;
+        // Instant drop on silence, fast responsive transition on voice
+        const factor = pitch > 0 ? 0.45 : 0.6;
+        smoothLiftRef.current = smoothLiftRef.current * (1 - factor) + rawLift * factor;
+        if (pitch === 0 && smoothLiftRef.current < 0.02) {
+          smoothLiftRef.current = 0.0;
+        }
 
         setData({
           pitch: Math.round(pitch),

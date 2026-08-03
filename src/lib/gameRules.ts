@@ -32,11 +32,21 @@ export const ROOM_TTL_MS = 6 * 60 * 60 * 1000;
 export const MINIGAME_MAX_SCORE: Record<MiniGameId, number> = {
   voice_arena: 310,
   pitch_bird: 1200,
+  // 5 rounds x 100 points. Unlike the other two this ceiling is exact rather
+  // than estimated, because the scoring is bounded by design.
+  solfege: 500,
 };
 
 export const MINIGAME_LABELS: Record<MiniGameId, string> = {
   voice_arena: 'Voice Arena',
   pitch_bird: 'PitchBird',
+  solfege: 'Karaoke',
+};
+
+export const MINIGAME_ICONS: Record<MiniGameId, string> = {
+  voice_arena: '🎙️',
+  pitch_bird: '🐦',
+  solfege: '🎵',
 };
 
 /** Raw mini-game score → 0..1 performance. */
@@ -166,9 +176,18 @@ export function alternateByTeam<T extends { teamId?: TeamId }>(ordered: T[]): T[
   return woven;
 }
 
+export const ALL_MINI_GAMES: MiniGameId[] = ['voice_arena', 'pitch_bird', 'solfege'];
+
+/** Maps a mini-game to the phase that runs it. */
+export function miniGamePhase(game: MiniGameId): 'qualifying_voice' | 'pitch_bird' | 'solfege' {
+  if (game === 'pitch_bird') return 'pitch_bird';
+  if (game === 'solfege') return 'solfege';
+  return 'qualifying_voice';
+}
+
 /** Picks the mini-game for a turn from whatever the host enabled. */
 export function pickMiniGame(enabled: MiniGameId[]): MiniGameId {
-  const pool = enabled.length > 0 ? enabled : (['voice_arena', 'pitch_bird'] as MiniGameId[]);
+  const pool = enabled.length > 0 ? enabled : ALL_MINI_GAMES;
   return pool[Math.floor(Math.random() * pool.length)];
 }
 

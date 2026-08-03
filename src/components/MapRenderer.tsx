@@ -121,7 +121,6 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
         {/* Circular Nodes Placed Exactly at (x%, y%) Coordinates */}
         {Array.from({ length: totalTiles }).map((_, idx) => {
           const coords = NODE_COORDINATES[idx] || { x: 50, y: 50 };
-          const playersOnTile = players.filter((p) => p.boardPosition === idx);
           const nodeType = NODE_TYPES[idx % NODE_TYPES.length];
           const isFinish = idx === totalTiles - 1;
 
@@ -131,30 +130,33 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
               className="absolute -translate-x-1/2 -translate-y-1/2 z-10"
               style={{ left: `${coords.x}%`, top: `${coords.y}%` }}
             >
-              <TileNode
-                index={idx}
-                nodeType={nodeType}
-                theme={theme}
-                playersOnTile={playersOnTile}
-                isFinish={isFinish}
-              />
+              <TileNode index={idx} nodeType={nodeType} theme={theme} isFinish={isFinish} />
             </div>
           );
         })}
 
-        {/* Animated Sliding Avatar Tokens */}
+        {/* Animated Sliding Avatar Tokens — the only place players are drawn */}
         {players.map((player) => {
           const currentTileIndex = Math.min(totalTiles - 1, Math.max(0, player.boardPosition));
           const coords = NODE_COORDINATES[currentTileIndex] || { x: 10, y: 12 };
           const isTurn = player.id === activePlayerId;
 
+          // Everyone starts on tile 1 and players bunch up all game. Without a
+          // fan-out they land on identical coordinates and read as one token.
+          const sharing = players.filter((p) => p.boardPosition === player.boardPosition);
+          const slot = sharing.findIndex((p) => p.id === player.id);
+          const spreadX = sharing.length > 1 ? (slot - (sharing.length - 1) / 2) * 4.5 : 0;
+          const spreadY = sharing.length > 1 ? (slot % 2 === 0 ? -1.5 : 1.5) : 0;
+
           return (
             <motion.div
               key={player.id}
               initial={false}
-              animate={{ left: `${coords.x}%`, top: `${coords.y}%` }}
+              animate={{ left: `${coords.x + spreadX}%`, top: `${coords.y + spreadY}%` }}
               transition={{ type: 'spring', stiffness: 180, damping: 22 }}
-              className="absolute -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none"
+              className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none ${
+                isTurn ? 'z-40' : 'z-30'
+              }`}
             >
               <div className="relative">
                 {isTurn && (

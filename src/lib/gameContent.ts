@@ -131,27 +131,22 @@ export const PRESET_TRAPS: PresetTrap[] = [
   { id: 't6', label: 'Danfo Driver', word: 'Owa o, danfo driver enter bus stop', category: 'Slang' },
 ];
 
+/**
+ * Only the decks the recogniser can actually score.
+ *
+ * Chrome has no speech models for ha-NG / ig-NG / yo-NG, so everything here is
+ * transcribed as Nigerian English and fuzzy-matched. Igbo and Pidgin survive
+ * that treatment well enough to be fair; Hausa and Yoruba did not, so they are
+ * parked rather than shipped as rounds nobody can win. Their tone marks and
+ * vowel set come back as noise through an English model.
+ */
 export const LANGUAGE_DECKS: Record<string, ChallengeWord[]> = {
-  hausa: [
-    { id: 'h1', word: 'Sannu da zuwa', phonetic: 'Sahn-noo dah zoo-wah', translation: 'Welcome', language: 'hausa', type: 'language', difficulty: 'easy' },
-    { id: 'h2', word: 'Ina kwana', phonetic: 'Ee-nah kwah-nah', translation: 'Good morning', language: 'hausa', type: 'language', difficulty: 'easy' },
-    { id: 'h3', word: 'Nagode sosai', phonetic: 'Nah-goh-deh soh-sigh', translation: 'Thank you very much', language: 'hausa', type: 'language', difficulty: 'medium' },
-    { id: 'h4', word: 'Ina sonka', phonetic: 'Ee-nah sohn-kah', translation: 'I love you', language: 'hausa', type: 'language', difficulty: 'easy' },
-    { id: 'h5', word: 'Yaya sunanka', phonetic: 'Yah-yah soo-nahn-kah', translation: 'What is your name?', language: 'hausa', type: 'language', difficulty: 'medium' },
-  ],
   igbo: [
     { id: 'i1', word: 'Kedu ka idi', phonetic: 'Keh-doo kah ee-dee', translation: 'How are you?', language: 'igbo', type: 'language', difficulty: 'easy' },
     { id: 'i2', word: 'Daalu', phonetic: 'Dah-ah-loo', translation: 'Thank you', language: 'igbo', type: 'language', difficulty: 'easy' },
     { id: 'i3', word: 'Ututu oma', phonetic: 'Oo-too-too oh-mah', translation: 'Good morning', language: 'igbo', type: 'language', difficulty: 'easy' },
     { id: 'i4', word: 'Nnoo', phonetic: 'N-noh-oh', translation: 'Welcome', language: 'igbo', type: 'language', difficulty: 'easy' },
     { id: 'i5', word: 'Afame bu Chidi', phonetic: 'Ah-fah-meh boo Chee-dee', translation: 'My name is Chidi', language: 'igbo', type: 'language', difficulty: 'medium' },
-  ],
-  yoruba: [
-    { id: 'y1', word: 'E kaaro', phonetic: 'Eh kah-ah-roh', translation: 'Good morning', language: 'yoruba', type: 'language', difficulty: 'easy' },
-    { id: 'y2', word: 'E se gan', phonetic: 'Eh sheh gahn', translation: 'Thank you very much', language: 'yoruba', type: 'language', difficulty: 'easy' },
-    { id: 'y3', word: 'Bawo ni', phonetic: 'Bah-woh nee', translation: 'How are you?', language: 'yoruba', type: 'language', difficulty: 'easy' },
-    { id: 'y4', word: 'Orukọ mi ni Paul', phonetic: 'Oh-roo-kaw mee nee Paul', translation: 'My name is Paul', language: 'yoruba', type: 'language', difficulty: 'medium' },
-    { id: 'y5', word: 'Ẹ ku aalẹ', phonetic: 'Eh koo ah-ah-leh', translation: 'Good evening', language: 'yoruba', type: 'language', difficulty: 'easy' },
   ],
   pidgin: [
     { id: 'p1', word: 'How you dey', phonetic: 'How goo dey', translation: 'How are you doing?', language: 'pidgin', type: 'language', difficulty: 'easy' },

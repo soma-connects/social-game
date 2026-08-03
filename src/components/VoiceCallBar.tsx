@@ -17,6 +17,8 @@ interface VoiceCallBarProps {
   autoMute: boolean;
   /** Shrinks to a status line so it stops competing with the live round. */
   compact?: boolean;
+  /** Connects the call without waiting for a tap, once the match is running. */
+  autoJoin?: boolean;
 }
 
 /**
@@ -31,6 +33,7 @@ export default function VoiceCallBar({
   duckRemote,
   autoMute,
   compact = false,
+  autoJoin = false,
 }: VoiceCallBarProps) {
   const [state, setState] = useState<VoiceState>(voiceChat.getState());
   const [joining, setJoining] = useState(false);
@@ -80,6 +83,30 @@ export default function VoiceCallBar({
     setJoining(true);
     await voiceChat.join(roomId, myPlayer.id, players.map((p) => p.id));
     setJoining(false);
+  };
+
+  // Auto-join once the match is underway.
+  //
+  // This is a voice game — hearing each other is the point, not an opt-in. The
+  // routing was already correct (listeners hear the performer live at full
+  // volume; only the performer's own incoming audio is ducked so the recogniser
+  // hears them rather than the room), but with the call left off by default
+  // nobody heard anything at all. Tried once per room; if the browser refuses
+  // permission the manual join button is still there.
+  const autoJoinedRef = useRef(false);
+  useEffect(() => {
+    if (autoJoin && !autoJoinedRef.current && !voiceChat.isJoined() && state.status === 'off') {
+      autoJoinedRef.current = true;
+      void handleJoin();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoJoin, state.status]);
+
+  // A failed auto-join must not lock the feature out for the session — a
+  // permission prompt gets dismissed by accident all the time.
+  const retry = () => {
+    autoJoinedRef.current = false;
+    void handleJoin();
   };
 
   const isLive = state.status === 'live';
@@ -185,13 +212,13 @@ export default function VoiceCallBar({
           </button>
         ) : (
           <button
-            onClick={handleJoin}
+            onClick={retry}
             disabled={joining || players.length < 2}
             title={players.length < 2 ? 'Wait for another player to join the room' : undefined}
             className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-partyDark font-black text-xs flex items-center gap-1.5 transition-all shadow"
           >
             <PhoneCall className="w-3.5 h-3.5" />
-            <span>JOIN VOICE</span>
+            <span>{state.status === 'error' ? 'RETRY VOICE' : 'JOIN VOICE'}</span>
           </button>
         )}
       </div>

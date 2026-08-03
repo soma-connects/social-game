@@ -99,10 +99,19 @@ export type PowerupItem = {
 
 export type TileNodeType = 'normal' | 'buff' | 'debuff' | 'dare' | 'mystery' | 'bonus' | 'trap';
 
-export type GamePhase = 'lobby' | 'qualifying_voice' | 'powerup_shop' | 'roadmap_turn' | 'peer_dare' | 'pitch_bird' | 'roast_intermission' | 'game_over';
+export type GamePhase =
+  | 'lobby'
+  | 'qualifying_voice'
+  | 'powerup_shop'
+  | 'roadmap_turn'
+  | 'peer_dare'
+  | 'pitch_bird'
+  | 'solfege'
+  | 'roast_intermission'
+  | 'game_over';
 
 /** The qualifying mini-games that feed the main board game. */
-export type MiniGameId = 'voice_arena' | 'pitch_bird';
+export type MiniGameId = 'voice_arena' | 'pitch_bird' | 'solfege';
 
 /** What a finished mini-game earned the player this turn. */
 export type TurnResult = {
@@ -121,6 +130,34 @@ export type RoundResult = TurnResult & {
   playerName: string;
   /** Cleared once they have rolled, so a round cannot be rolled twice. */
   rolled?: boolean;
+};
+
+/**
+ * A live glimpse of the performer's mini-game, pushed by whoever is playing so
+ * the rest of the room can follow along instead of staring at a "please wait".
+ *
+ * Deliberately tiny and declarative rather than a mirrored canvas: the room is
+ * driven by ~1.5s polling, so streaming frames would be a slideshow. What
+ * spectators actually need is what the performer is being asked to do and how
+ * it is going.
+ */
+export type LiveMiniGameState = {
+  playerId: string;
+  game: MiniGameId;
+  /** Set server-side, so a stale payload can be spotted and hidden. */
+  at?: number;
+  /** The challenge itself — the word, the note, the gate. */
+  prompt?: string;
+  /** Secondary line: phonetic, translation, instruction. */
+  detail?: string;
+  /** Running score during the attempt. */
+  score?: number;
+  /** 0..1 through the attempt, for a progress bar. */
+  progress?: number;
+  /** What is happening right now — transcript, "GO HIGHER", "CRASHED". */
+  status?: string;
+  /** Whether it is currently going well, for colour. */
+  good?: boolean;
 };
 
 export type SocialReactionId = 'laugh' | 'fire' | 'almost' | 'drama';
@@ -179,6 +216,8 @@ export type RoomState = {
   turnResult?: TurnResult | null;
   /** Laugh meter and peer judge votes for the active voice-related round. */
   socialRound?: SocialRound | null;
+  /** What the performer is doing right now, for spectators. */
+  liveState?: LiveMiniGameState | null;
 
   // ── Round-based loop ──────────────────────────────────────────────────────
   // A round is: every player takes the mini-game one at a time, then everyone

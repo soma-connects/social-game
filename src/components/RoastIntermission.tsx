@@ -1,8 +1,8 @@
 'use client';
 
-// 15-Second Open-Mic Roast Intermission ("Roast Lounge").
+// 25-Second Open-Mic Roast Intermission ("Roast Lounge").
 //
-// After every mini-game turn, the room enters this 15-second intermission phase.
+// After every mini-game turn, the room enters this 25-second intermission phase.
 // All players' microphones stay active so everyone can laugh, roast, tease, or
 // hype up the performer's attempt over live audio. Spectators can blast party
 // SFX from the interactive soundboard and send floating reaction badges.
@@ -35,6 +35,9 @@ interface RoastIntermissionProps {
   replayClip: VoiceClip | null;
   onFinishRoast: () => void;
 }
+
+/** Long enough to actually replay the clip and then react to it. */
+const ROAST_SECONDS = 25;
 
 const SOUNDBOARD = [
   { id: 'horn', name: 'Danfo Horn', icon: '🎺', action: () => audioSFX.playStreetVendorBell() },
@@ -71,7 +74,7 @@ export default function RoastIntermission({
   replayClip,
   onFinishRoast,
 }: RoastIntermissionProps) {
-  const [timeLeft, setTimeLeft] = useState<number>(15);
+  const [timeLeft, setTimeLeft] = useState<number>(ROAST_SECONDS);
   const [busyReaction, setBusyReaction] = useState<string | null>(null);
   const [floatingEmojis, setFloatingEmojis] = useState<{ id: number; emoji: string; x: number }[]>([]);
   /** Reaction ids already animated, so polling does not replay them each tick. */
@@ -84,13 +87,13 @@ export default function RoastIntermission({
   const reactions = socialRound?.reactions ?? [];
 
   // Keep the callback in a ref so the countdown effect has no changing
-  // dependency — otherwise a re-render mid-roast restarts the 15 seconds.
+  // dependency — otherwise a re-render mid-roast restarts the countdown.
   const finishRef = useRef(onFinishRoast);
   finishRef.current = onFinishRoast;
 
-  // 15-second countdown. Runs once per performer, not once per render.
+  // Countdown. Runs once per performer, not once per render.
   useEffect(() => {
-    setTimeLeft(15);
+    setTimeLeft(ROAST_SECONDS);
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
@@ -145,7 +148,7 @@ export default function RoastIntermission({
     setBusyReaction(null);
   };
 
-  const timerPct = Math.round((timeLeft / 15) * 100);
+  const timerPct = Math.round((timeLeft / ROAST_SECONDS) * 100);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6 relative overflow-hidden">
@@ -196,7 +199,7 @@ export default function RoastIntermission({
           }
         />
 
-        {/* 15-Second Progress Timer Bar */}
+        {/* Progress timer bar */}
         <div className="w-full bg-partyDark h-3 rounded-full overflow-hidden border border-white/10 p-0.5">
           <div
             className="h-full bg-gradient-to-r from-emerald-400 via-partyYellow to-terracotta rounded-full transition-all duration-1000"

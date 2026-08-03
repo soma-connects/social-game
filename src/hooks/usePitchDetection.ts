@@ -51,6 +51,25 @@ const MEDIAN_WINDOW = 5;
  */
 const UNVOICED_HOLD_MS = 100;
 
+/**
+ * Narrowest vocal range the game will map the screen to.
+ *
+ * Roughly an octave. Anything tighter and small, involuntary pitch wobble
+ * translates into large jumps on screen — the difference between a bird you
+ * steer and one that flails.
+ */
+const MIN_RANGE_HZ = 140;
+
+/** Where the player floats when no voice is detected at all. */
+const NEUTRAL_LIFT = 0.5;
+
+/**
+ * Calibration window. Long enough to genuinely sweep low → high; three seconds
+ * had people getting one note out before it closed, which is exactly the case
+ * MIN_RANGE_HZ then has to rescue.
+ */
+export const CALIBRATION_MS = 4000;
+
 function median(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -284,7 +303,15 @@ export function usePitchDetection() {
         // Lift: map pitch into the calibrated range.
         const range = calibrationRef.current;
         const span = Math.max(range.high - range.low, 30);
-        const rawLift = pitch > 0 ? Math.max(0, Math.min(1, (pitch - range.low) / span)) : 0;
+
+        // Silence drifts to the middle, not to zero.
+        //
+        // Zero is a real input — it means "singing your lowest note" — so
+        // treating silence as zero parked a quiet player on the floor and made
+        // any gate above them unwinnable before they had made a sound. Not
+        // singing should mean "no instruction", which is the middle.
+        const rawLift =
+          pitch > 0 ? Math.max(0, Math.min(1, (pitch - range.low) / span)) : NEUTRAL_LIFT;
 
         // Symmetric smooth transition for both rising and falling pitch
         smoothLiftRef.current =
@@ -313,17 +340,30 @@ export function usePitchDetection() {
           // Use 10th / 90th percentile to exclude outliers.
           const p10 = sorted[Math.floor(sorted.length * 0.1)];
           const p90 = sorted[Math.floor(sorted.length * 0.9)];
-          calibrationRef.current = {
-            low: Math.max(MIN_FREQ, p10 - 20),
-            high: Math.min(MAX_FREQ, p90 + 40),
-          };
+
+          let low = Math.max(MIN_FREQ, p10 - 20);
+          let high = Math.min(MAX_FREQ, p90 + 40);
+
+          // Most people hum one steady note through calibration rather than
+          // sweeping their range, which collapses this to a ~90Hz span. The
+          // whole screen then maps to less pitch variation than ordinary
+          // speech, and the bird slams between the ceiling and the floor.
+          // Widen a narrow reading around its own centre so the controls stay
+          // usable no matter what the player did during those three seconds.
+          if (high - low < MIN_RANGE_HZ) {
+            const centre = (low + high) / 2;
+            low = Math.max(MIN_FREQ, centre - MIN_RANGE_HZ / 2);
+            high = Math.min(MAX_FREQ, centre + MIN_RANGE_HZ / 2);
+          }
+
+          calibrationRef.current = { low, high };
         } else {
           // Not enough samples — use sensible defaults.
-          calibrationRef.current = { low: 100, high: 450 };
+          calibrationRef.current = { low: 120, high: 340 };
         }
 
         setData((d) => ({ ...d, isCalibrated: true }));
-      }, 3000);
+      }, CALIBRATION_MS);
 
       return true;
     } catch {
@@ -345,6 +385,14 @@ export function usePitchDetection() {
 
   return {
     ...data,
+    /**
+     * The player's measured vocal range.
+     *
+     * Read live from the ref rather than mirrored into state — the solfège
+     * game needs it to choose a tonic each player can actually reach, and a
+     * fixed tonic would set a bass and a soprano completely different tasks.
+     */
+    getRange: () => calibrationRef.current,
     startCalibration,
     stopDetection,
   };

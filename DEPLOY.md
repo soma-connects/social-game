@@ -112,6 +112,43 @@ const ICE_SERVERS: RTCIceServer[] = [
 TURN relays media, so it costs bandwidth. Managed options (Twilio, Metered,
 Cloudflare Calls) have free tiers that comfortably cover a party game.
 
+## Karaoke (solfège)
+
+`src/lib/solfege.ts` holds the theory and scoring; `SolfegeGame.tsx` runs the
+rounds. Uses no speech recognition at all — there is nothing to transcribe, only
+a frequency to measure — which is why it scores accurately where the Voice Arena
+cannot.
+
+Three rules that must not be broken:
+
+1. **Relative, never absolute.** The tonic is played, then an interval is asked
+   for. Naming an absolute pitch would require perfect pitch and fail everyone.
+2. **The tonic is picked from the player's measured range** (`getRange()`), so a
+   bass and a soprano are set the same task rather than one impossible one.
+3. **Octave errors are forgiven** — `centsError` folds the ratio into one octave.
+   Singing the right note an octave down is musically correct, and the detector
+   itself occasionally reports the wrong octave.
+
+**The target note is played, not just the tonic.** Playing only the key turned
+each round into an ear-training exam — work out where So sits above Do, then
+produce it. That is a musician's task. Hearing the note makes it imitation.
+
+**The instruction is the interface, not the meter.** A tuning needle is a
+musician's tool; the player needs "GO HIGHER" in words, large. The meter runs
+vertically (pitch is up and down, not left and right) over ±300 cents, and the
+displayed marker is smoothed separately from the scored samples — scoring wants
+the raw signal, the eye needs something that does not vibrate.
+
+Scored in cents (a semitone is 100), on sustain rather than instant hit: what
+counts is the share of the hold window spent on pitch, after a `GRACE_SECONDS`
+lead-in that is not graded because nobody lands on a note instantly. `playReferenceTone`
+deliberately ignores the SFX mute — it is the question being asked, not a sound
+effect, and muting party noise must not silently make the game impossible.
+
+**This is the karaoke engine.** A song is a pitch contour over time; a solfège
+round is that contour with one point. Adding real melodies means feeding these
+same functions a sequence of targets, not writing new scoring.
+
 ## PitchBird flight model
 
 Pitch commands **position**, not acceleration. `usePitchDetection` maps the

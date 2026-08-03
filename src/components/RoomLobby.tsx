@@ -25,6 +25,7 @@ import { MAX_PLAYERS, TEAMS } from '@/lib/gameRules';
 const MINI_GAMES: { id: MiniGameId; name: string; icon: string; blurb: string }[] = [
   { id: 'voice_arena', name: 'Voice Arena', icon: '🎙️', blurb: 'Say the prompt before the timer dies' },
   { id: 'pitch_bird', name: 'PitchBird', icon: '🐦', blurb: 'Fly through gates using your pitch' },
+  { id: 'solfege', name: 'Karaoke', icon: '🎵', blurb: 'Hear Do, then sing the note you are given' },
 ];
 import { audioSFX } from '@/lib/audioFeedback';
 import AvatarIllustration from './AvatarIllustration';
@@ -36,9 +37,7 @@ interface RoomLobbyProps {
 }
 
 const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
-  { id: 'hausa', name: 'Hausa', flag: '🇳🇬' },
   { id: 'igbo', name: 'Igbo', flag: '🇳🇬' },
-  { id: 'yoruba', name: 'Yoruba', flag: '🇳🇬' },
   { id: 'pidgin', name: 'Naija Pidgin', flag: '🇳🇬' },
   { id: 'spanish', name: 'Spanish', flag: '🇪🇸' },
   { id: 'french', name: 'French', flag: '🇫🇷' },
@@ -379,22 +378,6 @@ export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProp
                 </button>
               );
             })}
-          </div>
-
-          {/* Quick Math Sprinks Toggle */}
-          <div className="glass-pill rounded-2xl p-4 flex items-center justify-between border border-white/10">
-            <div>
-              <h4 className="font-bold text-sm text-white">⚡ QUICK MATH SPRINKS</h4>
-              <p className="text-xs text-gray-400">Mix rapid addition/subtraction problems into voice challenges!</p>
-            </div>
-            <button
-              onClick={toggleMath}
-              className={`w-12 h-6 rounded-full transition-colors p-1 flex items-center ${
-                mathEnabled ? 'bg-emerald-500 justify-end' : 'bg-gray-700 justify-start'
-              }`}
-            >
-              <div className="w-4 h-4 rounded-full bg-white shadow-md" />
-            </button>
           </div>
 
           {/* Crews — everyone still performs solo, they just perform for a side */}

@@ -1,6 +1,7 @@
 import {
   GamePhase,
   LanguageCode,
+  LiveMiniGameState,
   MapTheme,
   MiniGameId,
   RoomState,
@@ -269,8 +270,13 @@ class RoomStoreManager {
 
   /** Finishing a mini-game banks points and sets the movement for the board. */
   public async completeMiniGame(roomId: string, game: MiniGameId, pointsEarned: number) {
+    const ACTION: Record<MiniGameId, string> = {
+      pitch_bird: 'complete_pitch_bird',
+      solfege: 'complete_solfege',
+      voice_arena: 'complete_voice_turn',
+    };
     const data = await this.post(roomId, {
-      action: game === 'pitch_bird' ? 'complete_pitch_bird' : 'complete_voice_turn',
+      action: ACTION[game] ?? 'complete_voice_turn',
       pointsEarned,
     });
     return {
@@ -282,6 +288,33 @@ class RoomStoreManager {
 
   public finishRoast(roomId: string) {
     return this.post(roomId, { action: 'finish_roast' });
+  }
+
+  /**
+   * Reports what the performer is doing so spectators can follow along.
+   *
+   * Throttled and fire-and-forget: this runs from inside game loops, and a
+   * dropped frame of spectator detail matters far less than stalling the game
+   * that is producing it.
+   */
+  private lastLivePush = 0;
+  public pushLiveState(
+    roomId: string,
+    playerId: string,
+    state: Omit<LiveMiniGameState, 'playerId' | 'game' | 'at'>,
+    minIntervalMs = 700
+  ): void {
+    const now = Date.now();
+    if (now - this.lastLivePush < minIntervalMs) return;
+    this.lastLivePush = now;
+
+    void fetch(`/api/room/${roomId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'push_live_state', playerId, state }),
+    }).catch(() => {
+      /* spectator detail is optional; never surface this */
+    });
   }
 
   public buyPowerup(roomId: string, playerId: string, powerupId: string) {

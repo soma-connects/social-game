@@ -12,7 +12,7 @@ import {
   Gavel,
 } from 'lucide-react';
 import { ChallengeWord, Player, RoomState } from '@/lib/types';
-import { getRandomMathProblem, LANGUAGE_DECKS, PIDGIN_FEEDBACK } from '@/lib/gameContent';
+import { LANGUAGE_DECKS, PIDGIN_FEEDBACK } from '@/lib/gameContent';
 import { audioSFX } from '@/lib/audioFeedback';
 import {
   speechEngine,
@@ -90,17 +90,15 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
       return;
     }
 
-    if (room.mathEnabled && Math.random() < 0.35) {
-      setChallenge(getRandomMathProblem());
-      return;
-    }
-
-    const availableLangs = room.selectedLanguages.length > 0 ? room.selectedLanguages : ['hausa', 'yoruba', 'igbo'];
+    // Only languages we actually have a deck for — a selection can still name
+    // one that has been parked (Hausa, Yoruba) or has no deck at all.
+    const playable = room.selectedLanguages.filter((lang) => LANGUAGE_DECKS[lang]?.length);
+    const availableLangs = playable.length > 0 ? playable : ['igbo', 'pidgin'];
     const chosenLang = availableLangs[Math.floor(Math.random() * availableLangs.length)];
-    const deck = LANGUAGE_DECKS[chosenLang] || LANGUAGE_DECKS.hausa;
+    const deck = LANGUAGE_DECKS[chosenLang] ?? LANGUAGE_DECKS.igbo;
     setChallenge(deck[Math.floor(Math.random() * deck.length)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room.roomId, room.mathEnabled]);
+  }, [room.roomId]);
 
   // New turn: reset the arena completely.
   useEffect(() => {
@@ -208,6 +206,28 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
       audioSFX.playTimerTick(next <= 3);
     }, 1000);
   };
+
+  // Keep the room in the loop — spectators see the prompt and the transcript as
+  // it lands, so they can react to the attempt rather than to a waiting screen.
+  useEffect(() => {
+    if (!challenge) return;
+    roomStore.pushLiveState(room.roomId, activePlayer.id, {
+      prompt: challenge.word,
+      detail: challenge.phonetic ?? challenge.translation,
+      progress: 1 - Math.max(0, timeLeft) / room.turnTimeLimit,
+      status:
+        status === 'matched'
+          ? 'GOT IT!'
+          : status === 'failed'
+          ? 'Missed it'
+          : transcript
+          ? `heard: "${transcript}"`
+          : status === 'listening'
+          ? 'listening…'
+          : 'about to start',
+      good: status === 'matched' ? true : status === 'failed' ? false : undefined,
+    });
+  }, [challenge, transcript, status, timeLeft, room.roomId, room.turnTimeLimit, activePlayer.id]);
 
   const timerPercentage = Math.round((Math.max(0, timeLeft) / room.turnTimeLimit) * 100);
   const sttUnavailable = caps !== null && (!caps.hasSpeechRecognition || !caps.secureContext);

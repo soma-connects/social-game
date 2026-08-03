@@ -5,6 +5,8 @@ import {
   DEFAULT_TURN_SECONDS,
   JUDGE_PASS_BONUS,
   MAX_PLAYERS,
+  ALL_MINI_GAMES,
+  MINIGAME_ICONS,
   MINIGAME_LABELS,
   REACTION_POINTS,
   TOTAL_TILES,
@@ -13,6 +15,7 @@ import {
   describePerformance,
   getShopItem,
   getTeam,
+  miniGamePhase,
   performanceToSteps,
   pickMiniGame,
   resolveTile,
@@ -149,7 +152,12 @@ function unstickPhase(room: RoomState): void {
   if (live.length === 0 || room.phase === 'lobby' || room.phase === 'game_over') return;
 
   // Mid mini-game: if the performer is gone, skip their turn.
-  if (room.phase === 'qualifying_voice' || room.phase === 'pitch_bird' || room.phase === 'roast_intermission') {
+  if (
+    room.phase === 'qualifying_voice' ||
+    room.phase === 'pitch_bird' ||
+    room.phase === 'solfege' ||
+    room.phase === 'roast_intermission'
+  ) {
     const performer = room.players[room.activePlayerIndex];
     if (!performer || performer.connected === false) {
       advanceRoundOrOpenShop(room);
@@ -186,15 +194,17 @@ function advanceRoundOrOpenShop(room: RoomState): void {
   if (next) {
     room.activePlayerIndex = room.players.findIndex((p) => p.id === next.id);
     room.turnResult = null;
-    const game = pickMiniGame(room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']);
+    const game = pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES);
     room.currentMiniGame = game;
-    room.phase = game === 'pitch_bird' ? 'pitch_bird' : 'qualifying_voice';
+    room.phase = miniGamePhase(game);
     room.socialRound = { targetPlayerId: next.id, reactions: [], judgeVotes: [] };
-    pushEvent(room, `${game === 'pitch_bird' ? '🐦' : '🎙️'} ${next.name} is up — ${MINIGAME_LABELS[game]}`, 'system');
+    room.liveState = null;
+    pushEvent(room, `${MINIGAME_ICONS[game]} ${next.name} is up — ${MINIGAME_LABELS[game]}`, 'system');
     return;
   }
 
   // Everyone has played: the whole room shops together.
+  room.liveState = null;
   room.phase = 'powerup_shop';
   room.shopReady = [];
   pushEvent(room, `🛒 Round ${room.roundNumber ?? 1}: everyone to the buff shop`, 'system');
@@ -260,8 +270,10 @@ function createRoom(roomId: string, hostName: string): { room: RoomState; player
     phase: 'lobby',
     players: [host],
     activePlayerIndex: 0,
-    selectedLanguages: ['hausa', 'igbo', 'yoruba', 'pidgin'],
-    mathEnabled: true,
+    // Hausa and Yoruba are parked until there is a recogniser that can hear
+    // them; math rounds are gone — this is a voice game, not a quiz.
+    selectedLanguages: ['igbo', 'pidgin'],
+    mathEnabled: false,
     trapWords: [],
     currentChallenge: null,
     turnTimeLimit: DEFAULT_TURN_SECONDS,
@@ -269,7 +281,7 @@ function createRoom(roomId: string, hostName: string): { room: RoomState; player
     winner: null,
     theme: 'forest',
     events: [],
-    enabledMiniGames: ['voice_arena', 'pitch_bird'],
+    enabledMiniGames: ALL_MINI_GAMES,
     currentMiniGame: 'voice_arena',
     turnResult: null,
     socialRound: null,
@@ -443,6 +455,26 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       return NextResponse.json({ room: writeRoom(room) });
     }
 
+    /** Live glimpse of the performer's attempt, for everyone else to watch. */
+    case 'push_live_state': {
+      const active = room.players[room.activePlayerIndex];
+      if (!active || active.id !== body.playerId) {
+        return NextResponse.json(
+          { error: 'Only the active player reports live state' },
+          { status: 403 }
+        );
+      }
+      room.liveState = {
+        ...(body.state ?? {}),
+        playerId: active.id,
+        game: room.currentMiniGame ?? 'voice_arena',
+        at: Date.now(),
+      };
+      // Not an event-worthy change — write without pushing to the feed.
+      writeRoom(room);
+      return NextResponse.json({ ok: true });
+    }
+
     case 'add_judge_vote': {
       const voter = room.players.find((p) => p.id === body.voterId);
       const target = room.players.find((p) => p.id === body.targetPlayerId);
@@ -482,10 +514,11 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       return NextResponse.json({ room: writeRoom(room) });
     }
 
-    // Both mini-games finish through here. The score is banked as points AND
+    // Every mini-game finishes through here. The score is banked as points AND
     // converted into the movement the player earned for the board.
     case 'complete_voice_turn':
-    case 'complete_pitch_bird': {
+    case 'complete_pitch_bird':
+    case 'complete_solfege': {
       const active = room.players[room.activePlayerIndex];
       if (!active) return NextResponse.json({ error: 'No active player' }, { status: 409 });
 
@@ -513,7 +546,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
 
       pushEvent(
         room,
-        `${game === 'pitch_bird' ? '🐦' : '🎙️'} ${active.name} scored ${points} in ${MINIGAME_LABELS[game]} → ${steps} step${steps === 1 ? '' : 's'}`,
+        `${MINIGAME_ICONS[game]} ${active.name} scored ${points} in ${MINIGAME_LABELS[game]} → ${steps} step${steps === 1 ? '' : 's'}`,
         points > 0 ? 'point' : 'debuff'
       );
 
@@ -726,7 +759,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
 
     case 'update_minigames': {
       const games = Array.isArray(body.miniGames) ? (body.miniGames as MiniGameId[]) : null;
-      const valid = games?.filter((g) => g === 'voice_arena' || g === 'pitch_bird') ?? [];
+      const valid = games?.filter((g) => ALL_MINI_GAMES.includes(g)) ?? [];
       if (valid.length === 0) {
         return NextResponse.json({ error: 'Enable at least one mini-game' }, { status: 400 });
       }

@@ -9,6 +9,7 @@ import MapRenderer from '@/components/MapRenderer';
 import RoomLobby from '@/components/RoomLobby';
 import VoiceGameController from '@/components/VoiceGameController';
 import PitchBirdCanvas from '@/components/PitchBirdCanvas';
+import SolfegeGame from '@/components/SolfegeGame';
 import PowerupShop from '@/components/PowerupShop';
 import RoadmapBoard from '@/components/RoadmapBoard';
 import TrapWordPicker from '@/components/TrapWordPicker';
@@ -16,6 +17,7 @@ import PeerReviewDareModal from '@/components/PeerReviewDareModal';
 import AvatarIllustration from '@/components/AvatarIllustration';
 import VoiceCallBar from '@/components/VoiceCallBar';
 import SocialVoicePanel from '@/components/SocialVoicePanel';
+import SpectatorView from '@/components/SpectatorView';
 import RoastIntermission from '@/components/RoastIntermission';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
@@ -77,7 +79,8 @@ export default function GameRoomPage() {
   const myPlayerId = roomStore.getMyPlayerId();
   const performer = room?.players[room.activePlayerIndex] ?? null;
   const isPerformer = !!performer && performer.id === myPlayerId;
-  const isAttemptPhase = room?.phase === 'qualifying_voice' || room?.phase === 'pitch_bird';
+  const isAttemptPhase =
+    room?.phase === 'qualifying_voice' || room?.phase === 'pitch_bird' || room?.phase === 'solfege';
 
   const [captureStream, setCaptureStream] = useState<MediaStream | null>(null);
 
@@ -334,6 +337,11 @@ export default function GameRoomPage() {
             autoMute={isAttemptPhase && !isMyTurn}
             // Nobody joins or leaves the call mid-attempt; shrink it out of the way.
             compact={isAttemptPhase}
+            // Connect as soon as there is somebody to talk to — including in
+            // the lobby, which is exactly when people are waiting around and
+            // want to chat. Gating this on the match having started left the
+            // room silent during the part where they are just hanging out.
+            autoJoin={room.players.length >= 2}
           />
 
           {room.phase === 'lobby' && <RoomLobby room={room} myPlayer={myPlayer} onStartGame={handleStartMatch} />}
@@ -348,7 +356,11 @@ export default function GameRoomPage() {
                   onCompleteTurn={handleMiniGameComplete('voice_arena')}
                 />
               ) : (
-                <WaitingPanel activePlayer={activePlayer} label="is in the Voice Arena" />
+                <SpectatorView
+                  activePlayer={activePlayer}
+                  live={room.liveState ?? null}
+                  label="is in the Voice Arena"
+                />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
@@ -359,9 +371,17 @@ export default function GameRoomPage() {
           {room.phase === 'pitch_bird' && (
             <div className="space-y-6">
               {isMyTurn ? (
-                <PitchBirdCanvas player={activePlayer} onComplete={handleMiniGameComplete('pitch_bird')} />
+                <PitchBirdCanvas
+                  player={activePlayer}
+                  roomId={roomId}
+                  onComplete={handleMiniGameComplete('pitch_bird')}
+                />
               ) : (
-                <WaitingPanel activePlayer={activePlayer} label="is flying in PitchBird 🐦" />
+                <SpectatorView
+                  activePlayer={activePlayer}
+                  live={room.liveState ?? null}
+                  label="is flying in PitchBird 🐦"
+                />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
@@ -378,6 +398,27 @@ export default function GameRoomPage() {
                 replayClip={replayClip}
                 onFinishRoast={handleFinishRoast}
               />
+              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+            </div>
+          )}
+
+          {/* Step 1 — qualifying mini-game (Karaoke / solfège) */}
+          {room.phase === 'solfege' && (
+            <div className="space-y-6">
+              {isMyTurn ? (
+                <SolfegeGame
+                  player={activePlayer}
+                  roomId={roomId}
+                  onComplete={handleMiniGameComplete('solfege')}
+                />
+              ) : (
+                <SpectatorView
+                  activePlayer={activePlayer}
+                  live={room.liveState ?? null}
+                  label="is on the karaoke mic 🎵"
+                />
+              )}
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
             </div>
           )}

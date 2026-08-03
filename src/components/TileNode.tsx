@@ -2,20 +2,18 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { MapTheme, Player, TileNodeType } from '@/lib/types';
+import { MapTheme, TileNodeType } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
-import AvatarIllustration from './AvatarIllustration';
 
 interface TileNodeProps {
   index: number;
   nodeType: TileNodeType;
   theme: MapTheme;
-  playersOnTile: Player[];
   isFinish?: boolean;
   onClick?: () => void;
 }
 
-export default function TileNode({ index, nodeType, theme, playersOnTile, isFinish = false, onClick }: TileNodeProps) {
+export default function TileNode({ index, nodeType, theme, isFinish = false, onClick }: TileNodeProps) {
   const themeConfig = THEMES[theme] || THEMES.forest;
   const nodeStyle = themeConfig.nodeColors[nodeType] || themeConfig.nodeColors.normal;
 
@@ -40,21 +38,12 @@ export default function TileNode({ index, nodeType, theme, playersOnTile, isFini
         {isFinish ? '🏆' : nodeStyle.icon}
       </span>
 
-      {/* Player Tokens Container */}
-      {playersOnTile.length > 0 && (
-        <div className="absolute -bottom-2 flex gap-0.5 z-20">
-          {playersOnTile.map((p) => (
-            <motion.div
-              key={p.id}
-              initial={{ scale: 0, y: -20 }}
-              animate={{ scale: 1, y: 0 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-            >
-              <AvatarIllustration avatar={p.avatar} size="sm" className="shadow-2xl border-2 border-partyYellow" />
-            </motion.div>
-          ))}
-        </div>
-      )}
+      {/*
+        Player avatars are deliberately NOT drawn here. MapRenderer already
+        places a sliding token at this node's coordinates — one that springs
+        between tiles and carries the TURN badge. Drawing them in both places
+        put two copies of every player on the board.
+      */}
     </motion.div>
   );
 }

@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 
-const SYSTEM_PROMPT = `You are the AI Game Master for "Voice Party", a fast-paced multiplayer voice party game with vibrant Nigerian & global cultural vibes.
+const SYSTEM_PROMPT = `You are the AI Game Master for "Voice Party", a high-energy multiplayer voice gaming platform.
 
 YOUR ROLE & PERSONALITY:
-- You are a funny, energetic, encouraging, fast-paced party host.
-- Speak with high energy, celebratory humor, and light Pidgin/Naija flavor (e.g., "Oya", "No wahala", "Clear your throat sharp sharp!").
+- You are a witty, charismatic, energetic, and encouraging party host.
+- Speak in smooth, natural, clever English with punchy humor.
+- DO NOT force unnatural slang, awkward tropes, or fake accents (avoid forcing "yam", "Oya", or cliché slang unless completely natural).
 - Keep ALL responses under 2 short sentences (5-8 seconds when spoken aloud).
-- Never replace players, never insult players, and keep topics lighthearted and hilarious.
+- Never replace players, never insult players, and keep prompts fun, clever, and engaging.
 `;
 
 export async function POST(req: Request) {
@@ -17,19 +18,19 @@ export async function POST(req: Request) {
     if (!apiKey) {
       return NextResponse.json({
         success: false,
-        text: `🔥 Yo ${playerName || 'family'}! Step up to the mic and show us what you've got!`,
+        text: `🔥 Welcome ${playerName || 'everyone'}! Step up to the mic and show us what you've got!`,
       });
     }
 
     let promptText = '';
     if (action === 'welcome') {
-      promptText = 'Generate a 1-sentence explosive welcome line for players starting a new Voice Party session!';
+      promptText = 'Generate a 1-sentence energetic welcome line for players starting a new Voice Party session!';
     } else if (action === 'announce_turn') {
       promptText = `Announce that it is ${playerName}'s turn to take the mic in 1 high-energy sentence!`;
     } else if (action === 'challenge') {
-      promptText = `Generate a hilarious, creative 1-sentence party challenge or dare for player ${playerName || 'the active player'}! (e.g. dramatic Nollywood line, quick debate, or funny pitch challenge).`;
+      promptText = `Generate a witty, creative 1-sentence voice challenge or dare for player ${playerName || 'the active player'}! (e.g. dramatic movie line, quick debate topic, or fun impression).`;
     } else if (action === 'roast') {
-      promptText = `Deliver a lighthearted 1-sentence funny commentary on ${playerName}'s mini-game score!`;
+      promptText = `Deliver a lighthearted, clever 1-sentence funny commentary on ${playerName}'s mini-game score!`;
     } else {
       promptText = gameContext || `Give a short 1-sentence party host commentary for ${playerName || 'the group'}!`;
     }
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
     }
 
     const data = await response.json();
-    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || `🔥 Oya ${playerName || 'family'}! Clear your throat and take the mic!`;
+    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || `🔥 Welcome ${playerName || 'everyone'}! Take the mic and show your skills!`;
 
     return NextResponse.json({ success: true, text: generatedText });
   } catch (error) {

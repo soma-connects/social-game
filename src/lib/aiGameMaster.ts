@@ -46,13 +46,13 @@ export const AI_PROMPT_POOLS: AiHostPrompt[] = [
   { id: 'db3', category: 'debate', tone: 'silly', text: 'DEBATE: Is a hot dog a sandwich? Settle the debate right now!' },
 
   // Ice Breakers
-  { id: 'ib1', category: 'icebreaker', tone: 'personal', text: 'If you could only eat one Nigerian dish for the rest of your life, what is it?' },
+  { id: 'ib1', category: 'icebreaker', tone: 'personal', text: 'If you could only eat one meal for the rest of your life, what would it be?' },
   { id: 'ib2', category: 'icebreaker', tone: 'silly', text: 'What is the most ridiculous thing you bought because you were bored?' },
   { id: 'ib3', category: 'icebreaker', tone: 'personal', text: 'What song immediately gets you on the dance floor no matter where you are?' },
 
   // Personality Challenge
-  { id: 'pc1', category: 'personality', tone: 'energetic', text: 'Do your best Nollywood dramatic crying scene! Give it 100% passion!' },
-  { id: 'pc2', category: 'personality', tone: 'silly', text: 'Channel an angry market woman haggling for pepper. Oya sell your market!' },
+  { id: 'pc1', category: 'personality', tone: 'energetic', text: 'Do your most dramatic Hollywood movie confession line with 100% passion!' },
+  { id: 'pc2', category: 'personality', tone: 'silly', text: 'Imitate an over-the-top auctioneer trying to sell a plain bottle of water!' },
   { id: 'pc3', category: 'personality', tone: 'energetic', text: 'Give a 10-second fast-talk sports commentary on someone taking a sip of water!' },
 ];
 

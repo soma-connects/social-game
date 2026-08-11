@@ -30,10 +30,11 @@ export default function RightSidebar({ activePlayer, myPlayer, events, onUsePowe
   // Counts come straight from the inventory. The old version defaulted the boost
   // to 1 even when the player had none, so the button offered a powerup the
   // server would reject.
-  const powerups: PowerupItem[] = POWERUP_CATALOGUE.map((item) => ({
+  // Filter to only items the active player actually owns (count > 0)
+  const ownedPowerups: PowerupItem[] = POWERUP_CATALOGUE.map((item) => ({
     ...item,
     count: activePlayer.inventory.filter((i) => i === item.id).length,
-  }));
+  })).filter((p) => p.count > 0);
 
   return (
     <aside className="hidden lg:block w-80 glass-card rounded-3xl p-5 border border-white/15 space-y-6 backdrop-blur-xl bg-slate-900/70 shadow-2xl shrink-0">
@@ -47,14 +48,17 @@ export default function RightSidebar({ activePlayer, myPlayer, events, onUsePowe
           </span>
         </div>
 
-        <div className="grid grid-cols-1 gap-2">
-          {powerups.map((p) => (
-            <PowerupCard key={p.id} powerup={p} disabled={!isMyTurn} onUse={() => onUsePowerup(p.id)} />
-          ))}
-        </div>
-
-        {!isMyTurn && (
-          <p className="text-[10px] text-gray-400 text-center">Powerups unlock on your own turn.</p>
+        {ownedPowerups.length > 0 ? (
+          <div className="grid grid-cols-1 gap-2">
+            {ownedPowerups.map((p) => (
+              <PowerupCard key={p.id} powerup={p} disabled={!isMyTurn} onUse={() => onUsePowerup(p.id)} />
+            ))}
+          </div>
+        ) : (
+          <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-center space-y-1">
+            <p className="text-xs font-bold text-gray-300">Inventory Empty</p>
+            <p className="text-[10px] text-gray-400">Buy powerups in the shop after your turn!</p>
+          </div>
         )}
       </div>
 

@@ -52,9 +52,9 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden bg-partyDark">
-      {/* Ambient Arcade Neon Glow Blobs */}
-      <div className="absolute top-1/4 left-1/10 w-80 h-80 bg-purple-600/30 blur-3xl rounded-full pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/10 w-96 h-96 bg-partyPink/25 blur-3xl rounded-full pointer-events-none" />
+      {/* Ambient Outer Space Cosmic Blobs */}
+      <div className="absolute top-1/4 left-1/10 w-80 h-80 bg-cyan-500/20 blur-3xl rounded-full pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/10 w-96 h-96 bg-partyYellow/15 blur-3xl rounded-full pointer-events-none" />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/15 blur-3xl rounded-full pointer-events-none" />
 
       {/* Main Container */}
@@ -125,7 +125,7 @@ export default function HomePage() {
             <button
               onClick={handleCreateRoom}
               disabled={busy}
-              className="w-full bg-gradient-to-r from-partyPink via-partyPurple to-terracotta text-white font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all transform hover:scale-[1.03] active:scale-95 disabled:opacity-50 disabled:hover:scale-100 shadow-2xl glow-pink"
+              className="w-full bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all transform hover:scale-[1.03] active:scale-95 disabled:opacity-50 disabled:hover:scale-100 shadow-2xl glow-yellow"
             >
               <Play className="w-5 h-5 fill-current" />
               <span>{busy ? 'WORKING…' : 'CREATE NEW ROOM'}</span>

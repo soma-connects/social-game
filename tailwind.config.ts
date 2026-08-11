@@ -11,16 +11,16 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
-        partyYellow: "#FFD000",
-        partyPink: "#FF2A85",
+        partyYellow: "#FFD166",
+        partyPink: "#FF4757",
         partyCyan: "#00F0FF",
-        partyPurple: "#8A2BE2",
-        partyGreen: "#00FF66",
-        partyDark: "#0D0F1D",
-        partyCard: "#161B33",
-        // Used all over the gradients and borders but was never defined here, so
-        // every `*-terracotta` class silently rendered as nothing.
+        partyPurple: "#00F0FF", // Replaced AI generic purple with Cosmic Cyan
+        partyGreen: "#10B981",
+        partyDark: "#050814",
+        partyCard: "#0B132B",
         terracotta: "#FF5722",
+        cosmicVoid: "#050814",
+        cosmicCard: "#0B132B",
       },
       scale: {
         '102': '1.02',

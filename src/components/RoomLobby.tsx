@@ -16,6 +16,8 @@ import {
   X,
   Swords,
   Scale,
+  Bot,
+  Settings,
 } from 'lucide-react';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
@@ -51,6 +53,8 @@ export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProp
   const [newPlayerName, setNewPlayerName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
+  const [activeMode, setActiveMode] = useState<'board' | 'karaoke' | 'hangout' | 'ai_master'>('board');
+  const [showCustomDecks, setShowCustomDecks] = useState(false);
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
   );
@@ -195,7 +199,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProp
             <button
               type="button"
               onClick={() => setShowAvatarModal(true)}
-              className="bg-partyPurple hover:bg-purple-600 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-md active:scale-95 border border-partyPink/40"
+              className="bg-partyCyan/20 hover:bg-partyCyan/35 text-partyCyan font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-md active:scale-95 border border-partyCyan/40"
             >
               <Shirt className="w-4 h-4 text-partyYellow" />
               <span>CHANGE AVATAR</span>
@@ -344,182 +348,283 @@ export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProp
           )}
         </div>
 
-        {/* App Feature Categories Hub */}
-        <div className="glass-card rounded-3xl p-6 space-y-6 backdrop-blur-xl bg-slate-900/60 border border-white/20">
+        {/* Cosmic App Feature Mode Selector Hub */}
+        <div className="glass-card rounded-3xl p-6 space-y-6 backdrop-blur-xl bg-slate-900/80 border border-partyCyan/30 shadow-2xl">
           <div className="space-y-2">
             <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
               <Gamepad2 className="w-5 h-5 text-partyYellow" />
-              GAME MODES & CATEGORIES
+              CHOOSE APP GAME MODE
             </h3>
-            <p className="text-xs text-gray-400">Select active party mode or customize game decks</p>
+            <p className="text-xs text-gray-300">Tap a mode to select what you want to play</p>
 
-            <div className="grid grid-cols-3 gap-2 pt-2">
-              <div className="p-3 rounded-2xl bg-partyPurple/40 border border-partyCyan text-center space-y-1">
-                <span className="text-xl block">🎲</span>
-                <span className="font-black text-xs text-white block">BOARD GAME</span>
-                <span className="text-[9px] text-partyCyan block">Roadmap & Traps</span>
-              </div>
-              <div className="p-3 rounded-2xl bg-partyPink/20 border border-partyPink/50 text-center space-y-1">
-                <span className="text-xl block">🎤</span>
-                <span className="font-black text-xs text-white block">KARAOKE ARCADE</span>
-                <span className="text-[9px] text-partyPink block">Pitch & Singing</span>
-              </div>
-              <div className="p-3 rounded-2xl bg-emerald-500/20 border border-emerald-500/50 text-center space-y-1">
-                <span className="text-xl block">🍻</span>
-                <span className="font-black text-xs text-white block">HANGOUT LOUNGE</span>
-                <span className="text-[9px] text-emerald-300 block">15s Roast & Soundboard</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between pt-2 border-t border-white/10">
-            <div>
-              <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
-                <Globe className="w-4 h-4 text-partyCyan" />
-                SPEED LANGUAGE DECKS
-              </h3>
-              <p className="text-xs text-gray-400">Tap pill buttons to pick active decks</p>
-            </div>
-            <span className="text-[10px] text-partyPink font-bold">MULTIPLE SELECT</span>
-          </div>
-
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
-            {LANGUAGES.map((lang) => {
-              const isSelected = selectedLangs.includes(lang.id);
-              return (
-                <button
-                  key={lang.id}
-                  onClick={() => toggleLang(lang.id)}
-                  className={`p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between ${
-                    isSelected
-                      ? 'bg-partyPurple/50 border-partyCyan text-white shadow-lg glow-cyan'
-                      : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">{lang.flag}</span>
-                    <span className="font-extrabold text-sm">{lang.name}</span>
-                  </div>
-                  {isSelected && <span className="w-2.5 h-2.5 rounded-full bg-partyCyan animate-pulse" />}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Crews — everyone still performs solo, they just perform for a side */}
-          <div className="space-y-3 pt-1 border-t border-white/10">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
-                  <Swords className="w-4 h-4 text-partyPink" /> TEAM MODE
-                </h4>
-                <p className="text-xs text-gray-400">
-                  Red Crew vs Blue Crew. You still perform alone — the other crew judges you.
-                </p>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+              {/* 1. Board Game Mode */}
               <button
-                onClick={() => roomStore.setTeamMode(room.roomId, !room.teamMode)}
-                className={`w-12 h-6 rounded-full transition-colors p-1 flex items-center shrink-0 ${
-                  room.teamMode ? 'bg-partyPink justify-end' : 'bg-gray-700 justify-start'
+                onClick={() => {
+                  setActiveMode('board');
+                  audioSFX.playChoiSuccess();
+                }}
+                className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-3.5 ${
+                  activeMode === 'board'
+                    ? 'bg-gradient-to-r from-cyan-950/80 via-slate-900/90 to-cyan-900/50 border-partyCyan text-white shadow-xl glow-cyan'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
                 }`}
-                aria-label="Toggle team mode"
               >
-                <div className="w-4 h-4 rounded-full bg-white shadow-md" />
+                <div className="text-3xl p-2.5 rounded-xl bg-partyCyan/15 border border-partyCyan/30 shrink-0">
+                  🎲
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm text-white flex items-center gap-1.5">
+                    BOARD GAME ROADMAP
+                    {activeMode === 'board' && (
+                      <span className="bg-partyCyan text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">
+                        SELECTED
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-gray-300 mt-1 leading-snug">
+                    Multiplayer 3D dice rolling, roadmap tiles, trap placement & powerup shop!
+                  </p>
+                </div>
+              </button>
+
+              {/* 2. Karaoke Arcade */}
+              <button
+                onClick={() => {
+                  setActiveMode('karaoke');
+                  audioSFX.playChoiSuccess();
+                }}
+                className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-3.5 ${
+                  activeMode === 'karaoke'
+                    ? 'bg-gradient-to-r from-pink-950/80 via-slate-900/90 to-pink-900/50 border-partyPink text-white shadow-xl'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                }`}
+              >
+                <div className="text-3xl p-2.5 rounded-xl bg-partyPink/15 border border-partyPink/30 shrink-0">
+                  🎤
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm text-white flex items-center gap-1.5">
+                    KARAOKE & PITCH ARCADE
+                    {activeMode === 'karaoke' && (
+                      <span className="bg-partyPink text-white text-[9px] px-2 py-0.5 rounded-full font-black">
+                        SELECTED
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-gray-300 mt-1 leading-snug">
+                    PitchBird flying 🐦, Solfege Note Matching 🎵 & Voice Arena fast-mic!
+                  </p>
+                </div>
+              </button>
+
+              {/* 3. Hangout Lounge */}
+              <button
+                onClick={() => {
+                  setActiveMode('hangout');
+                  audioSFX.playChoiSuccess();
+                }}
+                className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-3.5 ${
+                  activeMode === 'hangout'
+                    ? 'bg-gradient-to-r from-emerald-950/80 via-slate-900/90 to-emerald-900/50 border-emerald-400 text-white shadow-xl glow-emerald'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                }`}
+              >
+                <div className="text-3xl p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/30 shrink-0">
+                  🍻
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm text-white flex items-center gap-1.5">
+                    15s ROAST HANGOUT
+                    {activeMode === 'hangout' && (
+                      <span className="bg-emerald-500 text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">
+                        SELECTED
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-gray-300 mt-1 leading-snug">
+                    Open-mic voice lounge, party soundboard pad (Danfo Horn) & roast countdown!
+                  </p>
+                </div>
+              </button>
+
+              {/* 4. AI Game Master Mode */}
+              <button
+                onClick={() => {
+                  setActiveMode('ai_master');
+                  audioSFX.playChoiSuccess();
+                }}
+                className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-3.5 ${
+                  activeMode === 'ai_master'
+                    ? 'bg-gradient-to-r from-amber-950/80 via-slate-900/90 to-amber-900/50 border-partyYellow text-white shadow-xl glow-yellow'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                }`}
+              >
+                <div className="text-3xl p-2.5 rounded-xl bg-partyYellow/15 border border-partyYellow/30 shrink-0">
+                  🤖
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm text-white flex items-center gap-1.5">
+                    AI GAME MASTER MODE
+                    {activeMode === 'ai_master' && (
+                      <span className="bg-partyYellow text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">
+                        SELECTED
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-gray-300 mt-1 leading-snug">
+                    Live AI Host challenges, Truth or Bluff, Debate topics & voice trivia!
+                  </p>
+                </div>
               </button>
             </div>
+          </div>
 
-            {room.teamMode && (
-              <div className="space-y-3 animate-fadeIn">
-                <div className="grid grid-cols-2 gap-3">
-                  {TEAMS.map((team) => {
-                    const members = room.players.filter((p) => p.teamId === team.id);
-                    const iAmHere = myPlayer.teamId === team.id;
+          {/* Toggle Button for Custom Deck Settings (HIDDEN BY DEFAULT) */}
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-white/10">
+            <button
+              onClick={() => setShowCustomDecks(!showCustomDecks)}
+              className="glass-pill hover:bg-white/15 text-partyCyan font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 border border-partyCyan/30 transition-all w-full sm:w-auto justify-center"
+            >
+              <Settings className="w-4 h-4 text-partyYellow" />
+              <span>{showCustomDecks ? 'HIDE DECK SETTINGS ▲' : 'CUSTOMIZE GAME DECKS & TEAMS ▼'}</span>
+            </button>
+
+            <button
+              onClick={onStartGame}
+              className="w-full sm:w-auto flex-1 bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-base py-3.5 px-8 rounded-2xl flex items-center justify-center gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-yellow"
+            >
+              <Play className="w-5 h-5 fill-current" />
+              <span>LAUNCH MATCH NOW</span>
+            </button>
+          </div>
+
+          {/* HIDDEN UNTIL USER OPENS DECK SETTINGS */}
+          {showCustomDecks && (
+            <div className="space-y-6 pt-4 border-t border-white/10 animate-fadeIn">
+              {/* Language Decks */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-partyCyan" />
+                    SPEED LANGUAGE DECKS
+                  </h4>
+                  <span className="text-[10px] text-partyPink font-bold">MULTIPLE SELECT</span>
+                </div>
+                <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
+                  {LANGUAGES.map((lang) => {
+                    const isSelected = selectedLangs.includes(lang.id);
                     return (
                       <button
-                        key={team.id}
-                        onClick={() => roomStore.setTeam(room.roomId, myPlayer.id, team.id)}
-                        className={`p-3 rounded-2xl border text-left transition-all ${
-                          iAmHere ? 'border-2 shadow-lg' : 'border-white/10 bg-white/5 hover:border-white/30'
+                        key={lang.id}
+                        onClick={() => toggleLang(lang.id)}
+                        className={`p-3 rounded-2xl border text-left transition-all flex items-center justify-between ${
+                          isSelected
+                            ? 'bg-partyCyan/20 border-partyCyan text-white shadow-lg glow-cyan'
+                            : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
                         }`}
-                        style={
-                          iAmHere
-                            ? { borderColor: team.color, backgroundColor: `${team.color}22` }
-                            : undefined
-                        }
                       >
-                        <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
-                          {team.icon} {team.name}
-                          {iAmHere && (
-                            <span className="bg-white/20 text-[8px] px-1 rounded font-black">YOU</span>
-                          )}
-                        </span>
-                        <p className="text-[10px] text-gray-300 mt-1 truncate">
-                          {members.length > 0 ? members.map((m) => m.name).join(', ') : 'Empty — tap to join'}
-                        </p>
-                        <p className="text-[10px] font-black mt-0.5" style={{ color: team.color }}>
-                          {members.reduce((sum, m) => sum + m.score, 0)} pts
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">{lang.flag}</span>
+                          <span className="font-extrabold text-sm">{lang.name}</span>
+                        </div>
+                        {isSelected && <span className="w-2.5 h-2.5 rounded-full bg-partyCyan animate-pulse" />}
                       </button>
                     );
                   })}
                 </div>
-
-                <button
-                  onClick={() => roomStore.balanceTeams(room.roomId)}
-                  className="w-full glass-pill hover:bg-white/20 text-gray-200 font-bold text-[11px] py-2 rounded-xl border border-white/15 flex items-center justify-center gap-1.5"
-                >
-                  <Scale className="w-3.5 h-3.5" /> AUTO-BALANCE CREWS
-                </button>
               </div>
-            )}
-          </div>
 
-          {/* Which qualifying mini-games feed the board */}
-          <div className="space-y-3 pt-1 border-t border-white/10">
-            <div>
-              <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
-                <Gamepad2 className="w-4 h-4 text-partyYellow" /> QUALIFYING MINI-GAMES
-              </h4>
-              <p className="text-xs text-gray-400">
-                One is picked at random each turn. Your score sets how far you move and what you can buy.
-              </p>
-            </div>
-
-            <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
-              {MINI_GAMES.map((game) => {
-                const isSelected = selectedGames.includes(game.id);
-                return (
+              {/* Team Mode */}
+              <div className="space-y-3 pt-2 border-t border-white/10">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                      <Swords className="w-4 h-4 text-partyPink" /> TEAM MODE
+                    </h4>
+                    <p className="text-xs text-gray-400">
+                      Red Crew vs Blue Crew. You perform solo — the opposing team votes.
+                    </p>
+                  </div>
                   <button
-                    key={game.id}
-                    onClick={() => toggleMiniGame(game.id)}
-                    className={`p-3.5 rounded-2xl border text-left transition-all ${
-                      isSelected
-                        ? 'bg-partyPurple/50 border-partyYellow text-white shadow-lg'
-                        : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                    onClick={() => roomStore.setTeamMode(room.roomId, !room.teamMode)}
+                    className={`w-12 h-6 rounded-full transition-colors p-1 flex items-center shrink-0 ${
+                      room.teamMode ? 'bg-partyPink justify-end' : 'bg-gray-700 justify-start'
                     }`}
+                    aria-label="Toggle team mode"
                   >
-                    <span className="text-xl block">{game.icon}</span>
-                    <span className="font-extrabold text-sm block">{game.name}</span>
-                    <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{game.blurb}</span>
+                    <div className="w-4 h-4 rounded-full bg-white shadow-md" />
                   </button>
-                );
-              })}
-            </div>
-          </div>
+                </div>
 
-          {/* Start Game Action */}
-          <div className="pt-2">
-            <button
-              onClick={onStartGame}
-              className="w-full bg-gradient-to-r from-partyPink via-partyPurple to-partyCyan text-white font-black text-base py-4 rounded-2xl flex items-center justify-center gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-pink"
-            >
-              <Play className="w-6 h-6 fill-current" />
-              <span>START THE ROADMAP MATCH</span>
-            </button>
-            <p className="text-[11px] text-gray-400 text-center mt-2">
-              Each turn: mini-game → buy buffs → move on the board.
-            </p>
-          </div>
+                {room.teamMode && (
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    {TEAMS.map((team) => {
+                      const members = room.players.filter((p) => p.teamId === team.id);
+                      const iAmHere = myPlayer.teamId === team.id;
+                      return (
+                        <button
+                          key={team.id}
+                          onClick={() => roomStore.setTeam(room.roomId, myPlayer.id, team.id)}
+                          className={`p-3 rounded-2xl border text-left transition-all ${
+                            iAmHere ? 'border-2 shadow-lg' : 'border-white/10 bg-white/5 hover:border-white/30'
+                          }`}
+                          style={
+                            iAmHere
+                              ? { borderColor: team.color, backgroundColor: `${team.color}22` }
+                              : undefined
+                          }
+                        >
+                          <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                            {team.icon} {team.name}
+                            {iAmHere && (
+                              <span className="bg-white/20 text-[8px] px-1 rounded font-black">YOU</span>
+                            )}
+                          </span>
+                          <p className="text-[10px] text-gray-300 mt-1 truncate">
+                            {members.length > 0 ? members.map((m) => m.name).join(', ') : 'Empty — tap to join'}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Mini-Games List */}
+              <div className="space-y-3 pt-2 border-t border-white/10">
+                <div>
+                  <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                    <Gamepad2 className="w-4 h-4 text-partyYellow" /> QUALIFYING MINI-GAMES
+                  </h4>
+                  <p className="text-xs text-gray-400">
+                    Pick mini-games to include in random turn rotation.
+                  </p>
+                </div>
+
+                <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
+                  {MINI_GAMES.map((game) => {
+                    const isSelected = selectedGames.includes(game.id);
+                    return (
+                      <button
+                        key={game.id}
+                        onClick={() => toggleMiniGame(game.id)}
+                        className={`p-3.5 rounded-2xl border text-left transition-all ${
+                          isSelected
+                            ? 'bg-partyCyan/20 border-partyYellow text-white shadow-lg glow-cyan'
+                            : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                        }`}
+                      >
+                        <span className="text-xl block">{game.icon}</span>
+                        <span className="font-extrabold text-sm block">{game.name}</span>
+                        <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{game.blurb}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

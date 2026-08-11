@@ -69,7 +69,7 @@ export default function AiGameMasterBanner({ currentSpeech, onTriggerChallenge }
         <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
           <button
             onClick={handleRequestChallenge}
-            className="bg-gradient-to-r from-partyPink to-partyPurple hover:from-pink-600 hover:to-purple-700 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 border border-partyPink/40"
+            className="bg-gradient-to-r from-partyYellow via-terracotta to-partyPink hover:from-yellow-400 hover:to-pink-600 text-partyDark font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 border border-partyYellow/40"
           >
             <Zap className="w-3.5 h-3.5 text-partyYellow fill-current" />
             <span>AI CHALLENGE</span>

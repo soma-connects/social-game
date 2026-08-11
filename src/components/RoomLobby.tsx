@@ -141,38 +141,40 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8 space-y-8 animate-fadeIn relative">
+    <div className="max-w-5xl mx-auto px-2 sm:px-4 py-4 space-y-6 animate-fadeIn relative">
       {/* Ambient Glow Blobs */}
-      <div className="absolute top-10 left-10 w-72 h-72 bg-purple-600/25 blur-3xl rounded-full pointer-events-none" />
-      <div className="absolute bottom-10 right-10 w-80 h-80 bg-emerald-500/20 blur-3xl rounded-full pointer-events-none" />
+      <div className="absolute top-10 left-10 w-72 h-72 bg-purple-600/15 blur-3xl rounded-full pointer-events-none" />
+      <div className="absolute bottom-10 right-10 w-80 h-80 bg-emerald-500/15 blur-3xl rounded-full pointer-events-none" />
 
-      {/* Prominent WhatsApp Invite Banner */}
-      <div className="glass-card rounded-3xl p-6 sm:p-8 border border-emerald-400/40 relative overflow-hidden text-center sm:text-left flex flex-col sm:flex-row items-center justify-between gap-6 glow-emerald backdrop-blur-xl bg-slate-900/70">
-        <div className="space-y-3 z-10">
-          <div className="inline-flex items-center gap-2 bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-xs font-black tracking-wider border border-emerald-400/30">
-            <Sparkles className="w-3.5 h-3.5" /> WHATSAPP DIRECT INVITE
+      {/* Compact WhatsApp Direct Invite Banner */}
+      <div className="glass-card rounded-2xl p-3.5 sm:p-4 border border-emerald-400/30 relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-xl bg-black/30 shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-400/30 shrink-0">
+            <MessageCircle className="w-5 h-5 fill-current" />
           </div>
-          <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-            &quot;OYA JOIN MY GAME, <span className="text-partyYellow block sm:inline">MAKE I CLEAR YOU!&quot;</span>
-          </h2>
-          <p className="text-gray-300 text-sm max-w-xl">
-            Invite your crew directly via WhatsApp! Tap below to send room link and start the speed voice challenge!
-          </p>
+          <div>
+            <h3 className="font-extrabold text-sm sm:text-base text-white">
+              INVITE CREW TO PLAY
+            </h3>
+            <p className="text-gray-300 text-xs">
+              Send room code <span className="text-partyYellow font-mono font-bold">{room.roomId}</span> directly via WhatsApp
+            </p>
+          </div>
         </div>
 
         <button
           onClick={shareToWhatsApp}
-          className="bg-emerald-500 hover:bg-emerald-400 text-partyDark font-black text-base px-8 py-4 rounded-2xl flex items-center gap-3 transition-all transform hover:scale-105 shadow-2xl glow-emerald"
+          className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-partyDark font-black text-xs px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all transform hover:scale-105 shadow-lg shrink-0"
         >
-          <MessageCircle className="w-6 h-6 fill-current" />
+          <MessageCircle className="w-4 h-4 fill-current" />
           <span>SHARE TO WHATSAPP</span>
         </button>
       </div>
 
-      {/* Two-up only once the play column is genuinely wide enough for it. */}
-      <div className="grid grid-cols-1 2xl:grid-cols-2 gap-6 relative z-10">
+      {/* Two-up grid for Lounging Area & Mode Hub */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 relative z-10">
         {/* Player Lounging Area */}
-        <div className="glass-card rounded-3xl p-6 space-y-6 backdrop-blur-xl bg-slate-900/60 border border-white/20">
+        <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 backdrop-blur-xl bg-black/30 border border-white/10 shadow-2xl">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
@@ -350,7 +352,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
         </div>
 
         {/* Cosmic App Feature Mode Selector Hub */}
-        <div className="glass-card rounded-3xl p-6 space-y-6 backdrop-blur-xl bg-slate-900/80 border border-partyCyan/30 shadow-2xl">
+        <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 backdrop-blur-xl bg-black/30 border border-white/10 shadow-2xl">
           <div className="space-y-2">
             <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
               <Gamepad2 className="w-5 h-5 text-partyYellow" />
@@ -365,10 +367,10 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   setActiveMode('board');
                   audioSFX.playChoiSuccess();
                 }}
-                className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-3.5 ${
+                className={`p-3.5 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-3 ${
                   activeMode === 'board'
-                    ? 'bg-gradient-to-r from-cyan-950/80 via-slate-900/90 to-cyan-900/50 border-partyCyan text-white shadow-xl glow-cyan'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                    ? 'bg-cyan-950/40 border-partyCyan text-white shadow-xl glow-cyan'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
                 }`}
               >
                 <div className="text-3xl p-2.5 rounded-xl bg-partyCyan/15 border border-partyCyan/30 shrink-0">

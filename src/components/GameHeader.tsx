@@ -96,15 +96,7 @@ export default function GameHeader({
             <span className="hidden sm:inline">{isMicMuted ? 'MIC MUTED' : 'MIC ON'}</span>
           </button>
 
-          {onOpenTrapPicker && (
-            <button
-              onClick={onOpenTrapPicker}
-              className="bg-partyPurple hover:bg-purple-600 text-white font-extrabold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md active:scale-95"
-            >
-              <Zap className="w-3.5 h-3.5 text-partyYellow" />
-              <span className="hidden sm:inline">TRAP ROOM</span>
-            </button>
-          )}
+
 
           <button
             onClick={shareToWhatsApp}

@@ -81,6 +81,7 @@ export default function VoiceCallBar({
 
   const handleJoin = async () => {
     setJoining(true);
+    voiceChat.resumeAudio();
     await voiceChat.join(roomId, myPlayer.id, players.map((p) => p.id));
     setJoining(false);
   };

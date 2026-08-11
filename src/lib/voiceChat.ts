@@ -244,9 +244,13 @@ class VoiceChatManager {
   private createPeer(peerId: string): Peer {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
-    const audio = new Audio();
-    audio.autoplay = true;
-    audio.volume = this.remoteVolume;
+    const audio = typeof window !== 'undefined' ? new Audio() : ({} as HTMLAudioElement);
+    if (audio.style) {
+      audio.autoplay = true;
+      audio.volume = this.remoteVolume;
+      audio.style.display = 'none';
+      document.body.appendChild(audio);
+    }
 
     const peer: Peer = {
       id: peerId,
@@ -277,9 +281,12 @@ class VoiceChatManager {
       if (!stream) return;
       peer.stream = stream;
       audio.srcObject = stream;
-      // Autoplay can be refused until the page has been interacted with; the
-      // player has already clicked "join voice", so this normally succeeds.
-      void audio.play().catch(() => {});
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        void this.audioCtx.resume();
+      }
+      void audio.play().catch((err) => {
+        console.warn('Peer audio autoplay blocked by browser policy:', err);
+      });
       this.attachRemoteAnalyser(peer, stream);
     };
 
@@ -296,6 +303,17 @@ class VoiceChatManager {
     return peer;
   }
 
+  public resumeAudio(): void {
+    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      void this.audioCtx.resume();
+    }
+    this.peers.forEach((peer) => {
+      if (peer.audio && peer.audio.play) {
+        void peer.audio.play().catch(() => {});
+      }
+    });
+  }
+
   private destroyPeer(peer: Peer): void {
     peer.pc.onicecandidate = null;
     peer.pc.ontrack = null;
@@ -306,6 +324,9 @@ class VoiceChatManager {
       /* already closed */
     }
     peer.audio.srcObject = null;
+    if (peer.audio.parentNode) {
+      peer.audio.parentNode.removeChild(peer.audio);
+    }
     peer.analyser = null;
   }
 

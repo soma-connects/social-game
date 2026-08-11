@@ -3,39 +3,39 @@
 @tailwind utilities;
 
 :root {
-  --background: #050814;
+  --background: #0d1117;
   --foreground: #F8FAFC;
   --terracotta: #FF5722;
   --emerald: #10B981;
   --yellow: #FFD166;
-  --cyan: #00F0FF;
+  --cyan: #58A6FF;
 }
 
 body {
   color: var(--foreground);
-  background: #050814;
+  background: #0d1117;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   min-height: 100vh;
   overflow-x: hidden;
   position: relative;
 }
 
-/* Outer Space Cosmic Stardust & Nebula Environment */
+/* GitHub Dark Constellation Starfield & Grid Pattern */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.25;
+  opacity: 0.45;
   background-image: 
-    radial-gradient(circle at 50% 20%, rgba(0, 240, 255, 0.15), transparent 40%),
-    radial-gradient(circle at 80% 80%, rgba(255, 71, 87, 0.12), transparent 45%),
-    radial-gradient(circle at 10% 90%, rgba(255, 209, 102, 0.1), transparent 35%),
-    radial-gradient(rgba(255, 255, 255, 0.8) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 100% 100%, 40px 40px;
-  background-position: 0 0, 0 0, 0 0, 0 0;
-  animation: cosmicPulse 10s ease-in-out infinite alternate;
+    radial-gradient(circle at 50% 15%, rgba(88, 166, 255, 0.18), transparent 45%),
+    radial-gradient(circle at 85% 85%, rgba(187, 128, 255, 0.12), transparent 45%),
+    radial-gradient(rgba(240, 246, 252, 0.25) 1.2px, transparent 1.2px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 24px 24px, 48px 48px, 48px 48px;
+  background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
 }
 
 @keyframes cosmicPulse {

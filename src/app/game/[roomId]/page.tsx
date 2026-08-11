@@ -256,12 +256,24 @@ export default function GameRoomPage() {
   const currentTheme: MapTheme = room.theme || 'forest';
   const isMyTurn = activePlayer?.id === myPlayer.id;
 
-  // The turn loop is: mini-game → buff shop → move on the board.
-  // The mini-game is what earns both the points and the movement, so it always
-  // runs first and the board never deals out a random roll.
+  const [showGeminiMode, setShowGeminiMode] = useState(false);
+  const [comingSoonTitle, setComingSoonTitle] = useState<string | null>(null);
+
   const handleStartMatch = () => {
     audioSFX.playNollywoodBrass();
     roomStore.startMatch(roomId);
+  };
+
+  const handleSelectMode = (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master') => {
+    if (mode === 'board') {
+      handleStartMatch();
+    } else if (mode === 'ai_master') {
+      setShowGeminiMode(true);
+    } else if (mode === 'karaoke') {
+      setComingSoonTitle('🎤 Karaoke & Pitch Arcade Mode');
+    } else if (mode === 'hangout') {
+      setComingSoonTitle('🍻 15s Roast & Open-Mic Lounge Mode');
+    }
   };
 
   const handleMiniGameComplete = (game: MiniGameId) => (pointsEarned: number) => {
@@ -347,13 +359,40 @@ export default function GameRoomPage() {
             autoJoin={room.players.length >= 2}
           />
 
-          <AiGameMasterBanner />
+          {showGeminiMode && (
+            <GeminiAiMasterStage
+              room={room}
+              activePlayer={activePlayer}
+              myPlayer={myPlayer}
+              onExit={() => setShowGeminiMode(false)}
+            />
+          )}
+
+          {comingSoonTitle && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+              <div className="glass-card rounded-3xl p-6 sm:p-8 max-w-md w-full border border-partyYellow text-center space-y-4">
+                <div className="text-4xl">🚀</div>
+                <h3 className="text-xl font-black text-white">{comingSoonTitle}</h3>
+                <p className="text-xs text-gray-300">
+                  This dedicated mode feature is currently in active development for the next update. Launch Board Game or AI Master Mode to play right now!
+                </p>
+                <button
+                  onClick={() => setComingSoonTitle(null)}
+                  className="w-full bg-partyYellow text-partyDark font-black text-sm py-3.5 rounded-xl hover:bg-yellow-400 transition-all shadow-lg"
+                >
+                  BACK TO LOBBY
+                </button>
+              </div>
+            </div>
+          )}
 
           {room.phase === 'lobby' && (
-            <div className="space-y-6">
-              <GeminiAiMasterStage room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
-              <RoomLobby room={room} myPlayer={myPlayer} onStartGame={handleStartMatch} />
-            </div>
+            <RoomLobby
+              room={room}
+              myPlayer={myPlayer}
+              onStartGame={handleStartMatch}
+              onSelectMode={handleSelectMode}
+            />
           )}
 
           {/* Step 1 — qualifying mini-game (voice arena) */}

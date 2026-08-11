@@ -36,6 +36,7 @@ interface RoomLobbyProps {
   room: RoomState;
   myPlayer: Player;
   onStartGame: () => void;
+  onSelectMode?: (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master') => void;
 }
 
 const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
@@ -47,7 +48,7 @@ const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
   { id: 'korean', name: 'Korean', flag: '🇰🇷' },
 ];
 
-export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProps) {
+export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }: RoomLobbyProps) {
   const [selectedLangs, setSelectedLangs] = useState<LanguageCode[]>(room.selectedLanguages);
   const [mathEnabled, setMathEnabled] = useState(room.mathEnabled);
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -491,7 +492,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProp
             </button>
 
             <button
-              onClick={onStartGame}
+              onClick={() => (onSelectMode ? onSelectMode(activeMode) : onStartGame())}
               className="w-full sm:w-auto flex-1 bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-base py-3.5 px-8 rounded-2xl flex items-center justify-center gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-yellow"
             >
               <Play className="w-5 h-5 fill-current" />

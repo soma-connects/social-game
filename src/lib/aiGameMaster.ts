@@ -156,6 +156,30 @@ class AiGameMasterEngine {
     return this.speak(text);
   }
 
+  /** Async real-time Gemini LLM powered prompt generator */
+  public async fetchGeminiChallenge(playerName?: string): Promise<AiHostPrompt> {
+    try {
+      const res = await fetch('/api/ai-master', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'challenge', playerName }),
+      });
+      const data = await res.json();
+      if (data.success && data.text) {
+        const geminiPrompt: AiHostPrompt = {
+          id: `gemini_${Date.now()}`,
+          category: 'personality',
+          tone: 'energetic',
+          text: data.text,
+        };
+        return geminiPrompt;
+      }
+    } catch (e) {
+      console.error('Failed to fetch Gemini challenge:', e);
+    }
+    return this.getRandomChallenge();
+  }
+
   /** Get unused AI Challenge prompt (Spec §4.2 No-Repeat & §4.4 Weighting) */
   public getRandomChallenge(category?: string, excludePlayerId?: string): AiHostPrompt {
     let pool = AI_PROMPT_POOLS.filter((p) => !this.usedPromptIds.has(p.id));

@@ -17,6 +17,7 @@ import PeerReviewDareModal from '@/components/PeerReviewDareModal';
 import AvatarIllustration from '@/components/AvatarIllustration';
 import VoiceCallBar from '@/components/VoiceCallBar';
 import AiGameMasterBanner from '@/components/AiGameMasterBanner';
+import GeminiAiMasterStage from '@/components/GeminiAiMasterStage';
 import SocialVoicePanel from '@/components/SocialVoicePanel';
 import SpectatorView from '@/components/SpectatorView';
 import RoastIntermission from '@/components/RoastIntermission';
@@ -348,7 +349,12 @@ export default function GameRoomPage() {
 
           <AiGameMasterBanner />
 
-          {room.phase === 'lobby' && <RoomLobby room={room} myPlayer={myPlayer} onStartGame={handleStartMatch} />}
+          {room.phase === 'lobby' && (
+            <div className="space-y-6">
+              <GeminiAiMasterStage room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+              <RoomLobby room={room} myPlayer={myPlayer} onStartGame={handleStartMatch} />
+            </div>
+          )}
 
           {/* Step 1 — qualifying mini-game (voice arena) */}
           {room.phase === 'qualifying_voice' && (

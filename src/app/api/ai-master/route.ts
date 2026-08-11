@@ -1,0 +1,67 @@
+import { NextResponse } from 'next/server';
+
+const SYSTEM_PROMPT = `You are the AI Game Master for "Voice Party", a fast-paced multiplayer voice party game with vibrant Nigerian & global cultural vibes.
+
+YOUR ROLE & PERSONALITY:
+- You are a funny, energetic, encouraging, fast-paced party host.
+- Speak with high energy, celebratory humor, and light Pidgin/Naija flavor (e.g., "Oya", "No wahala", "Clear your throat sharp sharp!").
+- Keep ALL responses under 2 short sentences (5-8 seconds when spoken aloud).
+- Never replace players, never insult players, and keep topics lighthearted and hilarious.
+`;
+
+export async function POST(req: Request) {
+  try {
+    const { action, playerName, gameContext } = await req.json();
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return NextResponse.json({
+        success: false,
+        text: `🔥 Yo ${playerName || 'family'}! Step up to the mic and show us what you've got!`,
+      });
+    }
+
+    let promptText = '';
+    if (action === 'welcome') {
+      promptText = 'Generate a 1-sentence explosive welcome line for players starting a new Voice Party session!';
+    } else if (action === 'announce_turn') {
+      promptText = `Announce that it is ${playerName}'s turn to take the mic in 1 high-energy sentence!`;
+    } else if (action === 'challenge') {
+      promptText = `Generate a hilarious, creative 1-sentence party challenge or dare for player ${playerName || 'the active player'}! (e.g. dramatic Nollywood line, quick debate, or funny pitch challenge).`;
+    } else if (action === 'roast') {
+      promptText = `Deliver a lighthearted 1-sentence funny commentary on ${playerName}'s mini-game score!`;
+    } else {
+      promptText = gameContext || `Give a short 1-sentence party host commentary for ${playerName || 'the group'}!`;
+    }
+
+    // Call Gemini REST API
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: `${SYSTEM_PROMPT}\n\nTask: ${promptText}` }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Gemini API HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || `🔥 Oya ${playerName || 'family'}! Clear your throat and take the mic!`;
+
+    return NextResponse.json({ success: true, text: generatedText });
+  } catch (error) {
+    console.error('Gemini AI Master Error:', error);
+    return NextResponse.json({
+      success: false,
+      text: '🔥 Oya step up to the mic and show us your voice skills!',
+    });
+  }
+}

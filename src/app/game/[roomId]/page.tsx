@@ -53,6 +53,8 @@ export default function GameRoomPage() {
   const [showTrapPicker, setShowTrapPicker] = useState(false);
   const [showMobilePlayers, setShowMobilePlayers] = useState(false);
   const [showMobileFeed, setShowMobileFeed] = useState(false);
+  const [showGeminiMode, setShowGeminiMode] = useState(false);
+  const [comingSoonTitle, setComingSoonTitle] = useState<string | null>(null);
   const [activeDareTarget, setActiveDareTarget] = useState<Player | null>(null);
   const [guestNameInput, setGuestNameInput] = useState('');
   const [isJoining, setIsJoining] = useState(false);
@@ -255,9 +257,6 @@ export default function GameRoomPage() {
   const leaderPlayer = [...room.players].sort((a, b) => b.score - a.score)[0] || room.players[0];
   const currentTheme: MapTheme = room.theme || 'forest';
   const isMyTurn = activePlayer?.id === myPlayer.id;
-
-  const [showGeminiMode, setShowGeminiMode] = useState(false);
-  const [comingSoonTitle, setComingSoonTitle] = useState<string | null>(null);
 
   const handleStartMatch = () => {
     audioSFX.playNollywoodBrass();

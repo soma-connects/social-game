@@ -16,44 +16,50 @@ interface MapRendererProps {
   totalTiles?: number;
 }
 
-// Tile Index 0..19 mapped 1:1 to exact (x%, y%) coordinates on winding adventure path
+// Tile Index 0..23 mapped 1:1 to exact (x%, y%) coordinates on 24-node adventure path
 export const NODE_COORDINATES: { x: number; y: number }[] = [
-  { x: 10, y: 12 }, // Node 0 (Start)
-  { x: 28, y: 10 }, // Node 1
-  { x: 48, y: 14 }, // Node 2
-  { x: 68, y: 10 }, // Node 3 (Dare)
-  { x: 86, y: 16 }, // Node 4
-  { x: 88, y: 32 }, // Node 5 (Boost)
-  { x: 70, y: 38 }, // Node 6
-  { x: 50, y: 34 }, // Node 7 (Trap)
-  { x: 30, y: 38 }, // Node 8
-  { x: 12, y: 44 }, // Node 9
-  { x: 14, y: 60 }, // Node 10 (Boost)
-  { x: 32, y: 64 }, // Node 11 (Dare)
-  { x: 52, y: 60 }, // Node 12
-  { x: 72, y: 64 }, // Node 13
-  { x: 88, y: 72 }, // Node 14 (Trap)
-  { x: 74, y: 86 }, // Node 15 (Boost)
-  { x: 54, y: 84 }, // Node 16
-  { x: 34, y: 88 }, // Node 17 (Dare)
-  { x: 20, y: 82 }, // Node 18
-  { x: 8,  y: 86 }, // Node 19 (Finish Line)
+  { x: 8,  y: 10 }, // 0 (Start)
+  { x: 22, y: 10 }, // 1
+  { x: 38, y: 12 }, // 2
+  { x: 54, y: 10 }, // 3 (Split Route 1)
+  { x: 70, y: 12 }, // 4
+  { x: 86, y: 14 }, // 5
+  { x: 92, y: 30 }, // 6
+  { x: 76, y: 34 }, // 7
+  { x: 58, y: 32 }, // 8
+  { x: 40, y: 34 }, // 9
+  { x: 22, y: 32 }, // 10
+  { x: 8,  y: 44 }, // 11
+  { x: 14, y: 60 }, // 12 (Split Route 2)
+  { x: 32, y: 62 }, // 13
+  { x: 50, y: 58 }, // 14
+  { x: 68, y: 62 }, // 15
+  { x: 86, y: 68 }, // 16
+  { x: 90, y: 84 }, // 17 (Portal)
+  { x: 74, y: 88 }, // 18 (Volcano)
+  { x: 56, y: 84 }, // 19
+  { x: 38, y: 88 }, // 20
+  { x: 24, y: 82 }, // 21
+  { x: 14, y: 88 }, // 22
+  { x: 6,  y: 90 }, // 23 (Finish)
 ];
 
-// SVG Bezier path string intersecting nodes 0 through 19
+// SVG Bezier path string intersecting nodes 0 through 23
 const ROAD_SVG_PATH = `
-  M 10 12
-  C 20 8, 38 8, 48 14
-  C 58 20, 78 8, 86 16
-  C 94 24, 94 28, 88 32
-  C 80 36, 60 36, 50 34
-  C 40 32, 20 36, 12 44
+  M 8 10
+  C 18 8, 30 8, 38 12
+  C 48 16, 62 8, 70 12
+  C 80 16, 92 20, 92 30
+  C 92 38, 84 32, 76 34
+  C 68 36, 48 30, 40 34
+  C 30 38, 12 36, 8 44
   C 4 52, 6 56, 14 60
-  C 22 64, 42 58, 52 60
-  C 62 62, 80 60, 88 72
-  C 94 80, 82 86, 74 86
-  C 64 86, 44 82, 34 88
-  C 24 92, 14 84, 8 86
+  C 22 64, 42 56, 50 58
+  C 60 60, 78 60, 86 68
+  C 94 76, 96 82, 90 84
+  C 84 86, 64 88, 56 84
+  C 48 80, 30 90, 24 82
+  C 18 78, 10 88, 6 90
 `;
 
 export default function MapRenderer({ theme, players, activePlayerId, totalTiles = TOTAL_TILES }: MapRendererProps) {

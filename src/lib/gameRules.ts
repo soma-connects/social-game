@@ -8,7 +8,7 @@ import { MiniGameId, PowerupType, SocialReactionId, TileNodeType } from './types
  * mobile devices; going higher needs an SFU rather than a bigger number here.
  */
 export const MAX_PLAYERS = 6;
-export const TOTAL_TILES = 20;
+export const TOTAL_TILES = 24;
 export const DEFAULT_TURN_SECONDS = 8;
 
 /** Rooms with no activity for this long are swept from the server cache. */

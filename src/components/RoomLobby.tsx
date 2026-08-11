@@ -344,17 +344,43 @@ export default function RoomLobby({ room, myPlayer, onStartGame }: RoomLobbyProp
           )}
         </div>
 
-        {/* Category & Language Deck Selector */}
+        {/* App Feature Categories Hub */}
         <div className="glass-card rounded-3xl p-6 space-y-6 backdrop-blur-xl bg-slate-900/60 border border-white/20">
-          <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
+              <Gamepad2 className="w-5 h-5 text-partyYellow" />
+              GAME MODES & CATEGORIES
+            </h3>
+            <p className="text-xs text-gray-400">Select active party mode or customize game decks</p>
+
+            <div className="grid grid-cols-3 gap-2 pt-2">
+              <div className="p-3 rounded-2xl bg-partyPurple/40 border border-partyCyan text-center space-y-1">
+                <span className="text-xl block">🎲</span>
+                <span className="font-black text-xs text-white block">BOARD GAME</span>
+                <span className="text-[9px] text-partyCyan block">Roadmap & Traps</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-partyPink/20 border border-partyPink/50 text-center space-y-1">
+                <span className="text-xl block">🎤</span>
+                <span className="font-black text-xs text-white block">KARAOKE ARCADE</span>
+                <span className="text-[9px] text-partyPink block">Pitch & Singing</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-emerald-500/20 border border-emerald-500/50 text-center space-y-1">
+                <span className="text-xl block">🍻</span>
+                <span className="font-black text-xs text-white block">HANGOUT LOUNGE</span>
+                <span className="text-[9px] text-emerald-300 block">15s Roast & Soundboard</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t border-white/10">
             <div>
-              <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
-                <Globe className="w-5 h-5 text-partyCyan" />
+              <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
+                <Globe className="w-4 h-4 text-partyCyan" />
                 SPEED LANGUAGE DECKS
               </h3>
               <p className="text-xs text-gray-400">Tap pill buttons to pick active decks</p>
             </div>
-            <span className="text-xs text-partyPink font-bold">MULTIPLE SELECT</span>
+            <span className="text-[10px] text-partyPink font-bold">MULTIPLE SELECT</span>
           </div>
 
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">

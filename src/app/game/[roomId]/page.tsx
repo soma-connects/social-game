@@ -16,9 +16,11 @@ import TrapWordPicker from '@/components/TrapWordPicker';
 import PeerReviewDareModal from '@/components/PeerReviewDareModal';
 import AvatarIllustration from '@/components/AvatarIllustration';
 import VoiceCallBar from '@/components/VoiceCallBar';
+import AiGameMasterBanner from '@/components/AiGameMasterBanner';
 import SocialVoicePanel from '@/components/SocialVoicePanel';
 import SpectatorView from '@/components/SpectatorView';
 import RoastIntermission from '@/components/RoastIntermission';
+import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
@@ -343,6 +345,8 @@ export default function GameRoomPage() {
             // room silent during the part where they are just hanging out.
             autoJoin={room.players.length >= 2}
           />
+
+          <AiGameMasterBanner />
 
           {room.phase === 'lobby' && <RoomLobby room={room} myPlayer={myPlayer} onStartGame={handleStartMatch} />}
 

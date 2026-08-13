@@ -93,9 +93,9 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     // Only languages we actually have a deck for — a selection can still name
     // one that has been parked (Hausa, Yoruba) or has no deck at all.
     const playable = room.selectedLanguages.filter((lang) => LANGUAGE_DECKS[lang]?.length);
-    const availableLangs = playable.length > 0 ? playable : ['igbo', 'pidgin'];
+    const availableLangs = playable.length > 0 ? playable : ['english'];
     const chosenLang = availableLangs[Math.floor(Math.random() * availableLangs.length)];
-    const deck = LANGUAGE_DECKS[chosenLang] ?? LANGUAGE_DECKS.igbo;
+    const deck = LANGUAGE_DECKS[chosenLang] ?? LANGUAGE_DECKS.english;
     setChallenge(deck[Math.floor(Math.random() * deck.length)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.roomId]);

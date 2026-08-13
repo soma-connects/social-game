@@ -28,3 +28,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Source/reference art. Nothing under src/ references these, and they are large
+# originals rather than assets the app serves — keeping them out of the repo
+# stops several MB of unused PNGs shipping with every clone and deploy.
+# Delete this line if they are meant to be tracked.
+/public/designs

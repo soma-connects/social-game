@@ -97,24 +97,24 @@ export function usePitchDetection() {
       detector.minVolumeDecibels = -45;
 
       const inputBuffer = new Float32Array(analyser.fftSize);
-      const byteData = new Uint8Array(analyser.frequencyBinCount);
-
       const tick = () => {
         if (!activeRef.current || !analyserRef.current) return;
 
-        // 1. Calculate RMS volume (0-100)
-        analyserRef.current.getByteFrequencyData(byteData);
+        analyserRef.current.getFloatTimeDomainData(inputBuffer);
+
+        // 1. Calculate RMS volume (0-100) from the mic waveform. This tracks
+        // singing more reliably than averaging frequency bins.
         let sum = 0;
-        for (let i = 0; i < byteData.length; i++) sum += byteData[i];
-        const volume = Math.min(100, Math.round((sum / byteData.length / 90) * 100));
+        for (let i = 0; i < inputBuffer.length; i++) sum += inputBuffer[i] * inputBuffer[i];
+        const rms = Math.sqrt(sum / inputBuffer.length);
+        const volume = Math.min(100, Math.round(rms * 350));
 
         // 2. Pitchy McLeod Pitch Detection
-        analyserRef.current.getFloatTimeDomainData(inputBuffer);
         const [detectedPitch, clarity] = detector.findPitch(inputBuffer, ctx.sampleRate);
 
         let pitch = 0;
         // Require clear periodic vocal sound (clarity > 0.70 and min volume)
-        if (clarity > 0.70 && volume > 8 && detectedPitch >= 60 && detectedPitch <= 1000) {
+        if (clarity > 0.62 && volume > 6 && detectedPitch >= 60 && detectedPitch <= 1000) {
           historyRef.current.push(detectedPitch);
           if (historyRef.current.length > MEDIAN_WINDOW) historyRef.current.shift();
           pitch = median(historyRef.current);

@@ -141,18 +141,18 @@ export const PRESET_TRAPS: PresetTrap[] = [
  * vowel set come back as noise through an English model.
  */
 export const LANGUAGE_DECKS: Record<string, ChallengeWord[]> = {
-  igbo: [
-    { id: 'i1', word: 'Kedu ka idi', phonetic: 'Keh-doo kah ee-dee', translation: 'How are you?', language: 'igbo', type: 'language', difficulty: 'easy' },
-    { id: 'i2', word: 'Daalu', phonetic: 'Dah-ah-loo', translation: 'Thank you', language: 'igbo', type: 'language', difficulty: 'easy' },
-    { id: 'i3', word: 'Ututu oma', phonetic: 'Oo-too-too oh-mah', translation: 'Good morning', language: 'igbo', type: 'language', difficulty: 'easy' },
-    { id: 'i4', word: 'Nnoo', phonetic: 'N-noh-oh', translation: 'Welcome', language: 'igbo', type: 'language', difficulty: 'easy' },
-    { id: 'i5', word: 'Afame bu Chidi', phonetic: 'Ah-fah-meh boo Chee-dee', translation: 'My name is Chidi', language: 'igbo', type: 'language', difficulty: 'medium' },
+  english: [
+    { id: 'e1', word: 'She sells seashells by the seashore', phonetic: 'SH IY S EH L Z S IY SH EH L Z', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e2', word: 'How much wood would a woodchuck chuck', phonetic: 'H AW M AH CH W UH D W UH D', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e3', word: 'Peter Piper picked a peck of pickled peppers', phonetic: 'P IY T ER P AY P ER P IH K T', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e4', word: 'I saw a kitten eating chicken in the kitchen', phonetic: 'AY S AO AH K IH T AH N IY T IH NG', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
   ],
-  pidgin: [
-    { id: 'p1', word: 'How you dey', phonetic: 'How goo dey', translation: 'How are you doing?', language: 'pidgin', type: 'language', difficulty: 'easy' },
-    { id: 'p2', word: 'No wahala', phonetic: 'No wah-hah-lah', translation: 'No problem', language: 'pidgin', type: 'language', difficulty: 'easy' },
-    { id: 'p3', word: 'I dey kampe', phonetic: 'Ee dey kahm-peh', translation: 'I am doing great', language: 'pidgin', type: 'language', difficulty: 'easy' },
-    { id: 'p4', word: 'Oya na make we go', phonetic: 'Oh-yah nah mah-keh weh go', translation: 'Alright let us go', language: 'pidgin', type: 'language', difficulty: 'easy' },
+  spelling_bee: [
+    { id: 's1', word: 'ACCOMMODATE', phonetic: 'A C C O M M O D A T E', translation: 'To provide lodging or sufficient space for', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 's2', word: 'EMBARRASS', phonetic: 'E M B A R R A S S', translation: 'To cause someone to feel awkward or ashamed', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 's3', word: 'FLUORESCENT', phonetic: 'F L U O R E S C E N T', translation: 'Vividly colorful', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 's4', word: 'QUESTIONNAIRE', phonetic: 'Q U E S T I O N N A I R E', translation: 'A set of printed or written questions with a choice of answers', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 's5', word: 'RHYTHM', phonetic: 'R H Y T H M', translation: 'A strong, regular, repeated pattern of movement or sound', language: 'english', type: 'language', difficulty: 'medium' },
   ],
 };
 

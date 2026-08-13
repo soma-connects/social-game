@@ -118,7 +118,8 @@ export function useVoiceRecorder({ stream, active, maxMs = 15000 }: Options) {
         const blob = new Blob(parts, { type: mimeType || 'audio/webm' });
         // Silence still produces a container header, so ignore tiny blobs
         // rather than showing the room a replay button that plays nothing.
-        if (blob.size < 1200) return;
+        // Lowered to 200 because a 15s silent WebM or quick turn can be small.
+        if (blob.size < 200) return;
 
         revoke();
         const url = URL.createObjectURL(blob);

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { EventLog, RoomState } from '../types';
 import { ROOM_TTL_MS } from '../gameRules';
 
@@ -49,12 +50,23 @@ function sweep(): void {
   });
 }
 
-export function readRoom(roomId: string): RoomState | null {
-  sweep();
-  return rooms.get(roomId)?.room ?? null;
+import { adminDb } from '../firebase/server';
+
+/**
+ * Raised when a room was written by somebody else between our read and our
+ * write. The API route catches it and replays the action against fresh state.
+ */
+export class RoomConflictError extends Error {
+  constructor(roomId: string) {
+    super(`Room ${roomId} changed during the update`);
+    this.name = 'RoomConflictError';
+  }
 }
 
-export function writeRoom(room: RoomState): RoomState {
+/** Remembers the revision each request read, so writeRoom can detect a clash. */
+const revisionsRead = new WeakMap<RoomState, number>();
+
+function cacheLocally(room: RoomState): void {
   const existing = rooms.get(room.roomId);
   rooms.set(room.roomId, {
     room,
@@ -62,7 +74,110 @@ export function writeRoom(room: RoomState): RoomState {
     mailboxes: existing?.mailboxes ?? new Map(),
     voicePresence: existing?.voicePresence ?? new Map(),
   });
+}
+
+export async function readRoom(roomId: string): Promise<RoomState | null> {
+  sweep();
+  const doc = await adminDb.collection('rooms').doc(roomId).get();
+  if (!doc.exists) return null;
+
+  const room = doc.data() as RoomState;
+  // Tracked off to the side rather than on RoomState, so the revision never
+  // reaches the client or shows up in a room diff.
+  revisionsRead.set(room, room.rev ?? 0);
+
+  // The mailboxes stay in memory — WebRTC signalling is far too chatty for a
+  // database round trip — so the signalling route needs the room cached here.
+  cacheLocally(room);
+
   return room;
+}
+
+/**
+ * Persists a room, failing if anyone else wrote to it since it was read.
+ *
+ * The document is replaced wholesale, so without this check two overlapping
+ * requests would each write their own copy of the room and whichever landed
+ * second would erase the other's changes entirely.
+ */
+export async function writeRoom(room: RoomState): Promise<RoomState> {
+  const ref = adminDb.collection('rooms').doc(room.roomId);
+  const expectedRev = revisionsRead.get(room);
+
+  await adminDb.runTransaction(async (tx) => {
+    const current = await tx.get(ref);
+    if (expectedRev === undefined) {
+      // No prior read means this is a brand new room, so it must not already
+      // exist — otherwise creating a room on a code someone else is using would
+      // wipe their game.
+      if (current.exists) throw new RoomConflictError(room.roomId);
+    } else {
+      const currentRev = current.exists ? ((current.data() as RoomState).rev ?? 0) : undefined;
+      if (currentRev !== expectedRev) throw new RoomConflictError(room.roomId);
+    }
+    room.rev = (expectedRev ?? 0) + 1;
+    tx.set(ref, room);
+  });
+
+  revisionsRead.set(room, room.rev ?? 0);
+  cacheLocally(room);
+
+  return room;
+}
+
+// ─── private room state ─────────────────────────────────────────────────────
+//
+// Everything clients must not see. It lives in a subcollection rather than in
+// the room document because clients subscribe to that document directly — a
+// field is not hidden just because the UI does not render it, and the trivia
+// answer sitting in a devtools panel is the whole cheat.
+//
+// firestore.rules denies browsers any access to rooms/{id}/private.
+
+/** Path of the single private document belonging to a room. */
+function privateRef(roomId: string) {
+  return adminDb.collection('rooms').doc(roomId).collection('private').doc('state');
+}
+
+export type RoomSecrets = {
+  /** playerId -> the bearer token that proves a request really is that player. */
+  tokens: Record<string, string>;
+  /** The trivia answer, kept back so the room cannot read it off the wire. */
+  triviaAnswer?: string;
+  triviaFunFact?: string;
+  /** Which Truth or Bluff claim was the lie, until the reveal. */
+  lieIndex?: number | null;
+};
+
+const EMPTY_SECRETS: RoomSecrets = { tokens: {} };
+
+/**
+ * Cached per room, because almost every request needs the token map and it
+ * changes only when somebody joins. A miss falls through to Firestore, so a
+ * cold container or a second instance still authenticates correctly.
+ */
+const secretsCache: Map<string, RoomSecrets> = ((
+  globalThis as unknown as { __voicePartySecrets?: Map<string, RoomSecrets> }
+).__voicePartySecrets ??= new Map());
+
+export async function readSecrets(roomId: string): Promise<RoomSecrets> {
+  const cached = secretsCache.get(roomId);
+  if (cached) return cached;
+
+  const doc = await privateRef(roomId).get();
+  const secrets = doc.exists ? ({ ...EMPTY_SECRETS, ...(doc.data() as RoomSecrets) }) : { ...EMPTY_SECRETS };
+  secretsCache.set(roomId, secrets);
+  return secrets;
+}
+
+export async function writeSecrets(roomId: string, secrets: RoomSecrets): Promise<void> {
+  secretsCache.set(roomId, secrets);
+  await privateRef(roomId).set(secrets);
+}
+
+/** Unguessable, unlike the old timestamp-based player ids. */
+export function newToken(): string {
+  return randomBytes(24).toString('base64url');
 }
 
 export function pushEvent(room: RoomState, text: string, type: EventLog['type']): void {

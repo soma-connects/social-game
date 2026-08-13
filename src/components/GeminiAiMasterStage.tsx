@@ -5,6 +5,7 @@ import { Bot, Sparkles, Mic, Volume2, Zap, Flame, ArrowLeft, Send, MessageSquare
 import { Player, RoomState } from '@/lib/types';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { audioSFX } from '@/lib/audioFeedback';
+import { speechEngine } from '@/lib/speechService';
 
 interface GeminiAiMasterStageProps {
   room: RoomState;
@@ -32,6 +33,57 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+
+  const recordSpeech = async () => {
+    if (isRecording) {
+      speechEngine.stopListening();
+      setIsRecording(false);
+      return;
+    }
+    
+    setIsRecording(true);
+    setInputText(''); // clear previous text
+    try {
+      const accessError = await speechEngine.requestMicAccess();
+      if (accessError) {
+        setIsRecording(false);
+        return;
+      }
+      
+      let session: any = null;
+      session = speechEngine.listenForSpeech({
+        targetWord: '',
+        language: 'en-US',
+        onResult: (result: any) => {
+          if (result && result.transcript) {
+            setInputText(result.transcript);
+          }
+          if (result.isFinal && session) {
+            session.stop();
+            setIsRecording(false);
+            if (result.transcript.trim()) {
+              handleGeneratePrompt('custom', result.transcript.trim());
+              setInputText('');
+            }
+          }
+        },
+        onError: () => setIsRecording(false)
+      });
+      
+      // Auto-stop recording after 15 seconds max
+      setTimeout(() => {
+        if (session) {
+          session.stop();
+          speechEngine.stopListening();
+          setIsRecording(false);
+        }
+      }, 15000);
+      
+    } catch (error) {
+      setIsRecording(false);
+    }
+  };
 
   const handleGeneratePrompt = async (type: 'challenge' | 'debate' | 'custom', customText?: string) => {
     setLoading(true);
@@ -176,9 +228,21 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
             placeholder="Ask Gemini AI Master anything or type a topic..."
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            disabled={loading}
+            disabled={loading || isRecording}
             className="flex-1 bg-transparent px-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none"
           />
+          <button
+            type="button"
+            onClick={recordSpeech}
+            className={`p-3 rounded-xl transition-all shadow-md flex items-center justify-center ${
+              isRecording 
+                ? 'bg-red-500 text-white animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.5)]' 
+                : 'bg-slate-800 text-gray-300 hover:bg-slate-700 hover:text-white'
+            }`}
+            title={isRecording ? "Stop Recording" : "Start Voice Input"}
+          >
+            <Mic className="w-4 h-4" />
+          </button>
           <button
             type="submit"
             disabled={loading || !inputText.trim()}

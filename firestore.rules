@@ -1,0 +1,38 @@
+rules_version = '2';
+
+// Security model
+// --------------
+// The room API (/api/room/[roomId]) is the only thing allowed to change game
+// state. It runs server-side on the Firebase Admin SDK, which bypasses these
+// rules entirely — so everything a browser can reach is locked to read-only.
+//
+// Clients still read the room directly, via an onSnapshot subscription, because
+// that is what makes the game live. Anything a player must NOT see before the
+// reveal — trivia answers, the Truth or Bluff lie, per-player auth tokens —
+// lives under rooms/{roomId}/private, which no client may read at all.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /rooms/{roomId} {
+      // Knowing the room code is the only credential the game has ever had; it
+      // is what gets pasted into WhatsApp to invite people. Reads stay open so
+      // players and spectators can follow along without signing in.
+      allow read: if true;
+
+      // Never writable from a browser. A client that could write here could set
+      // its own score, teleport to the finish line, or delete the room.
+      allow write: if false;
+
+      // Secrets. Not readable by anyone but the Admin SDK.
+      match /private/{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    // Anything not explicitly matched above is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

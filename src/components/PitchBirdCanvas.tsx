@@ -56,9 +56,9 @@ const GATE_WIDTH = 50;
 // Pacing is set against how fast a voice can actually move the bird: a full
 // traverse of the playable band takes ~0.8s, so gates need to arrive slowly
 // enough to sing your way between two of them without rushing.
-const INITIAL_SPEED = 2.0;      // px/frame scroll speed
-const MAX_SPEED = 4.0;
-const SPEED_RAMP = 0.0015;      // speed increase per frame
+const INITIAL_SPEED = 4.0;      // px/frame scroll speed
+const MAX_SPEED = 8.0;
+const SPEED_RAMP = 0.004;      // speed increase per frame
 
 const GATE_SPAWN_INTERVAL_START = 240; // frames (~4s at 60fps)
 const GATE_SPAWN_INTERVAL_MIN = 150;   // frames (~2.5s)

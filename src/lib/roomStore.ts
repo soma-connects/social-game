@@ -12,7 +12,15 @@ import {
 
 const ROOM_CACHE_PREFIX = 'voice_party_room_';
 const MY_PLAYER_ID_KEY = 'voice_party_my_player_id';
-const POLL_INTERVAL_MS = 1500;
+/**
+ * Proves to the server which player this browser is.
+ *
+ * Player ids are visible to everyone in the room — they are in the room
+ * document the whole room subscribes to — so they cannot double as a
+ * credential. The server issues this alongside the id at create/join and
+ * checks it on every action that changes anything.
+ */
+const MY_TOKEN_KEY = 'voice_party_my_token';
 
 export type RoomStatus = 'connecting' | 'live' | 'missing' | 'error';
 
@@ -28,21 +36,20 @@ type Listener = (snapshot: RoomSnapshot) => void;
 /**
  * Client-side view of a room.
  *
- * The server is the single source of truth. localStorage is only a cache of the
- * last known state so a refresh has something to paint immediately — it is never
- * used to invent a room or to apply a move the server has not accepted. That
- * split matters: the old version applied dice rolls and dare results to local
- * objects, and the next poll silently threw them away.
+ * Reads come from a live Firestore subscription; writes go through the room API,
+ * which is the only thing allowed to change game state. localStorage is purely a
+ * cache of the last known state so a refresh has something to paint immediately
+ * — it is never used to invent a room or to apply a move the server has not
+ * accepted. That split matters: an older version applied dice rolls and dare
+ * results to local objects, and the next update silently threw them away.
  */
 class RoomStoreManager {
   private listeners = new Set<Listener>();
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
   private currentRoomId: string | null = null;
 
   private snapshot: RoomSnapshot = { room: null, status: 'connecting', error: null };
   private lastSerialized = '';
-  private hasLoadedOnce = false;
-  private visibilityHandler: (() => void) | null = null;
+  private unsubscribeFirestore: (() => void) | null = null;
 
   // ---------------------------------------------------------------- identity
 
@@ -54,6 +61,23 @@ class RoomStoreManager {
   public setMyPlayerId(id: string): void {
     if (typeof window === 'undefined') return;
     localStorage.setItem(MY_PLAYER_ID_KEY, id);
+  }
+
+  public getMyToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem(MY_TOKEN_KEY);
+  }
+
+  public setMyToken(token: string): void {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(MY_TOKEN_KEY, token);
+  }
+
+  /** Forgets who this browser was, so the next screen offers a fresh join. */
+  public clearSession(): void {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(MY_PLAYER_ID_KEY);
+    localStorage.removeItem(MY_TOKEN_KEY);
   }
 
   public generateRoomCode(): string {
@@ -122,62 +146,62 @@ class RoomStoreManager {
 
   // ----------------------------------------------------------------- polling
 
+  /** Opens a live Firestore subscription to the room. */
   public startPolling(roomId: string): void {
+    this.stopPolling();
+
     this.currentRoomId = roomId;
     this.lastSerialized = '';
-    this.hasLoadedOnce = false;
 
     const cached = this.readCache(roomId);
     this.snapshot = { room: cached, status: 'connecting', error: null };
 
-    if (this.pollTimer) clearInterval(this.pollTimer);
-    void this.poll();
-    this.pollTimer = setInterval(() => void this.poll(), POLL_INTERVAL_MS);
+    // Firebase is imported lazily so it never runs during SSR. That makes
+    // attaching the listener asynchronous, so the room this call was made for
+    // is captured and re-checked once the imports land — otherwise a fast
+    // unmount, or switching rooms, leaves an orphan listener running forever on
+    // the room we just left.
+    void (async () => {
+      const [{ doc, onSnapshot }, { db }] = await Promise.all([
+        import('firebase/firestore'),
+        import('./firebase/client'),
+      ]);
+      if (this.currentRoomId !== roomId) return;
 
-    if (typeof document !== 'undefined' && !this.visibilityHandler) {
-      // Catch up immediately when the player comes back to the tab.
-      this.visibilityHandler = () => {
-        if (!document.hidden) void this.poll();
-      };
-      document.addEventListener('visibilitychange', this.visibilityHandler);
-    }
+      const unsubscribe = onSnapshot(
+        doc(db, 'rooms', roomId),
+        (snapshot) => {
+          if (this.currentRoomId !== roomId) return;
+          if (!snapshot.exists()) {
+            this.emit({ status: 'missing', error: null });
+            return;
+          }
+          this.applyRoom(snapshot.data() as RoomState);
+        },
+        (error) => {
+          console.error('Firestore listener error:', error);
+          if (this.currentRoomId !== roomId) return;
+          this.emit({ status: 'error', error: 'Lost connection to the game server. Retrying…' });
+        }
+      );
+
+      // stopPolling may have run while the imports were in flight.
+      if (this.currentRoomId !== roomId) {
+        unsubscribe();
+        return;
+      }
+      this.unsubscribeFirestore = unsubscribe;
+    })();
   }
 
   public stopPolling(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
-    if (this.visibilityHandler && typeof document !== 'undefined') {
-      document.removeEventListener('visibilitychange', this.visibilityHandler);
-      this.visibilityHandler = null;
-    }
     this.currentRoomId = null;
-  }
-
-  private async poll(): Promise<void> {
-    const roomId = this.currentRoomId;
-    if (!roomId) return;
-    // Skip polling a backgrounded tab, but never skip the very first load — a tab
-    // opened in the background would otherwise sit on "connecting" forever.
-    if (this.hasLoadedOnce && typeof document !== 'undefined' && document.hidden) return;
-
-    try {
-      const res = await fetch(`/api/room/${roomId}`, { cache: 'no-store' });
-      if (res.status === 404) {
-        this.emit({ status: 'missing', error: null });
-        return;
-      }
-      if (!res.ok) {
-        this.emit({ status: 'error', error: `Server responded ${res.status}` });
-        return;
-      }
-      this.hasLoadedOnce = true;
-      this.applyRoom((await res.json()) as RoomState);
-    } catch {
-      this.emit({ status: 'error', error: 'Lost connection to the game server. Retrying…' });
+    if (this.unsubscribeFirestore) {
+      this.unsubscribeFirestore();
+      this.unsubscribeFirestore = null;
     }
   }
+
 
   // ----------------------------------------------------------------- actions
 
@@ -189,15 +213,28 @@ class RoomStoreManager {
       const res = await fetch(`/api/room/${roomId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        // Attached to every request; the server ignores it where it is not
+        // needed and rejects the request where it is missing.
+        body: JSON.stringify({ token: this.getMyToken() ?? '', ...payload }),
       });
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         const error = (data as { error?: string }).error ?? `Request failed (${res.status})`;
+
+        // The stored credential no longer matches any player — the room was
+        // reset, or this is a session from before tokens existed. Clearing it
+        // drops the UI back to the join screen instead of retrying forever
+        // against an identity the server has never heard of.
+        if (res.status === 401 && (data as { code?: string }).code === 'no_session') {
+          this.clearSession();
+        }
+
         this.emit({ status: res.status === 404 ? 'missing' : 'error', error });
         return { error };
       }
+
+      if (typeof data.token === 'string') this.setMyToken(data.token);
 
       if (data.room) this.applyRoom(data.room as RoomState);
       return data;
@@ -208,14 +245,31 @@ class RoomStoreManager {
     }
   }
 
-  public async createRoom(roomId: string, hostName: string): Promise<RoomState | null> {
-    const data = await this.post(roomId, { action: 'create', playerName: hostName });
+  /**
+   * Sends an arbitrary room action.
+   *
+   * The mini-games used to call fetch directly, which meant they bypassed the
+   * auth token, the shared error handling and the snapshot update. Everything
+   * that talks to the room API should come through here.
+   */
+  public send(roomId: string, payload: Record<string, unknown>) {
+    return this.post(roomId, payload);
+  }
+
+  public async createRoom(roomId: string, hostName: string, roomType: 'board_game' | 'team_battle' = 'board_game'): Promise<RoomState | null> {
+    const data = await this.post(roomId, { action: 'create', playerName: hostName, roomType });
     if (data.playerId) this.setMyPlayerId(String(data.playerId));
     return (data.room as RoomState) ?? null;
   }
 
   public async joinRoom(roomId: string, playerName: string): Promise<{ room: RoomState | null; error?: string }> {
-    const data = await this.post(roomId, { action: 'join', playerName });
+    // Sent so a refresh re-claims the seat this browser already holds instead of
+    // burning another slot, or colliding with someone of the same name.
+    const data = await this.post(roomId, {
+      action: 'join',
+      playerName,
+      playerId: this.getMyPlayerId() ?? '',
+    });
     if (data.error) return { room: null, error: data.error };
     if (data.playerId) this.setMyPlayerId(String(data.playerId));
     return { room: (data.room as RoomState) ?? null };
@@ -259,6 +313,22 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'set_team', playerId, teamId });
   }
 
+  public switchTeam(roomId: string, targetPlayerId: string, teamId: TeamId) {
+    return this.post(roomId, { action: 'switch_team', targetPlayerId, teamId });
+  }
+
+  public teamBattleStartSeries(roomId: string, selectedGames: MiniGameId[]) {
+    return this.post(roomId, { action: 'team_battle_start_series', selectedGames });
+  }
+
+  public teamBattleNextGame(roomId: string) {
+    return this.post(roomId, { action: 'team_battle_next_game' });
+  }
+
+  public teamBattleScore(roomId: string, winnerTeam: TeamId) {
+    return this.post(roomId, { action: 'team_battle_score', winnerTeam });
+  }
+
   public balanceTeams(roomId: string) {
     return this.post(roomId, { action: 'balance_teams' });
   }
@@ -274,6 +344,13 @@ class RoomStoreManager {
       pitch_bird: 'complete_pitch_bird',
       solfege: 'complete_solfege',
       voice_arena: 'complete_voice_turn',
+      spelling_bee: 'complete_voice_turn',
+      truth_or_bluff: 'complete_truth_bluff',
+      story_builder: 'complete_voice_turn',
+      debate: 'complete_voice_turn',
+      guess_the_voice: 'complete_voice_turn',
+      trivia_showdown: 'complete_voice_turn',
+      asteroid_defense: 'complete_voice_turn',
     };
     const data = await this.post(roomId, {
       action: ACTION[game] ?? 'complete_voice_turn',
@@ -290,28 +367,81 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'finish_roast' });
   }
 
+  public submitTruthBluffClaims(roomId: string, playerId: string, claims: string[], lieIndex: number) {
+    return this.post(roomId, { action: 'truth_bluff_submit_claims', playerId, claims, lieIndex });
+  }
+
+  public voteTruthBluff(roomId: string, playerId: string, voteIndex: number) {
+    return this.post(roomId, { action: 'truth_bluff_vote', playerId, voteIndex });
+  }
+
+  public revealTruthBluff(roomId: string, playerId: string) {
+    return this.post(roomId, { action: 'truth_bluff_reveal', playerId });
+  }
+
+  public submitStoryBuilder(roomId: string, playerId: string, sentence: string, phase?: string) {
+    return this.post(roomId, { action: 'story_builder_submit', playerId, sentence, phase });
+  }
+
+  public voteStoryBuilder(roomId: string, voterId: string, votedPlayerId: string) {
+    return this.post(roomId, { action: 'story_builder_vote', voterId, votedPlayerId });
+  }
+
+  public submitDebate(roomId: string, phase: string) {
+    return this.post(roomId, { action: 'debate_submit', phase });
+  }
+
+  public voteDebate(roomId: string, voterId: string, vote: number) {
+    return this.post(roomId, { action: 'debate_vote', voterId, vote });
+  }
+
+  public submitGuessVoice(roomId: string, audioBlobUrl?: string, phase?: string) {
+    return this.post(roomId, { action: 'guess_voice_submit', audioBlobUrl, phase });
+  }
+
+  public voteGuessVoice(roomId: string, voterId: string, guessedPlayerId: string) {
+    return this.post(roomId, { action: 'guess_voice_vote', voterId, guessedPlayerId });
+  }
+
   /**
    * Reports what the performer is doing so spectators can follow along.
    *
    * Throttled and fire-and-forget: this runs from inside game loops, and a
    * dropped frame of spectator detail matters far less than stalling the game
    * that is producing it.
+   *
+   * The throttle is deliberately coarse. Each push rewrites the whole room
+   * document and pushes a snapshot to every client, so this is the most
+   * expensive thing the game does per second — and spectators only need the
+   * gist of the attempt, not a frame-accurate mirror of it.
    */
   private lastLivePush = 0;
+  private lastLiveBody = '';
   public pushLiveState(
     roomId: string,
     playerId: string,
     state: Omit<LiveMiniGameState, 'playerId' | 'game' | 'at'>,
-    minIntervalMs = 700
+    minIntervalMs = 1500
   ): void {
     const now = Date.now();
     if (now - this.lastLivePush < minIntervalMs) return;
+
+    // Nothing spectators can see has changed — don't pay for a write.
+    const body = JSON.stringify(state);
+    if (body === this.lastLiveBody) return;
+
     this.lastLivePush = now;
+    this.lastLiveBody = body;
 
     void fetch(`/api/room/${roomId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'push_live_state', playerId, state }),
+      body: JSON.stringify({
+        action: 'push_live_state',
+        token: this.getMyToken() ?? '',
+        playerId,
+        state,
+      }),
     }).catch(() => {
       /* spectator detail is optional; never surface this */
     });
@@ -358,7 +488,10 @@ class RoomStoreManager {
     try {
       navigator.sendBeacon(
         `/api/room/${roomId}`,
-        new Blob([JSON.stringify({ action: 'mark_away', playerId })], { type: 'application/json' })
+        new Blob(
+          [JSON.stringify({ action: 'mark_away', token: this.getMyToken() ?? '', playerId })],
+          { type: 'application/json' }
+        )
       );
     } catch {
       /* the heartbeat timeout is the fallback */
@@ -400,6 +533,7 @@ class RoomStoreManager {
     return {
       roll: typeof data.roll === 'number' ? data.roll : null,
       outcome: (data.outcome as { banner: string | null; message: string; triggersDare: boolean }) ?? null,
+      waitingForBranch: !!data.waitingForBranch,
       error: data.error,
     };
   }

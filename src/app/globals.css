@@ -20,42 +20,26 @@ body {
   position: relative;
 }
 
-/* GitHub Dark Constellation Starfield & Grid Pattern */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.45;
-  background-image: 
-    radial-gradient(circle at 50% 15%, rgba(88, 166, 255, 0.18), transparent 45%),
-    radial-gradient(circle at 85% 85%, rgba(187, 128, 255, 0.12), transparent 45%),
-    radial-gradient(rgba(240, 246, 252, 0.25) 1.2px, transparent 1.2px),
-    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 24px 24px, 48px 48px, 48px 48px;
-  background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
-}
+/* Starfield is now rendered via <StarfieldCanvas /> — no CSS pseudo-element needed. */
 
 @keyframes cosmicPulse {
   0% { transform: scale(1); opacity: 0.2; }
   100% { transform: scale(1.03); opacity: 0.3; }
 }
 
-/* Obsidian Glassmorphism Cards */
+/* Transparent Glassmorphism Cards — lets the starfield show through */
 .glass-card {
-  background: rgba(11, 19, 43, 0.85);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(0, 240, 255, 0.2);
-  box-shadow: 0 16px 48px 0 rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
 }
 
 .glass-pill {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(0, 240, 255, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* Localized Cosmic Color Glows */

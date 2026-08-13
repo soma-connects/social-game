@@ -92,13 +92,18 @@ export default function RoastIntermission({
   finishRef.current = onFinishRoast;
 
   // Countdown. Runs once per performer, not once per render.
+  //
+  // Everyone runs the same clock so the room sees the same numbers, but only
+  // the performer's client sends the "roast over" request — the server accepts
+  // a turn ending from the active player alone, so the other five would be
+  // rejected and each would surface an error.
   useEffect(() => {
     setTimeLeft(ROAST_SECONDS);
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          finishRef.current();
+          if (isPerformer) finishRef.current();
           return 0;
         }
         return prev - 1;
@@ -106,7 +111,7 @@ export default function RoastIntermission({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [activePlayer.id]);
+  }, [activePlayer.id, isPerformer]);
 
   const triggerSound = (action: () => void) => {
     action();
@@ -282,15 +287,21 @@ export default function RoastIntermission({
           </div>
         )}
 
-        {/* Proceed / Skip Control */}
+        {/* Proceed / Skip Control — the performer's call, so only they see it. */}
         <div className="pt-3">
-          <button
-            onClick={onFinishRoast}
-            className="w-full bg-gradient-to-r from-emerald-500 via-partyYellow to-emerald-400 text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] shadow-2xl glow-emerald"
-          >
-            <span>PROCEED TO POWER-UP SHOP & ROADMAP BOARD</span>
-            <ArrowRight className="w-5 h-5" />
-          </button>
+          {isPerformer ? (
+            <button
+              onClick={onFinishRoast}
+              className="w-full bg-gradient-to-r from-emerald-500 via-partyYellow to-emerald-400 text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] shadow-2xl glow-emerald"
+            >
+              <span>PROCEED TO POWER-UP SHOP &amp; ROADMAP BOARD</span>
+              <ArrowRight className="w-5 h-5" />
+            </button>
+          ) : (
+            <p className="text-center text-xs font-bold text-gray-400 py-4">
+              Keep reacting — {activePlayer.name} moves the room on when the clock runs out.
+            </p>
+          )}
         </div>
       </div>
     </div>

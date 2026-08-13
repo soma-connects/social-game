@@ -3,7 +3,7 @@
 import React from 'react';
 import { Mic, Users, Trophy, MapPin, UserMinus, WifiOff } from 'lucide-react';
 import { Player } from '@/lib/types';
-import { MAX_PLAYERS, TEAMS, TOTAL_TILES, getTeam } from '@/lib/gameRules';
+import { BOARD_LENGTH, MAX_PLAYERS, TEAMS, boardProgress, getTeam } from '@/lib/gameRules';
 import AvatarIllustration from './AvatarIllustration';
 
 interface LeftSidebarProps {
@@ -15,7 +15,7 @@ interface LeftSidebarProps {
   /** Only the host gets the remove control. */
   canManage?: boolean;
   onKickPlayer?: (player: Player) => void;
-  teamMode?: boolean;
+  roomType?: 'board_game' | 'team_battle';
 }
 
 export default function LeftSidebar({
@@ -26,7 +26,7 @@ export default function LeftSidebar({
   myPlayerId,
   canManage = false,
   onKickPlayer,
-  teamMode = false,
+  roomType = 'board_game',
 }: LeftSidebarProps) {
   return (
     <aside className="hidden lg:flex w-64 glass-card rounded-3xl p-5 border border-white/15 space-y-6 backdrop-blur-xl bg-slate-900/70 shadow-2xl flex-col justify-between shrink-0">
@@ -43,7 +43,7 @@ export default function LeftSidebar({
           </h2>
 
           {/* Crew scoreboard — the number that actually matters in team mode */}
-          {teamMode && (
+          {roomType === 'team_battle' && (
             <div className="grid grid-cols-2 gap-2 pt-1">
               {TEAMS.map((team) => {
                 const members = players.filter((p) => p.teamId === team.id);
@@ -100,7 +100,7 @@ export default function LeftSidebar({
                           HOST
                         </span>
                       )}
-                      {teamMode && player.teamId && (
+                      {roomType === 'team_battle' && player.teamId && (
                         <span
                           className="text-[8px] px-1 py-px rounded font-black text-white"
                           style={{ backgroundColor: getTeam(player.teamId).color }}
@@ -126,7 +126,7 @@ export default function LeftSidebar({
                 <div className="flex flex-col items-end gap-1 shrink-0">
                   {isTurn && <Mic className="w-4 h-4 text-emerald-400 animate-pulse" />}
                   <span className="text-[9px] font-mono text-gray-400 flex items-center gap-0.5">
-                    <MapPin className="w-2.5 h-2.5" /> {player.boardPosition + 1}/{TOTAL_TILES}
+                    <MapPin className="w-2.5 h-2.5" /> {boardProgress(player.boardPosition)}/{BOARD_LENGTH}
                   </span>
 
                   {/* Presence — a dropped player is why a round would otherwise hang */}

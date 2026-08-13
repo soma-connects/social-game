@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import StarfieldCanvas from "@/components/StarfieldCanvas";
 
 export const metadata: Metadata = {
   title: "Voice Party Arcade | High-Speed Voice & 3D Board Game",
@@ -15,8 +16,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // Pinch zoom stays available. Locking it is a WCAG 1.4.4 failure, and this is
+  // a game full of small type that people play on phones.
   themeColor: "#0d1117",
 };
 
@@ -27,7 +28,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased min-h-screen selection:bg-partyPink selection:text-white bg-[#0d1117]">
+      <body className="antialiased min-h-screen overflow-x-hidden selection:bg-partyPink selection:text-white bg-[#0d1117]">
+        <StarfieldCanvas />
         {children}
       </body>
     </html>

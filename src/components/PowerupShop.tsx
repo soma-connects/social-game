@@ -74,7 +74,7 @@ export default function PowerupShop({
 
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl bg-partyDark/80 border border-white/10 p-4 text-center">
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">POINTS BANKED</p>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">COINS BANKED</p>
             <p className="text-3xl font-black text-partyYellow flex items-center justify-center gap-1.5">
               <Coins className="w-5 h-5" /> {activePlayer.score}
             </p>

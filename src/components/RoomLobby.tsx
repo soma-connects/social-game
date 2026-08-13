@@ -28,6 +28,10 @@ const MINI_GAMES: { id: MiniGameId; name: string; icon: string; blurb: string }[
   { id: 'voice_arena', name: 'Voice Arena', icon: '🎙️', blurb: 'Say the prompt before the timer dies' },
   { id: 'pitch_bird', name: 'PitchBird', icon: '🐦', blurb: 'Fly through gates using your pitch' },
   { id: 'solfege', name: 'Karaoke', icon: '🎵', blurb: 'Hear Do, then sing the note you are given' },
+  { id: 'spelling_bee', name: 'Spelling Bee', icon: '🐝', blurb: 'Listen to the word, then spell it out loud' },
+  { id: 'truth_or_bluff', name: 'Truth or Bluff', icon: '🎭', blurb: 'Tell a true story and a lie, see who guesses right' },
+  { id: 'trivia_showdown', name: 'Trivia Showdown', icon: '🧠', blurb: 'Answer trivia questions fast with your voice' },
+  { id: 'asteroid_defense', name: 'Asteroid Defense', icon: '☄️', blurb: 'Shoot down asteroids by calling out their words!' },
 ];
 import { audioSFX } from '@/lib/audioFeedback';
 import AvatarIllustration from './AvatarIllustration';
@@ -36,12 +40,11 @@ interface RoomLobbyProps {
   room: RoomState;
   myPlayer: Player;
   onStartGame: () => void;
-  onSelectMode?: (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master') => void;
+  onSelectMode?: (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle') => void;
 }
 
 const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
-  { id: 'igbo', name: 'Igbo', flag: '🇳🇬' },
-  { id: 'pidgin', name: 'Naija Pidgin', flag: '🇳🇬' },
+  { id: 'english', name: 'English', flag: '🇬🇧' },
   { id: 'spanish', name: 'Spanish', flag: '🇪🇸' },
   { id: 'french', name: 'French', flag: '🇫🇷' },
   { id: 'japanese', name: 'Japanese', flag: '🇯🇵' },
@@ -54,7 +57,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   const [newPlayerName, setNewPlayerName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
-  const [activeMode, setActiveMode] = useState<'board' | 'karaoke' | 'hangout' | 'ai_master'>('board');
+  const [activeMode, setActiveMode] = useState<'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle'>('board');
   const [showCustomDecks, setShowCustomDecks] = useState(false);
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
@@ -146,8 +149,11 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
       <div className="absolute top-10 left-10 w-72 h-72 bg-purple-600/15 blur-3xl rounded-full pointer-events-none" />
       <div className="absolute bottom-10 right-10 w-80 h-80 bg-emerald-500/15 blur-3xl rounded-full pointer-events-none" />
 
+      {/* Ambient Dashboard Background Music */}
+      <audio src="/audios/lexin_music-space-ambient-sci-fi-121842.mp3" autoPlay loop className="hidden" />
+
       {/* Compact WhatsApp Direct Invite Banner */}
-      <div className="glass-card rounded-2xl p-3.5 sm:p-4 border border-emerald-400/30 relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-xl bg-black/30 shadow-xl">
+      <div className="glass-card rounded-2xl p-3.5 sm:p-4 border border-emerald-400/20 relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-400/30 shrink-0">
             <MessageCircle className="w-5 h-5 fill-current" />
@@ -174,7 +180,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
       {/* Two-up grid for Lounging Area & Mode Hub */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 relative z-10">
         {/* Player Lounging Area */}
-        <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 backdrop-blur-xl bg-black/30 border border-white/10 shadow-2xl">
+        <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 border border-white/5 shadow-2xl">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
@@ -274,56 +280,111 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
             </div>
           )}
 
-          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
-            {room.players.map((player) => (
-              <div
-                key={player.id}
-                className="glass-pill rounded-2xl p-4 space-y-3 border border-white/15 hover:border-partyYellow/50 transition-all text-center relative overflow-hidden flex flex-col items-center"
-              >
-                {/* Full character card poster */}
-                <AvatarIllustration avatar={player.avatar} variant="card" size="md" />
+          {room.roomType === 'team_battle' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {TEAMS.map((team) => {
+                const members = room.players.filter((p) => p.teamId === team.id);
+                return (
+                  <div key={team.id} className="space-y-4 p-5 rounded-3xl border transition-all" style={{ backgroundColor: `${team.color}15`, borderColor: `${team.color}40` }}>
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-extrabold text-white text-lg flex items-center gap-2" style={{ color: team.color }}>
+                        {team.icon} {team.name}
+                      </h4>
+                      <span className="text-xs px-2.5 py-1 rounded-full font-bold" style={{ backgroundColor: `${team.color}30`, color: team.color }}>
+                        {members.length} / {MAX_PLAYERS / 2}
+                      </span>
+                    </div>
+                    
+                    <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
+                      {members.map((player) => (
+                        <div
+                          key={player.id}
+                          className="glass-pill rounded-2xl p-4 space-y-3 border transition-all text-center relative overflow-hidden flex flex-col items-center"
+                          style={{ borderColor: `${team.color}50` }}
+                        >
+                          {myPlayer.isHost && (
+                            <button
+                              onClick={() => roomStore.switchTeam(room.roomId, player.id, team.id === 'red' ? 'blue' : 'red')}
+                              className="absolute top-2 right-2 text-[10px] bg-black/40 hover:bg-black/60 px-2 py-1 rounded-full z-10 font-bold text-white transition-colors"
+                            >
+                              SWAP
+                            </button>
+                          )}
+                          <AvatarIllustration avatar={player.avatar} variant="card" size="md" />
+                          <div>
+                            <h4 className="font-extrabold text-white text-sm flex items-center justify-center gap-1">
+                              {player.name}
+                              {player.id === myPlayer.id && (
+                                <span className="bg-white text-partyDark text-[9px] px-1.5 py-0.5 rounded-full font-black">YOU</span>
+                              )}
+                            </h4>
+                          </div>
+                          <div className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-1 rounded-full border whitespace-nowrap" style={{ backgroundColor: `${team.color}30`, borderColor: `${team.color}50`, color: team.color }}>
+                            <CheckCircle2 className="w-3 h-3 shrink-0" /> READY
+                          </div>
+                        </div>
+                      ))}
+                      {members.length === 0 && (
+                        <div className="col-span-full py-8 text-center text-sm font-bold opacity-50" style={{ color: team.color }}>
+                          Waiting for players...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
+              {room.players.map((player) => (
+                <div
+                  key={player.id}
+                  className="glass-pill rounded-2xl p-4 space-y-3 border border-white/15 hover:border-partyYellow/50 transition-all text-center relative overflow-hidden flex flex-col items-center"
+                >
+                  <AvatarIllustration avatar={player.avatar} variant="card" size="md" />
 
-                <div>
-                  <h4 className="font-extrabold text-white text-sm flex items-center justify-center gap-1">
-                    {player.name}
-                    {player.id === myPlayer.id && (
-                      <span className="bg-partyCyan text-partyDark text-[9px] px-1.5 py-0.5 rounded-full font-black">
-                        YOU
+                  <div>
+                    <h4 className="font-extrabold text-white text-sm flex items-center justify-center gap-1">
+                      {player.name}
+                      {player.id === myPlayer.id && (
+                        <span className="bg-partyCyan text-partyDark text-[9px] px-1.5 py-0.5 rounded-full font-black">
+                          YOU
+                        </span>
+                      )}
+                      {player.isHost && (
+                        <span className="bg-partyYellow text-partyDark text-[9px] px-1.5 py-0.5 rounded-full font-black">
+                          HOST
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-[11px] text-gray-300 font-medium flex items-center justify-center gap-1 mt-1">
+                      <Shirt className="w-3 h-3 text-partyCyan" /> {player.avatar.outfit}
+                    </p>
+                    <div className="flex items-center justify-center gap-1.5 mt-2 flex-wrap">
+                      <span className="bg-partyPurple/40 text-partyCyan text-[9px] px-2 py-0.5 rounded-full font-black border border-partyCyan/20">
+                        LVL {player.level ?? 1}
                       </span>
-                    )}
-                    {player.isHost && (
-                      <span className="bg-partyYellow text-partyDark text-[9px] px-1.5 py-0.5 rounded-full font-black">
-                        HOST
+                      <span className="bg-partyPink/20 text-partyPink text-[9px] px-2 py-0.5 rounded-full font-black border border-partyPink/25">
+                        VIBE {player.vibeScore ?? 0}
                       </span>
-                    )}
-                  </h4>
-                  <p className="text-[11px] text-gray-300 font-medium flex items-center justify-center gap-1 mt-1">
-                    <Shirt className="w-3 h-3 text-partyCyan" /> {player.avatar.outfit}
-                  </p>
-                  <div className="flex items-center justify-center gap-1.5 mt-2 flex-wrap">
-                    <span className="bg-partyPurple/40 text-partyCyan text-[9px] px-2 py-0.5 rounded-full font-black border border-partyCyan/20">
-                      LVL {player.level ?? 1}
-                    </span>
-                    <span className="bg-partyPink/20 text-partyPink text-[9px] px-2 py-0.5 rounded-full font-black border border-partyPink/25">
-                      VIBE {player.vibeScore ?? 0}
-                    </span>
-                    {(player.badges ?? []).slice(-2).map((badge) => (
-                      <span
-                        key={badge}
-                        className="bg-partyYellow/20 text-partyYellow text-[9px] px-2 py-0.5 rounded-full font-black border border-partyYellow/25"
-                      >
-                        {badge}
-                      </span>
-                    ))}
+                      {(player.badges ?? []).slice(-2).map((badge) => (
+                        <span
+                          key={badge}
+                          className="bg-partyYellow/20 text-partyYellow text-[9px] px-2 py-0.5 rounded-full font-black border border-partyYellow/25"
+                        >
+                          {badge}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-400 text-[10px] font-extrabold px-2.5 py-1 rounded-full border border-emerald-500/30 whitespace-nowrap">
+                    <CheckCircle2 className="w-3 h-3 shrink-0" /> READY
                   </div>
                 </div>
-
-                <div className="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-400 text-[10px] font-extrabold px-2.5 py-1 rounded-full border border-emerald-500/30 whitespace-nowrap">
-                  <CheckCircle2 className="w-3 h-3 shrink-0" /> READY
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           {/* Quick Add Player Form */}
           {room.players.length < MAX_PLAYERS && (
@@ -352,7 +413,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
         </div>
 
         {/* Cosmic App Feature Mode Selector Hub */}
-        <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 backdrop-blur-xl bg-black/30 border border-white/10 shadow-2xl">
+        <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 border border-white/5 shadow-2xl">
           <div className="space-y-2">
             <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
               <Gamepad2 className="w-5 h-5 text-partyYellow" />
@@ -360,24 +421,24 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
             </h3>
             <p className="text-xs text-gray-300">Tap a mode to select what you want to play</p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+            <div className="grid grid-cols-1 gap-3 pt-2">
               {/* 1. Board Game Mode */}
               <button
                 onClick={() => {
                   setActiveMode('board');
                   audioSFX.playChoiSuccess();
                 }}
-                className={`p-3.5 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-3 ${
+                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3 ${
                   activeMode === 'board'
                     ? 'bg-cyan-950/40 border-partyCyan text-white shadow-xl glow-cyan'
                     : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
                 }`}
               >
-                <div className="text-3xl p-2.5 rounded-xl bg-partyCyan/15 border border-partyCyan/30 shrink-0">
+                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyCyan/15 border border-partyCyan/30 shrink-0">
                   🎲
                 </div>
-                <div>
-                  <h4 className="font-extrabold text-sm text-white flex items-center gap-1.5">
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
                     BOARD GAME ROADMAP
                     {activeMode === 'board' && (
                       <span className="bg-partyCyan text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">
@@ -397,17 +458,17 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   setActiveMode('karaoke');
                   audioSFX.playChoiSuccess();
                 }}
-                className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-3.5 ${
+                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
                   activeMode === 'karaoke'
                     ? 'bg-gradient-to-r from-pink-950/80 via-slate-900/90 to-pink-900/50 border-partyPink text-white shadow-xl'
                     : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
                 }`}
               >
-                <div className="text-3xl p-2.5 rounded-xl bg-partyPink/15 border border-partyPink/30 shrink-0">
+                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyPink/15 border border-partyPink/30 shrink-0">
                   🎤
                 </div>
-                <div>
-                  <h4 className="font-extrabold text-sm text-white flex items-center gap-1.5">
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
                     KARAOKE & PITCH ARCADE
                     {activeMode === 'karaoke' && (
                       <span className="bg-partyPink text-white text-[9px] px-2 py-0.5 rounded-full font-black">
@@ -427,17 +488,17 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   setActiveMode('hangout');
                   audioSFX.playChoiSuccess();
                 }}
-                className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-3.5 ${
+                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
                   activeMode === 'hangout'
                     ? 'bg-gradient-to-r from-emerald-950/80 via-slate-900/90 to-emerald-900/50 border-emerald-400 text-white shadow-xl glow-emerald'
                     : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
                 }`}
               >
-                <div className="text-3xl p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/30 shrink-0">
+                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/30 shrink-0">
                   🍻
                 </div>
-                <div>
-                  <h4 className="font-extrabold text-sm text-white flex items-center gap-1.5">
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
                     15s ROAST HANGOUT
                     {activeMode === 'hangout' && (
                       <span className="bg-emerald-500 text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">
@@ -457,17 +518,17 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   setActiveMode('ai_master');
                   audioSFX.playChoiSuccess();
                 }}
-                className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-3.5 ${
+                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
                   activeMode === 'ai_master'
                     ? 'bg-gradient-to-r from-amber-950/80 via-slate-900/90 to-amber-900/50 border-partyYellow text-white shadow-xl glow-yellow'
                     : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
                 }`}
               >
-                <div className="text-3xl p-2.5 rounded-xl bg-partyYellow/15 border border-partyYellow/30 shrink-0">
+                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyYellow/15 border border-partyYellow/30 shrink-0">
                   🤖
                 </div>
-                <div>
-                  <h4 className="font-extrabold text-sm text-white flex items-center gap-1.5">
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
                     AI GAME MASTER MODE
                     {activeMode === 'ai_master' && (
                       <span className="bg-partyYellow text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">
@@ -480,25 +541,54 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   </p>
                 </div>
               </button>
+              {/* 5. Team Battle */}
+              <button
+                onClick={() => {
+                  setActiveMode('team_battle');
+                  audioSFX.playChoiSuccess();
+                }}
+                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
+                  activeMode === 'team_battle'
+                    ? 'bg-gradient-to-r from-red-950/80 via-slate-900/90 to-red-900/50 border-red-500 text-white shadow-xl glow-red'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                }`}
+              >
+                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-red-500/15 border border-red-500/30 shrink-0">
+                  ⚔️
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
+                    TEAM BATTLE
+                    {activeMode === 'team_battle' && (
+                      <span className="bg-red-500 text-white text-[9px] px-2 py-0.5 rounded-full font-black">
+                        SELECTED
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-gray-300 mt-1 leading-snug">
+                    Squad up! 2v2 or 3v3 sudden death voice duels. Pick your side!
+                  </p>
+                </div>
+              </button>
             </div>
           </div>
 
           {/* Toggle Button for Custom Deck Settings (HIDDEN BY DEFAULT) */}
-          <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-white/10">
-            <button
-              onClick={() => setShowCustomDecks(!showCustomDecks)}
-              className="glass-pill hover:bg-white/15 text-partyCyan font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 border border-partyCyan/30 transition-all w-full sm:w-auto justify-center"
-            >
-              <Settings className="w-4 h-4 text-partyYellow" />
-              <span>{showCustomDecks ? 'HIDE DECK SETTINGS ▲' : 'CUSTOMIZE GAME DECKS & TEAMS ▼'}</span>
-            </button>
-
+          <div className="pt-2 flex flex-col gap-3 border-t border-white/10">
             <button
               onClick={() => (onSelectMode ? onSelectMode(activeMode) : onStartGame())}
-              className="w-full sm:w-auto flex-1 bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-base py-3.5 px-8 rounded-2xl flex items-center justify-center gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-yellow"
+              className="w-full bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-sm sm:text-base py-3 sm:py-3.5 px-6 sm:px-8 rounded-2xl flex items-center justify-center gap-2 sm:gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-yellow"
             >
               <Play className="w-5 h-5 fill-current" />
               <span>LAUNCH MATCH NOW</span>
+            </button>
+
+            <button
+              onClick={() => setShowCustomDecks(!showCustomDecks)}
+              className="glass-pill hover:bg-white/15 text-partyCyan font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 border border-partyCyan/30 transition-all w-full justify-center"
+            >
+              <Settings className="w-4 h-4 text-partyYellow" />
+              <span>{showCustomDecks ? 'HIDE DECK SETTINGS ▲' : 'CUSTOMIZE GAME DECKS & TEAMS ▼'}</span>
             </button>
           </div>
 
@@ -536,62 +626,6 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                     );
                   })}
                 </div>
-              </div>
-
-              {/* Team Mode */}
-              <div className="space-y-3 pt-2 border-t border-white/10">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
-                      <Swords className="w-4 h-4 text-partyPink" /> TEAM MODE
-                    </h4>
-                    <p className="text-xs text-gray-400">
-                      Red Crew vs Blue Crew. You perform solo — the opposing team votes.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => roomStore.setTeamMode(room.roomId, !room.teamMode)}
-                    className={`w-12 h-6 rounded-full transition-colors p-1 flex items-center shrink-0 ${
-                      room.teamMode ? 'bg-partyPink justify-end' : 'bg-gray-700 justify-start'
-                    }`}
-                    aria-label="Toggle team mode"
-                  >
-                    <div className="w-4 h-4 rounded-full bg-white shadow-md" />
-                  </button>
-                </div>
-
-                {room.teamMode && (
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    {TEAMS.map((team) => {
-                      const members = room.players.filter((p) => p.teamId === team.id);
-                      const iAmHere = myPlayer.teamId === team.id;
-                      return (
-                        <button
-                          key={team.id}
-                          onClick={() => roomStore.setTeam(room.roomId, myPlayer.id, team.id)}
-                          className={`p-3 rounded-2xl border text-left transition-all ${
-                            iAmHere ? 'border-2 shadow-lg' : 'border-white/10 bg-white/5 hover:border-white/30'
-                          }`}
-                          style={
-                            iAmHere
-                              ? { borderColor: team.color, backgroundColor: `${team.color}22` }
-                              : undefined
-                          }
-                        >
-                          <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
-                            {team.icon} {team.name}
-                            {iAmHere && (
-                              <span className="bg-white/20 text-[8px] px-1 rounded font-black">YOU</span>
-                            )}
-                          </span>
-                          <p className="text-[10px] text-gray-300 mt-1 truncate">
-                            {members.length > 0 ? members.map((m) => m.name).join(', ') : 'Empty — tap to join'}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
 
               {/* Mini-Games List */}

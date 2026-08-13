@@ -21,7 +21,7 @@ export default function HomePage() {
     setBusy(true);
     setError(null);
     const newCode = roomStore.generateRoomCode();
-    const room = await roomStore.createRoom(newCode, hostName.trim() || 'Chief Boss');
+    const room = await roomStore.createRoom(newCode, hostName.trim() || 'Chief Boss', 'board_game');
     setBusy(false);
 
     if (!room) {
@@ -88,8 +88,8 @@ export default function HomePage() {
             </span>
           </h1>
 
-          <p className="text-gray-300 text-sm sm:text-base max-w-lg mx-auto">
-            High-speed voice challenges in <span className="text-partyYellow font-extrabold">Hausa, Igbo, Yoruba</span> & world languages! Win mini-games, drop traps & roll 3D dice to victory!
+          <p className="text-gray-300 text-sm sm:text-base max-w-lg mx-auto px-4 sm:px-0">
+            High-speed voice challenges in <span className="text-partyYellow font-extrabold">English</span> and other languages! Win mini-games, drop traps & roll 3D dice to victory!
           </p>
         </div>
 
@@ -104,7 +104,7 @@ export default function HomePage() {
         </div>
 
         {/* Home Glassmorphic Action Card (Tight Spacing to Title) */}
-        <div className="glass-card rounded-3xl p-6 sm:p-8 border border-white/20 space-y-6 text-left shadow-2xl relative overflow-hidden backdrop-blur-xl bg-slate-900/60 max-w-xl mx-auto">
+        <div className="glass-card rounded-3xl p-6 sm:p-8 border border-white/10 space-y-6 text-left shadow-2xl relative overflow-hidden max-w-xl mx-auto">
           {/* Ambient Inner Card Glow */}
           <div className="absolute -top-24 -right-24 w-48 h-48 bg-partyYellow/20 blur-2xl rounded-full pointer-events-none" />
 
@@ -120,6 +120,7 @@ export default function HomePage() {
               className="w-full bg-partyDark/90 border border-white/25 rounded-2xl px-5 py-3.5 text-base text-white placeholder-gray-500 focus:outline-none focus:border-partyYellow shadow-inner font-bold"
             />
           </div>
+
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
             <button

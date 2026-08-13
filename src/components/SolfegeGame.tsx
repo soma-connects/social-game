@@ -366,13 +366,11 @@ export default function SolfegeGame({ player, roomId, onComplete }: SolfegeGameP
             </div>
 
             {/*
-              Vertical, because pitch is up and down. The old bar ran left to
-              right across half an octave, which is both the wrong metaphor and
-              too wide a range for small errors to show.
+              Vertical, because pitch is up and down.
             */}
-            <div className="w-16 shrink-0 relative rounded-2xl bg-partyDark border border-white/15 overflow-hidden">
+            <div className="w-24 shrink-0 min-h-[250px] relative rounded-2xl bg-partyDark border-2 border-white/20 overflow-hidden shadow-inner">
               <div
-                className="absolute inset-x-0 bg-emerald-500/25 border-y border-emerald-400/50"
+                className="absolute inset-x-0 bg-emerald-500/25 border-y-2 border-emerald-400/80"
                 style={{
                   top: `${50 - (PERFECT_CENTS / METER_RANGE) * 50}%`,
                   height: `${((PERFECT_CENTS * 2) / METER_RANGE) * 50}%`,
@@ -385,26 +383,26 @@ export default function SolfegeGame({ player, roomId, onComplete }: SolfegeGameP
                   height: `${((CLOSE_CENTS * 2) / METER_RANGE) * 50}%`,
                 }}
               />
-              <div className="absolute inset-x-0 top-1/2 h-0.5 bg-white/70" />
+              <div className="absolute inset-x-0 top-1/2 h-0.5 bg-white/70 shadow-[0_0_10px_white]" />
 
               {liveCents !== null && (
                 <div
-                  className={`absolute inset-x-2 h-2 rounded-full transition-all duration-150 ease-out ${
+                  className={`absolute inset-x-2 h-4 rounded-full transition-all duration-150 ease-out z-10 border-2 border-white/50 ${
                     quality === 'perfect'
-                      ? 'bg-emerald-400 shadow-[0_0_12px_rgba(0,230,118,0.9)]'
+                      ? 'bg-emerald-400 shadow-[0_0_20px_rgba(52,211,153,1)]'
                       : quality === 'close'
-                      ? 'bg-amber-400'
-                      : 'bg-red-400'
+                      ? 'bg-amber-400 shadow-[0_0_20px_rgba(251,191,36,1)]'
+                      : 'bg-red-500 shadow-[0_0_20px_rgba(239,68,68,1)]'
                   }`}
-                  style={{ top: `calc(${markerPct}% - 4px)` }}
+                  style={{ top: `calc(${markerPct}% - 8px)` }}
                 />
               )}
 
-              <span className="absolute top-1 left-1/2 -translate-x-1/2 text-[8px] font-black text-gray-500">
-                HIGH
+              <span className="absolute top-2 left-1/2 -translate-x-1/2 text-[10px] font-black text-gray-400 uppercase">
+                TOO HIGH
               </span>
-              <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[8px] font-black text-gray-500">
-                LOW
+              <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-black text-gray-400 uppercase">
+                TOO LOW
               </span>
             </div>
           </div>

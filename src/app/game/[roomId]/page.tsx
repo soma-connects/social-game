@@ -10,6 +10,13 @@ import RoomLobby from '@/components/RoomLobby';
 import VoiceGameController from '@/components/VoiceGameController';
 import PitchBirdCanvas from '@/components/PitchBirdCanvas';
 import SolfegeGame from '@/components/SolfegeGame';
+import SpellingBeeGame from '@/components/SpellingBeeGame';
+import TruthOrBluffGame from '@/components/TruthOrBluffGame';
+import StoryBuilderGame from '@/components/StoryBuilderGame';
+import DebateGame from '@/components/DebateGame';
+import GuessTheVoiceGame from '@/components/GuessTheVoiceGame';
+import TriviaShowdownGame from '@/components/TriviaShowdownGame';
+import AsteroidDefenseGame from '@/components/AsteroidDefenseGame';
 import PowerupShop from '@/components/PowerupShop';
 import RoadmapBoard from '@/components/RoadmapBoard';
 import TrapWordPicker from '@/components/TrapWordPicker';
@@ -21,11 +28,13 @@ import GeminiAiMasterStage from '@/components/GeminiAiMasterStage';
 import SocialVoicePanel from '@/components/SocialVoicePanel';
 import SpectatorView from '@/components/SpectatorView';
 import RoastIntermission from '@/components/RoastIntermission';
+import BattleScoreboard from '@/components/BattleScoreboard';
+import TeamBattleGameSelect from '@/components/TeamBattleGameSelect';
 import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
-import { MAX_PLAYERS, getTeam } from '@/lib/gameRules';
+import { MAX_PLAYERS, BOARD_GRAPH, getTeam } from '@/lib/gameRules';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { voiceChat } from '@/lib/voiceChat';
@@ -75,12 +84,6 @@ export default function GameRoomPage() {
   const { room, status, error } = snapshot;
 
   // ── Voice replay ──────────────────────────────────────────────────────────
-  // Everyone records the performer independently, from whichever source they
-  // already have: the performer captures their own mic, listeners capture the
-  // peer audio they are hearing anyway. No clip is ever transmitted — each tab
-  // ends up with its own local copy of the same moment.
-  //
-  // Declared above the early returns: these are hooks.
   const myPlayerId = roomStore.getMyPlayerId();
   const performer = room?.players[room.activePlayerIndex] ?? null;
   const isPerformer = !!performer && performer.id === myPlayerId;
@@ -94,8 +97,6 @@ export default function GameRoomPage() {
       setCaptureStream(null);
       return;
     }
-    // The peer stream can arrive a beat after the turn starts, so poll briefly
-    // rather than sampling once and giving up.
     const resolve = () =>
       setCaptureStream(isPerformer ? micStream.getStream() : voiceChat.getRemoteStream(performer.id));
     resolve();
@@ -109,9 +110,6 @@ export default function GameRoomPage() {
   });
 
   // ── Presence ──────────────────────────────────────────────────────────────
-  // A closed tab is indistinguishable from a slow player unless we say so.
-  // Beat every 8s against a 25s server timeout, and fire a beacon on unload so
-  // a deliberate close is noticed immediately rather than 25 seconds later.
   useEffect(() => {
     if (!myPlayerId) return;
 
@@ -167,8 +165,6 @@ export default function GameRoomPage() {
     );
   }
 
-  // The room genuinely does not exist on the server — say so instead of quietly
-  // manufacturing a new one with this player as host.
   if (!room || status === 'missing') {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-partyDark">
@@ -263,9 +259,11 @@ export default function GameRoomPage() {
     roomStore.startMatch(roomId);
   };
 
-  const handleSelectMode = (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master') => {
+  const handleSelectMode = (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle') => {
     if (mode === 'board') {
       handleStartMatch();
+    } else if (mode === 'team_battle') {
+      setComingSoonTitle('⚔️ Team Battle Mode');
     } else if (mode === 'ai_master') {
       setShowGeminiMode(true);
     } else if (mode === 'karaoke') {
@@ -279,9 +277,6 @@ export default function GameRoomPage() {
     roomStore.completeMiniGame(roomId, game, pointsEarned);
   };
 
-  // Deliberately not memoised — this sits after the component's early returns,
-  // so a hook here would break the Rules of Hooks. RoastIntermission holds it
-  // in a ref instead, so its countdown does not care about this identity.
   const handleFinishRoast = () => {
     roomStore.finishRoast(roomId);
   };
@@ -315,17 +310,15 @@ export default function GameRoomPage() {
         onOpenTrapPicker={() => setShowTrapPicker(true)}
         onGoHome={() => router.push('/')}
         onLeaveGame={handleLeaveGame}
+        showThemeSelector={room.phase !== 'lobby'}
       />
 
-      {/* Connection trouble is surfaced rather than swallowed */}
       {status === 'error' && error && (
         <div className="bg-amber-500/20 border-b border-amber-500/50 text-amber-200 text-xs font-bold px-4 py-2 text-center flex items-center justify-center gap-2">
           <AlertTriangle className="w-3.5 h-3.5" /> {error}
         </div>
       )}
 
-      {/* Wider than max-w-7xl: the two sidebars take ~576px, so a 1280 cap left
-          the play area at 608px on a 1440 screen with dead margins either side. */}
       <div className="max-w-[1700px] mx-auto w-full p-4 sm:p-6 flex flex-col lg:flex-row gap-5 xl:gap-6 flex-1">
         <LeftSidebar
           roomId={roomId}
@@ -333,8 +326,8 @@ export default function GameRoomPage() {
           activePlayerId={activePlayer.id}
           leaderId={leaderPlayer.id}
           myPlayerId={myPlayer.id}
-          teamMode={room.teamMode}
           canManage={myPlayer.isHost}
+          roomType={room.roomType}
           onKickPlayer={(p) => roomStore.kickPlayer(roomId, p.id, myPlayer.id)}
         />
 
@@ -343,18 +336,9 @@ export default function GameRoomPage() {
             roomId={roomId}
             players={room.players}
             myPlayer={myPlayer}
-            // Quiet the others while this player is being scored, so the speech
-            // recogniser hears them and not the call coming out of the speaker.
             duckRemote={isAttemptPhase && isMyTurn}
-            // Everyone but the performer is closed while an attempt is scored;
-            // the reaction buttons are the room's channel for those seconds.
             autoMute={isAttemptPhase && !isMyTurn}
-            // Nobody joins or leaves the call mid-attempt; shrink it out of the way.
             compact={isAttemptPhase}
-            // Connect as soon as there is somebody to talk to — including in
-            // the lobby, which is exactly when people are waiting around and
-            // want to chat. Gating this on the match having started left the
-            // room silent during the part where they are just hanging out.
             autoJoin={room.players.length >= 2}
           />
 
@@ -394,7 +378,14 @@ export default function GameRoomPage() {
             />
           )}
 
-          {/* Step 1 — qualifying mini-game (voice arena) */}
+          {room.roomType === 'team_battle' && room.phase !== 'lobby' && room.phase !== 'game_over' && (
+            <BattleScoreboard room={room} />
+          )}
+
+          {room.phase === 'team_battle_select' && (
+            <TeamBattleGameSelect room={room} myPlayerId={myPlayer.id} />
+          )}
+
           {room.phase === 'qualifying_voice' && (
             <div className="space-y-6">
               {isMyTurn ? (
@@ -411,11 +402,10 @@ export default function GameRoomPage() {
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
-              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
 
-          {/* Step 1 — qualifying mini-game (PitchBird) */}
           {room.phase === 'pitch_bird' && (
             <div className="space-y-6">
               {isMyTurn ? (
@@ -432,11 +422,10 @@ export default function GameRoomPage() {
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
-              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
 
-          {/* Step 1.5 — 15-second open-mic roast intermission */}
           {room.phase === 'roast_intermission' && (
             <div className="space-y-6">
               <RoastIntermission
@@ -446,11 +435,10 @@ export default function GameRoomPage() {
                 replayClip={replayClip}
                 onFinishRoast={handleFinishRoast}
               />
-              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
 
-          {/* Step 1 — qualifying mini-game (Karaoke / solfège) */}
           {room.phase === 'solfege' && (
             <div className="space-y-6">
               {isMyTurn ? (
@@ -467,14 +455,125 @@ export default function GameRoomPage() {
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
+            </div>
+          )}
+
+          {room.phase === 'spelling_bee' && (
+            <div className="space-y-6">
+              {isMyTurn ? (
+                <SpellingBeeGame
+                  room={room}
+                  activePlayer={activePlayer}
+                  onCompleteTurn={handleMiniGameComplete('spelling_bee')}
+                />
+              ) : (
+                <SpectatorView
+                  activePlayer={activePlayer}
+                  live={room.liveState ?? null}
+                  label="is spelling in the Spelling Bee 🐝"
+                />
+              )}
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
             </div>
           )}
 
-          {/* Step 2 — spend the points the mini-game just earned */}
+          {room.phase === 'truth_or_bluff' && (
+            <div className="space-y-6">
+              <TruthOrBluffGame
+                room={room}
+                activePlayer={activePlayer}
+                myPlayer={myPlayer}
+                isMyTurn={isMyTurn}
+                roomId={roomId}
+              />
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
+            </div>
+          )}
+
+          {room.phase === 'story_builder' && (
+            <div className="space-y-6">
+              <StoryBuilderGame
+                room={room}
+                activePlayer={activePlayer}
+                myPlayer={myPlayer}
+                isMyTurn={isMyTurn}
+                roomId={roomId}
+              />
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+            </div>
+          )}
+
+          {room.phase === 'debate' && (
+            <div className="space-y-6">
+              <DebateGame
+                room={room}
+                activePlayer={activePlayer}
+                myPlayer={myPlayer}
+                isMyTurn={isMyTurn}
+                roomId={roomId}
+              />
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+            </div>
+          )}
+
+          {room.phase === 'guess_the_voice' && (
+            <div className="space-y-6">
+              <GuessTheVoiceGame
+                room={room}
+                activePlayer={activePlayer}
+                myPlayer={myPlayer}
+                isMyTurn={isMyTurn}
+                roomId={roomId}
+              />
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+            </div>
+          )}
+
+          {room.phase === 'trivia_showdown' && (
+            <div className="space-y-6">
+              {isMyTurn ? (
+                <TriviaShowdownGame
+                  room={room}
+                  activePlayer={activePlayer}
+                  onCompleteTurn={handleMiniGameComplete('trivia_showdown')}
+                />
+              ) : (
+                <SpectatorView
+                  activePlayer={activePlayer}
+                  live={room.liveState ?? null}
+                  label="is answering Trivia in Trivia Showdown 🧠"
+                />
+              )}
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+            </div>
+          )}
+
+          {room.phase === 'asteroid_defense' && (
+            <div className="space-y-6">
+              {isMyTurn ? (
+                <AsteroidDefenseGame
+                  room={room}
+                  activePlayer={activePlayer}
+                  onCompleteTurn={handleMiniGameComplete('asteroid_defense')}
+                />
+              ) : (
+                <SpectatorView
+                  activePlayer={activePlayer}
+                  live={room.liveState ?? null}
+                  label="is defending the station from ASTEROIDS ☄️"
+                />
+              )}
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+            </div>
+          )}
+
           {room.phase === 'powerup_shop' && (
             <div className="space-y-6">
-              {/* Everyone shops at the same time — no waiting your turn. */}
               <PowerupShop
                 roomId={roomId}
                 myPlayer={myPlayer}
@@ -490,20 +589,61 @@ export default function GameRoomPage() {
           )}
 
           {/* Step 3 — move on the main board */}
-          {room.phase === 'roadmap_turn' && (
-            <RoadmapBoard
-              room={room}
-              activePlayer={activePlayer}
-              canRoll={isMyTurn}
-              onTriggerDare={setActiveDareTarget}
-              onNextTurn={handleFinishRoadmapTurn}
-            />
+          {(room.phase === 'roadmap_turn' || room.phase === 'branch_choice') && (
+            <>
+              <RoadmapBoard
+                room={room}
+                activePlayer={activePlayer}
+                canRoll={isMyTurn && room.phase === 'roadmap_turn'}
+                onTriggerDare={setActiveDareTarget}
+                onNextTurn={handleFinishRoadmapTurn}
+              />
+              {room.phase === 'branch_choice' && (
+                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
+                  <div className="bg-slate-900 border border-partyYellow rounded-3xl p-6 max-w-md w-full text-center space-y-6 shadow-2xl">
+                    <Map className="w-12 h-12 text-partyYellow mx-auto animate-bounce" />
+                    <h2 className="text-2xl font-black text-white">FORK IN THE ROAD!</h2>
+                    {isMyTurn ? (
+                      <>
+                        <p className="text-gray-300">Choose your path wisely to proceed.</p>
+                        <div className="flex flex-col gap-3">
+                          {BOARD_GRAPH[activePlayer.boardPosition]?.next.map((nextId) => {
+                            const node = BOARD_GRAPH[nextId];
+                            if (!node) return null;
+                            const isRisky = node.type === 'debuff' || node.type === 'trap' || node.type === 'duel';
+                            return (
+                              <button
+                                key={nextId}
+                                onClick={() => {
+                                  audioSFX.playPop();
+                                  void roomStore.send(roomId, { action: 'choose_branch', nodeId: nextId });
+                                }}
+                                className={`w-full py-4 px-6 rounded-2xl font-black text-white transition-all transform hover:scale-105 active:scale-95 border-2 flex justify-between items-center ${
+                                  isRisky 
+                                    ? 'bg-red-500/20 border-red-500 hover:bg-red-500/40 text-red-200' 
+                                    : 'bg-emerald-500/20 border-emerald-500 hover:bg-emerald-500/40 text-emerald-200'
+                                }`}
+                              >
+                                <span>{isRisky ? '💀 RISKY PATH' : '🌱 SAFE PATH'}</span>
+                                <span className="opacity-60 text-sm">Node #{nextId + 1}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-gray-300">Waiting for {activePlayer.name} to choose a path...</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {room.phase === 'game_over' && room.winner && (() => {
             // In team mode the crew takes the win, with the player who crossed
             // the line credited underneath.
-            const team = room.teamMode && room.winningTeam ? getTeam(room.winningTeam) : null;
+            const team = room.roomType === 'team_battle' && room.winningTeam ? getTeam(room.winningTeam) : null;
             const crew = team ? room.players.filter((p) => p.teamId === team.id) : [];
 
             return (
@@ -558,12 +698,14 @@ export default function GameRoomPage() {
           })()}
         </main>
 
-        <RightSidebar
-          activePlayer={activePlayer}
-          myPlayer={myPlayer}
-          events={room.events ?? []}
-          onUsePowerup={handleUsePowerup}
-        />
+        {room.phase !== 'lobby' && (
+          <RightSidebar
+            activePlayer={activePlayer}
+            myPlayer={myPlayer}
+            events={room.events ?? []}
+            onUsePowerup={handleUsePowerup}
+          />
+        )}
       </div>
 
       {/* Mobile-Only Bottom Action Bar (Keeps mobile game view 100% clean & decluttered!) */}

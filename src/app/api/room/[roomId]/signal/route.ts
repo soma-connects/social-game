@@ -38,7 +38,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
     return NextResponse.json({ error: 'Malformed request body' }, { status: 400 });
   }
 
-  const room = readRoom(roomId);
+  const room = await readRoom(roomId);
   if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
 
   const playerId = String(body.playerId ?? '');

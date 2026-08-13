@@ -42,6 +42,10 @@ export type Player = {
   vibeScore?: number;
   badges?: string[];
   boardPosition: number;
+  /** Set when a player is paused at a branching node with remaining dice steps */
+  remainingSteps?: number;
+  hasShield?: boolean;
+  skipNextTurn?: boolean;
   inventory: string[];
   isHost: boolean;
   isReady: boolean;
@@ -49,7 +53,7 @@ export type Player = {
   ping?: number;
 };
 
-export type LanguageCode = 'hausa' | 'igbo' | 'yoruba' | 'pidgin' | 'spanish' | 'french' | 'japanese' | 'korean';
+export type LanguageCode = 'hausa' | 'yoruba' | 'english' | 'spanish' | 'french' | 'japanese' | 'korean' | 'spelling_bee';
 
 export type ChallengeType = 'language' | 'math' | 'trap';
 
@@ -97,21 +101,117 @@ export type PowerupItem = {
   count: number;
 };
 
-export type TileNodeType = 'normal' | 'buff' | 'debuff' | 'dare' | 'mystery' | 'bonus' | 'trap';
+export type TileNodeType = 'normal' | 'buff' | 'debuff' | 'dare' | 'mystery' | 'bonus' | 'trap' | 'duel' | 'empty';
+
+export type BoardNode = {
+  id: number;
+  type: TileNodeType;
+  next: number[];
+  x: number;
+  y: number;
+};
 
 export type GamePhase =
   | 'lobby'
   | 'qualifying_voice'
   | 'powerup_shop'
   | 'roadmap_turn'
+  | 'branch_choice'
+  | 'duel_challenge'
   | 'peer_dare'
   | 'pitch_bird'
   | 'solfege'
+  | 'spelling_bee'
+  | 'truth_or_bluff'
+  | 'story_builder'
+  | 'debate'
+  | 'guess_the_voice'
   | 'roast_intermission'
+  | 'team_battle_select'
+  | 'team_battle_intro'
+  | 'team_battle_recap'
+  | 'trivia_showdown'
+  | 'asteroid_defense'
   | 'game_over';
 
 /** The qualifying mini-games that feed the main board game. */
-export type MiniGameId = 'voice_arena' | 'pitch_bird' | 'solfege';
+export type MiniGameId = 'voice_arena' | 'pitch_bird' | 'solfege' | 'spelling_bee' | 'truth_or_bluff' | 'story_builder' | 'debate' | 'guess_the_voice' | 'trivia_showdown' | 'asteroid_defense';
+
+/** State for a Truth or Bluff round. */
+export type TruthBluffState = {
+  performerId: string;
+  prompt: string;
+  claims: string[];
+  /**
+   * Which claim was the lie. Absent until the reveal — the whole room
+   * subscribes to this document, so publishing it early hands everyone the
+   * answer. Held server-side in the room's private state until then.
+   */
+  lieIndex?: number | null;
+  votes: Record<string, number>;
+  phase: 'prompting' | 'speaking' | 'voting' | 'reveal';
+  revealedAt?: number;
+};
+
+/** State for a Story Builder round. */
+export type StoryBuilderState = {
+  prompt: string;
+  story: Array<{ playerId: string; sentence: string }>;
+  currentPlayerIndex: number;
+  phase: 'prompting' | 'speaking' | 'voting' | 'reveal';
+  votes: Record<string, string>; // voterId -> playerId they voted for funniest
+  revealedAt?: number;
+};
+
+/** State for a Debate round. */
+export type DebateState = {
+  player1Id: string;
+  player2Id: string;
+  topic: string;
+  side1: string;
+  side2: string;
+  phase: 'intro' | 'p1_speaking' | 'p2_speaking' | 'voting' | 'reveal';
+  votes: Record<string, number>; // voterId -> 1 or 2
+  revealedAt?: number;
+};
+
+/** State for a Guess the Voice round. */
+export type GuessTheVoiceState = {
+  performerId: string;
+  prompt: string;
+  audioBlobUrl: string | null;
+  phase: 'prompting' | 'recording' | 'playback' | 'voting' | 'reveal';
+  votes: Record<string, string>; // voterId -> guessedPlayerId
+  revealedAt?: number;
+};
+
+/** State for a Trivia Showdown round. */
+export type TriviaState = {
+  question: string;
+  /**
+   * Answer and fun fact are withheld until the reveal, for the same reason as
+   * the Truth or Bluff lie: the room reads this document live, so shipping the
+   * answer alongside the question makes the round unwinnable to lose. Grading
+   * happens server-side via the `trivia_answer` action.
+   */
+  answer?: string;
+  funFact?: string;
+  buzzedPlayerId: string | null;
+  phase: 'asking' | 'answering' | 'reveal';
+  winnerId: string | null;
+  /** Set at the reveal so the UI can say what was actually heard. */
+  lastAnswerText?: string;
+  revealedAt?: number;
+};
+
+/** A small structured event for the Session Memory Service (powers Who Said It? later). */
+export type SessionMemoryEvent = {
+  playerId: string;
+  playerName: string;
+  category: 'truth_bluff' | 'fun_fact' | 'story' | 'debate' | 'icebreaker';
+  text: string;
+  timestamp: number;
+};
 
 /** What a finished mini-game earned the player this turn. */
 export type TurnResult = {
@@ -186,6 +286,11 @@ export type SocialRound = {
 
 export type RoomState = {
   roomId: string;
+  /**
+   * Bumped by the server on every write. Used to detect two requests mutating
+   * the room at once; clients should ignore it.
+   */
+  rev?: number;
   hostId: string;
   phase: GamePhase;
   players: Player[];
@@ -202,10 +307,19 @@ export type RoomState = {
     passed?: boolean;
   } | null;
   winner: Player | null;
+  /** The high-level mode the room is running in. */
+  roomType?: 'board_game' | 'team_battle';
   /** Set instead of a solo winner when the room is in team mode. */
   winningTeam?: TeamId | null;
-  /** Players are split into two crews; everyone still performs solo. */
-  teamMode?: boolean;
+  /** Cumulative scores in Team Battle mode. */
+  teamScores?: Record<TeamId, number>;
+  /** State specific to Team Battle mode. */
+  teamBattleState?: {
+    selectedGames: MiniGameId[];
+    currentGameIndex: number;
+    currentRound: number;
+    seriesLength: number;
+  } | null;
   theme?: MapTheme;
   events?: EventLog[];
   /** Mini-games the host enabled for this match. */
@@ -231,4 +345,17 @@ export type RoomState = {
   rollIndex?: number;
   /** Players who have finished buying this round. */
   shopReady?: string[];
+
+  /** Truth or Bluff round state (active during truth_or_bluff phase). */
+  truthBluffState?: TruthBluffState | null;
+  /** Story Builder state. */
+  storyBuilderState?: StoryBuilderState | null;
+  /** Debate state. */
+  debateState?: DebateState | null;
+  /** Trivia state. */
+  triviaState?: TriviaState | null;
+  /** Guess the Voice state. */
+  guessTheVoiceState?: GuessTheVoiceState | null;
+  /** Session memory — small structured events for Who Said It? and AI callbacks. */
+  sessionMemory?: SessionMemoryEvent[];
 };

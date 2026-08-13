@@ -1,19 +1,21 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { ArrowRight, Dices, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ArrowRight, Dices } from 'lucide-react';
 import { MapTheme, Player, RoomState } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
 import confetti from 'canvas-confetti';
 import AvatarIllustration from './AvatarIllustration';
 import MapRenderer from './MapRenderer';
+import DiceRoller from './DiceRoller';
+import TileEventOverlay from './TileEventOverlay';
 import { TOTAL_TILES } from '@/lib/gameRules';
 
 interface RoadmapBoardProps {
   room: RoomState;
   activePlayer: Player;
-  /** Only the player whose turn it is may reveal their move. */
+  /** Only the player whose turn it is may roll. */
   canRoll: boolean;
   onTriggerDare: (targetPlayer: Player) => void;
   onNextTurn: () => void;
@@ -22,68 +24,108 @@ interface RoadmapBoardProps {
 export default function RoadmapBoard({ room, activePlayer, canRoll, onTriggerDare, onNextTurn }: RoadmapBoardProps) {
   const [diceValue, setDiceValue] = useState<number | null>(null);
   const [isRolling, setIsRolling] = useState(false);
-  const [hasRolled, setHasRolled] = useState(false);
+  
+  // Initialize from server state so we don't get trapped on refresh
+  const serverHasRolled = room.roundResults?.find(r => r.playerId === activePlayer.id)?.rolled ?? false;
+  const [hasRolled, setHasRolled] = useState(serverHasRolled);
+
   const [tileMessage, setTileMessage] = useState('');
   const [banner, setBanner] = useState<string | null>(null);
+  const [showOverlay, setShowOverlay] = useState(false);
   const [rollError, setRollError] = useState<string | null>(null);
+  const [preRollPosition, setPreRollPosition] = useState<number | null>(null);
+  /** True between sending our roll and finishing its reveal animation. */
+  const rollInFlight = useRef(false);
 
   // A new turn resets the dice.
+  //
+  // Keyed on the turn, NOT on `room.roundResults` — that array is rebuilt on
+  // every Firestore snapshot, so any player's heartbeat used to re-run this and
+  // wipe the landing banner out from under whoever was reading it.
+  const turnKey = `${room.roundNumber ?? 0}:${room.rollIndex ?? 0}:${activePlayer.id}`;
   useEffect(() => {
+    rollInFlight.current = false;
     setDiceValue(null);
     setIsRolling(false);
-    setHasRolled(false);
     setTileMessage('');
     setBanner(null);
+    setShowOverlay(false);
     setRollError(null);
-  }, [room.activePlayerIndex]);
+    setPreRollPosition(null);
+  }, [turnKey]);
+
+  // The server is the authority on whether this turn's roll already happened —
+  // that has to survive a refresh mid-turn. But it marks the roll done the
+  // instant the request lands, so it is ignored while our own dice and token
+  // animation is still playing out.
+  useEffect(() => {
+    if (rollInFlight.current) return;
+    setHasRolled(serverHasRolled);
+  }, [turnKey, serverHasRolled]);
 
   const rollDice = async () => {
     if (isRolling || hasRolled || !canRoll) return;
 
+    rollInFlight.current = true;
     setIsRolling(true);
     setRollError(null);
+    setPreRollPosition(activePlayer.boardPosition);
     audioSFX.playDiceRoll();
 
-    // Not a random roll — the server returns the movement this player earned in
-    // the mini-game. The delay is only so the dice animation has time to play.
-    const [result] = await Promise.all([
-      roomStore.rollDice(room.roomId),
-      new Promise((resolve) => setTimeout(resolve, 800)),
-    ]);
-
-    setIsRolling(false);
+    // Ask the server to roll random dice and resolve the landing tile.
+    const result = await roomStore.rollDice(room.roomId);
 
     if (result.error || result.roll === null) {
+      rollInFlight.current = false;
+      setIsRolling(false);
       setRollError(result.error ?? 'The roll did not go through. Try again.');
+      setPreRollPosition(null);
       return;
     }
 
     setDiceValue(result.roll);
-    setHasRolled(true);
 
     const outcome = result.outcome;
-    if (!outcome) return;
-
-    setBanner(outcome.banner);
-    setTileMessage(outcome.message);
-
-    if (outcome.banner?.includes('FINISH')) {
-      audioSFX.playChoiSuccess();
-      confetti({ particleCount: 150, spread: 90, origin: { y: 0.6 } });
-    } else if (outcome.banner?.includes('BOOST')) {
-      audioSFX.playPowerUpZap();
-    } else if (outcome.banner?.includes('DEBUFF')) {
-      audioSFX.playWhaalaFailure();
+    if (!outcome && !result.waitingForBranch) {
+      rollInFlight.current = false;
+      setIsRolling(false);
+      return;
     }
 
-    if (outcome.triggersDare) {
-      audioSFX.playNollywoodBrass();
-      const opponents = room.players.filter((p) => p.id !== activePlayer.id);
-      if (opponents.length > 0) {
-        const target = opponents[Math.floor(Math.random() * opponents.length)];
-        setTimeout(() => onTriggerDare(target), 1200);
+    // Hold the token in place while the dice lands, then let the map animate.
+    const tokenMovementTime = result.roll * 500;
+    setTimeout(() => {
+      setIsRolling(false);
+      setPreRollPosition(null);
+    }, 1600);
+
+    setTimeout(() => {
+      rollInFlight.current = false;
+      setHasRolled(true);
+      if (result.waitingForBranch) return; // Branch UI will appear now
+
+      setBanner(outcome.banner);
+      setTileMessage(outcome.message);
+      if (outcome.banner) setShowOverlay(true);
+
+      if (outcome.banner?.includes('FINISH')) {
+        audioSFX.playChoiSuccess();
+        confetti({ particleCount: 150, spread: 90, origin: { y: 0.6 } });
+      } else if (outcome.banner?.includes('WORMHOLE') || outcome.banner?.includes('SHIELD')) {
+        audioSFX.playPowerUpZap();
+      } else if (outcome.banner?.includes('ASTEROID')) {
+        audioSFX.playWhaalaFailure();
       }
-    }
+
+      if (outcome.triggersDare) {
+        audioSFX.playNollywoodBrass();
+        const opponents = room.players.filter((p) => p.id !== activePlayer.id);
+        if (opponents.length > 0) {
+          const target = opponents[Math.floor(Math.random() * opponents.length)];
+          setTimeout(() => onTriggerDare(target), 1200);
+        }
+      }
+    }, 1700 + tokenMovementTime);
   };
 
   const currentTheme: MapTheme = room.theme || 'forest';
@@ -94,6 +136,9 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onTriggerDar
       {/* Background Ambient Glow */}
       <div className="absolute top-10 left-1/4 w-72 h-72 bg-cyan-500/15 blur-3xl rounded-full pointer-events-none" />
       <div className="absolute bottom-10 right-1/4 w-80 h-80 bg-partyYellow/15 blur-3xl rounded-full pointer-events-none" />
+
+      {/* Board Background Music */}
+      <audio src="/audios/maksymmalko-game-minecraft-gaming-background-music-402451.mp3" autoPlay loop className="hidden" />
 
       {/* Dynamic Event Banner */}
       {banner && (
@@ -117,7 +162,11 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onTriggerDar
       {/* Main Clean 3D Map Renderer */}
       <MapRenderer
         theme={currentTheme}
-        players={room.players}
+        players={room.players.map(p =>
+          (p.id === activePlayer.id && isRolling && preRollPosition !== null)
+            ? { ...p, boardPosition: preRollPosition }
+            : p
+        )}
         activePlayerId={activePlayer.id}
         totalTiles={TOTAL_TILES}
       />
@@ -137,7 +186,7 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onTriggerDar
             }`}
           >
             <Dices className={`w-6 h-6 ${isRolling ? 'animate-spin' : ''}`} />
-            <span>{isRolling ? 'ROLLING DICE…' : !canRoll ? 'WAITING FOR TURN…' : 'ROLL DICE'}</span>
+            <span>{isRolling ? 'ROLLING DICE...' : !canRoll ? 'WAITING FOR TURN...' : 'ROLL DICE'}</span>
           </button>
         ) : (
           canRoll && (
@@ -151,12 +200,23 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onTriggerDar
           )
         )}
 
-        {earnedSteps !== null && !hasRolled && canRoll && (
-          <span className="bg-slate-900/90 text-emerald-400 border border-emerald-500/40 text-[10px] font-black px-3 py-1 rounded-full shadow-lg backdrop-blur-md">
-            🎯 Mini-Game Score Earned {earnedSteps} Step{earnedSteps === 1 ? '' : 's'}
-          </span>
+        {/* DICE ROLLER OVERLAY */}
+        {diceValue !== null && (
+          <DiceRoller
+            isRolling={isRolling}
+            value={diceValue}
+            onRollComplete={() => {}}
+          />
         )}
       </div>
+
+      {showOverlay && banner && tileMessage && (
+        <TileEventOverlay
+          banner={banner}
+          message={tileMessage}
+          onComplete={() => setShowOverlay(false)}
+        />
+      )}
     </div>
   );
 }

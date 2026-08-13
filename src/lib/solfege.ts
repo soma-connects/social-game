@@ -31,8 +31,9 @@ export const SOLFEGE: SolfegeDegree[] = [
 ];
 
 /** Cents inside which a note counts as hit. A semitone is 100 cents. */
-export const PERFECT_CENTS = 50;
-export const CLOSE_CENTS = 110;
+// WIDENED tolerances so casual players don't fail as easily
+export const PERFECT_CENTS = 80;
+export const CLOSE_CENTS = 160;
 
 /** Seconds the player has to find and hold the note. */
 export const HOLD_SECONDS = 4;

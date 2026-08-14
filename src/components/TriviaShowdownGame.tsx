@@ -139,7 +139,7 @@ export default function TriviaShowdownGame({
     setStatus('listening');
     setTranscript('');
     try {
-      const accessError = await speechEngine.requestMicAccess();
+      const accessError = await speechEngine.probeMicPermission();
       if (accessError) return;
 
       sessionRef.current = speechEngine.listenForSpeech({
@@ -306,4 +306,5 @@ export default function TriviaShowdownGame({
     </div>
   );
 }
+
 

@@ -34,7 +34,8 @@ import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
-import { MAX_PLAYERS, BOARD_GRAPH, getTeam } from '@/lib/gameRules';
+import { MAX_PLAYERS, BOARD_GRAPH, ShopItem, getShopItem, getTeam } from '@/lib/gameRules';
+import PowerupTargetPicker from '@/components/PowerupTargetPicker';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { voiceChat } from '@/lib/voiceChat';
@@ -65,6 +66,8 @@ export default function GameRoomPage() {
   const [showGeminiMode, setShowGeminiMode] = useState(false);
   const [comingSoonTitle, setComingSoonTitle] = useState<string | null>(null);
   const [activeDareTarget, setActiveDareTarget] = useState<Player | null>(null);
+  /** Set while an offensive powerup is waiting for a target to be chosen. */
+  const [pendingPowerup, setPendingPowerup] = useState<ShopItem | null>(null);
   const [guestNameInput, setGuestNameInput] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -259,11 +262,12 @@ export default function GameRoomPage() {
     roomStore.startMatch(roomId);
   };
 
-  const handleSelectMode = (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle') => {
+  const handleSelectMode = async (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle') => {
     if (mode === 'board') {
       handleStartMatch();
     } else if (mode === 'team_battle') {
-      setComingSoonTitle('⚔️ Team Battle Mode');
+      await roomStore.setTeamMode(roomId, true);
+      handleStartMatch();
     } else if (mode === 'ai_master') {
       setShowGeminiMode(true);
     } else if (mode === 'karaoke') {
@@ -289,16 +293,35 @@ export default function GameRoomPage() {
     roomStore.advanceTurn(roomId);
   };
 
+  /**
+   * Spends a powerup, asking who it hits when the item needs a victim.
+   *
+   * Self items fire straight away; the offensive ones open the picker, because
+   * the server now requires a target and rejects the request without one.
+   */
   const handleUsePowerup = (powerupId: string) => {
+    const item = getShopItem(powerupId);
+    if (!item) return;
+
+    if (item.target === 'opponent') {
+      setPendingPowerup(item);
+      return;
+    }
     audioSFX.playPowerUpZap();
     roomStore.usePowerup(roomId, powerupId);
   };
 
+  const handlePickTarget = (target: Player) => {
+    if (!pendingPowerup) return;
+    audioSFX.playPowerUpZap();
+    roomStore.usePowerup(roomId, pendingPowerup.id, target.id);
+    setPendingPowerup(null);
+  };
+
   const handleResolveDare = (passed: boolean) => {
-    if (activeDareTarget) {
-      roomStore.resolveDare(roomId, activeDareTarget.id, passed);
+    if (room.currentDare) {
+      roomStore.resolveDare(roomId, room.currentDare.targetPlayerId, passed);
     }
-    setActiveDareTarget(null);
   };
 
   return (
@@ -595,7 +618,6 @@ export default function GameRoomPage() {
                 room={room}
                 activePlayer={activePlayer}
                 canRoll={isMyTurn && room.phase === 'roadmap_turn'}
-                onTriggerDare={setActiveDareTarget}
                 onNextTurn={handleFinishRoadmapTurn}
               />
               {room.phase === 'branch_choice' && (
@@ -844,11 +866,29 @@ export default function GameRoomPage() {
         />
       )}
 
-      {activeDareTarget && (
-        <PeerReviewDareModal
-          targetPlayer={activeDareTarget}
-          challengerPlayer={activePlayer}
-          onResolveDare={handleResolveDare}
+      {/* Driven by room.currentDare so the whole room sees the same dare, and a
+          refresh mid-dare does not lose it. */}
+      {room.currentDare && (() => {
+        const target = room.players.find((p) => p.id === room.currentDare!.targetPlayerId);
+        const challenger = room.players.find((p) => p.id === room.currentDare!.challengerPlayerId);
+        if (!target || !challenger) return null;
+        return (
+          <PeerReviewDareModal
+            dareText={room.currentDare!.dareText}
+            targetPlayer={target}
+            challengerPlayer={challenger}
+            canJudge={myPlayer.id !== target.id}
+            onResolveDare={handleResolveDare}
+          />
+        );
+      })()}
+
+      {pendingPowerup && (
+        <PowerupTargetPicker
+          item={pendingPowerup}
+          candidates={room.players.filter((p) => p.id !== myPlayer.id && p.connected !== false)}
+          onPick={handlePickTarget}
+          onCancel={() => setPendingPowerup(null)}
         />
       )}
     </div>

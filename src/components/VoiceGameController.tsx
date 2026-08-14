@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -90,7 +90,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
       return;
     }
 
-    // Only languages we actually have a deck for — a selection can still name
+    // Only languages we actually have a deck for â€” a selection can still name
     // one that has been parked (Hausa, Yoruba) or has no deck at all.
     const playable = room.selectedLanguages.filter((lang) => LANGUAGE_DECKS[lang]?.length);
     const availableLangs = playable.length > 0 ? playable : ['english'];
@@ -157,7 +157,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
 
     // Ask for the microphone before starting the clock. A permission prompt that
     // eats four of the eight seconds is the same as losing the round.
-    const accessError = await speechEngine.requestMicAccess();
+    const accessError = await speechEngine.probeMicPermission();
     if (accessError) {
       setError(accessError);
       return;
@@ -207,7 +207,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     }, 1000);
   };
 
-  // Keep the room in the loop — spectators see the prompt and the transcript as
+  // Keep the room in the loop â€” spectators see the prompt and the transcript as
   // it lands, so they can react to the attempt rather than to a waiting screen.
   useEffect(() => {
     if (!challenge) return;
@@ -223,7 +223,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
           : transcript
           ? `heard: "${transcript}"`
           : status === 'listening'
-          ? 'listening…'
+          ? 'listeningâ€¦'
           : 'about to start',
       good: status === 'matched' ? true : status === 'failed' ? false : undefined,
     });
@@ -303,7 +303,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
                   ? error.message
                   : !caps?.secureContext
                     ? 'The microphone only works over HTTPS. Open the game on its https:// link.'
-                    : 'This browser has no speech recognition. Chrome, Edge and Safari support it — or use the judge button below to score the round manually.'}
+                    : 'This browser has no speech recognition. Chrome, Edge and Safari support it â€” or use the judge button below to score the round manually.'}
               </p>
             </div>
           </div>
@@ -318,7 +318,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
               </span>
               {challenge.type === 'trap' && (
                 <span className="bg-red-500 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full animate-pulse">
-                  ⚡ OPPONENT TRAP
+                  âš¡ OPPONENT TRAP
                 </span>
               )}
             </div>
@@ -329,7 +329,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
 
             {challenge.phonetic && (
               <p className="text-sm sm:text-base text-partyCyan font-mono">
-                🗣️ Phonetic: <span className="font-bold">{challenge.phonetic}</span>
+                ðŸ—£ï¸ Phonetic: <span className="font-bold">{challenge.phonetic}</span>
               </p>
             )}
 
@@ -351,7 +351,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
           <div className="space-y-2 pt-2">
             <div className="flex items-center justify-between text-xs text-emerald-400 font-bold px-1">
               <span className="flex items-center gap-1.5 animate-pulse">
-                <Mic className="w-4 h-4" /> LIVE MIC ACTIVE — SPEAK THE PROMPT CLEARLY!
+                <Mic className="w-4 h-4" /> LIVE MIC ACTIVE â€” SPEAK THE PROMPT CLEARLY!
               </span>
               <span>AUDIO WAVE: {micVolume}%</span>
             </div>
@@ -363,7 +363,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
             </div>
             {micVolume === 0 && (
               <p className="text-[11px] text-gray-400">
-                No sound reaching the mic yet — check the right input device is selected.
+                No sound reaching the mic yet â€” check the right input device is selected.
               </p>
             )}
           </div>
@@ -462,3 +462,4 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     </div>
   );
 }
+

@@ -542,8 +542,9 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'resolve_dare', targetPlayerId, passed });
   }
 
-  public usePowerup(roomId: string, powerupId: string) {
-    return this.post(roomId, { action: 'use_powerup', powerupId });
+  /** `targetPlayerId` is required by the offensive items; the server enforces it. */
+  public usePowerup(roomId: string, powerupId: string, targetPlayerId?: string) {
+    return this.post(roomId, { action: 'use_powerup', powerupId, targetPlayerId });
   }
 
   public advanceTurn(roomId: string) {

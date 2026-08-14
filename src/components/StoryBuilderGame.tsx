@@ -91,7 +91,7 @@ export default function StoryBuilderGame({
     }
     setIsRecording(true);
     try {
-      const accessError = await speechEngine.requestMicAccess();
+      const accessError = await speechEngine.probeMicPermission();
       if (accessError) {
         setIsRecording(false);
         return;
@@ -370,4 +370,5 @@ export default function StoryBuilderGame({
     </div>
   );
 }
+
 

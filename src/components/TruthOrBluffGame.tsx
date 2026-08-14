@@ -104,7 +104,7 @@ export default function TruthOrBluffGame({
     else setIsRecording2(true);
     
     try {
-      const accessError = await speechEngine.requestMicAccess();
+      const accessError = await speechEngine.probeMicPermission();
       if (accessError) {
         if (claimNum === 1) setIsRecording1(false);
         else setIsRecording2(false);
@@ -557,4 +557,5 @@ export default function TruthOrBluffGame({
     </div>
   );
 }
+
 

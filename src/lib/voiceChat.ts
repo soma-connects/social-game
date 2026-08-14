@@ -64,6 +64,7 @@ class VoiceChatManager {
 
   private peers = new Map<string, Peer>();
   private localStream: MediaStream | null = null;
+  private unsubscribeStream: (() => void) | null = null;
 
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private levelFrame: number | null = null;
@@ -137,6 +138,13 @@ class VoiceChatManager {
     this.localStream = stream;
     this.startLevelMeter();
 
+    // On a phone the mic is handed to the speech recogniser during a mini-game
+    // and given back afterwards. Peer connections outlive that, so the track on
+    // each sender has to be swapped rather than the call torn down — otherwise
+    // everyone hears silence from this player for the rest of the session.
+    this.unsubscribeStream?.();
+    this.unsubscribeStream = micStream.onStreamChange((next) => this.onLocalStreamChanged(next));
+
     this.pollTimer = setInterval(() => void this.pollSignals(), SIGNAL_POLL_MS);
     void this.pollSignals();
 
@@ -146,7 +154,35 @@ class VoiceChatManager {
     return null;
   }
 
+  /**
+   * Swaps the outgoing audio track when the shared microphone is suspended for
+   * the speech recogniser and later restored.
+   *
+   * `replaceTrack` is the whole point: it changes what a sender transmits
+   * without renegotiating, so nobody has to re-offer and the call does not
+   * flicker for the other five players.
+   */
+  private onLocalStreamChanged(next: MediaStream | null): void {
+    this.localStream = next;
+    const track = next?.getAudioTracks()[0] ?? null;
+
+    this.peers.forEach((peer) => {
+      const sender = peer.pc?.getSenders().find((s) => s.track?.kind === 'audio' || !s.track);
+      if (!sender) return;
+      sender.replaceTrack(track).catch(() => {
+        /* the connection is going away anyway */
+      });
+    });
+
+    // The level meter is bound to the old stream, so rebuild it against the new
+    // one — otherwise the player's own bar sits at zero after a mini-game.
+    if (next) this.startLevelMeter();
+  }
+
   public leave(): void {
+    this.unsubscribeStream?.();
+    this.unsubscribeStream = null;
+
     if (this.roomId && this.myId) {
       // Best effort — the peers also notice via connection state.
       void this.post({ action: 'leave', playerId: this.myId });

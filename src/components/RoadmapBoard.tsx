@@ -17,11 +17,10 @@ interface RoadmapBoardProps {
   activePlayer: Player;
   /** Only the player whose turn it is may roll. */
   canRoll: boolean;
-  onTriggerDare: (targetPlayer: Player) => void;
   onNextTurn: () => void;
 }
 
-export default function RoadmapBoard({ room, activePlayer, canRoll, onTriggerDare, onNextTurn }: RoadmapBoardProps) {
+export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }: RoadmapBoardProps) {
   const [diceValue, setDiceValue] = useState<number | null>(null);
   const [isRolling, setIsRolling] = useState(false);
   
@@ -36,6 +35,50 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onTriggerDar
   const [preRollPosition, setPreRollPosition] = useState<number | null>(null);
   /** True between sending our roll and finishing its reveal animation. */
   const rollInFlight = useRef(false);
+
+  // ── shared board events ───────────────────────────────────────────────────
+  //
+  // The server records what the board just did; every client plays it. Tracking
+  // the last id we finished means a repeated snapshot never replays the same
+  // wormhole, and a genuinely new event always fires.
+  const [seenEventId, setSeenEventId] = useState<string | null>(null);
+  const boardEvent = room.boardEvent ?? null;
+  const liveEvent = boardEvent && boardEvent.id !== seenEventId ? boardEvent : null;
+
+  useEffect(() => {
+    if (!liveEvent) return;
+    switch (liveEvent.kind) {
+      case 'finish':
+        audioSFX.playChoiSuccess();
+        confetti({ particleCount: 160, spread: 90, origin: { y: 0.6 } });
+        break;
+      case 'asteroid':
+      case 'bomb':
+      case 'rewind':
+        audioSFX.playWhaalaFailure();
+        break;
+      case 'dare':
+      case 'duel':
+        audioSFX.playNollywoodBrass();
+        break;
+      default:
+        audioSFX.playPowerUpZap();
+    }
+  }, [liveEvent?.id]);
+
+  // ── roll deadline ─────────────────────────────────────────────────────────
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  useEffect(() => {
+    if (!room.rollDeadline || room.phase !== 'roadmap_turn') {
+      setSecondsLeft(null);
+      return;
+    }
+    const tick = () =>
+      setSecondsLeft(Math.max(0, Math.ceil((room.rollDeadline! - Date.now()) / 1000)));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [room.rollDeadline, room.phase]);
 
   // A new turn resets the dice.
   //
@@ -103,28 +146,7 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onTriggerDar
       rollInFlight.current = false;
       setHasRolled(true);
       if (result.waitingForBranch) return; // Branch UI will appear now
-
-      setBanner(outcome.banner);
       setTileMessage(outcome.message);
-      if (outcome.banner) setShowOverlay(true);
-
-      if (outcome.banner?.includes('FINISH')) {
-        audioSFX.playChoiSuccess();
-        confetti({ particleCount: 150, spread: 90, origin: { y: 0.6 } });
-      } else if (outcome.banner?.includes('WORMHOLE') || outcome.banner?.includes('SHIELD')) {
-        audioSFX.playPowerUpZap();
-      } else if (outcome.banner?.includes('ASTEROID')) {
-        audioSFX.playWhaalaFailure();
-      }
-
-      if (outcome.triggersDare) {
-        audioSFX.playNollywoodBrass();
-        const opponents = room.players.filter((p) => p.id !== activePlayer.id);
-        if (opponents.length > 0) {
-          const target = opponents[Math.floor(Math.random() * opponents.length)];
-          setTimeout(() => onTriggerDare(target), 1200);
-        }
-      }
     }, 1700 + tokenMovementTime);
   };
 
@@ -140,10 +162,29 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onTriggerDar
       {/* Board Background Music */}
       <audio src="/audios/maksymmalko-game-minecraft-gaming-background-music-402451.mp3" autoPlay loop className="hidden" />
 
-      {/* Dynamic Event Banner */}
-      {banner && (
-        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-center text-sm sm:text-base tracking-wide shadow-2xl border border-partyYellow animate-bounce z-20 relative">
-          ⚡ {banner}
+      {/* Whose turn it is, and how long they have left. Without the clock the
+          room has no idea whether to wait or whether the game has stalled. */}
+      <div className="flex items-center justify-between gap-3 z-20 relative">
+        <p className="text-xs font-black text-white/80 truncate">
+          {canRoll ? 'YOUR ROLL' : `${activePlayer.name.toUpperCase()} IS ROLLING`}
+        </p>
+        {secondsLeft !== null && !hasRolled && (
+          <span
+            className={`font-mono text-xs font-black px-2.5 py-1 rounded-full border ${
+              secondsLeft <= 10
+                ? 'bg-red-500/20 border-red-500/60 text-red-300 animate-pulse'
+                : 'bg-white/5 border-white/15 text-gray-300'
+            }`}
+          >
+            {secondsLeft}s
+          </span>
+        )}
+      </div>
+
+      {/* Last thing the board did, kept on screen after the overlay clears. */}
+      {boardEvent && (
+        <div className="p-3 rounded-2xl bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-center text-xs sm:text-sm tracking-wide shadow-xl border border-partyYellow z-20 relative">
+          {boardEvent.banner}
         </div>
       )}
 
@@ -210,13 +251,9 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onTriggerDar
         )}
       </div>
 
-      {showOverlay && banner && tileMessage && (
-        <TileEventOverlay
-          banner={banner}
-          message={tileMessage}
-          onComplete={() => setShowOverlay(false)}
-        />
-      )}
+      {/* Driven by room.boardEvent, so every player watches the wormhole — not
+          just whoever rolled into it. */}
+      <TileEventOverlay event={liveEvent} onComplete={() => setSeenEventId(liveEvent?.id ?? null)} />
     </div>
   );
 }

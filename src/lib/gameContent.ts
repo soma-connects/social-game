@@ -214,3 +214,23 @@ export const NOLLYWOOD_DARES = [
 ];
 
 export const DARES = NOLLYWOOD_DARES;
+
+/**
+ * Duel tile topics.
+ *
+ * Deliberately silly and unwinnable — a duel is decided by who argues it more
+ * entertainingly, and a topic anyone could actually be right about turns the
+ * room's vote into a fact check instead of a performance.
+ */
+export const DUEL_TOPICS = [
+  'Jollof rice is objectively the best rice dish on earth',
+  'Socks belong on before trousers, always',
+  'A hot dog is a sandwich',
+  'Cereal is technically cold soup',
+  'Sleeping with one leg out of the duvet is the only correct way',
+  'Voice notes over three minutes should be illegal',
+  'Pineapple absolutely belongs on pizza',
+  'Everyone secretly rehearses arguments in the shower',
+  'Cutlery in the sink is worse than cutlery on the counter',
+  'The aisle seat is the superior seat',
+];

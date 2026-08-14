@@ -109,22 +109,72 @@ export function describePerformance(performance: number): string {
 // Points are both the score and the currency, so buying a buff is a real
 // trade-off: spend to move faster now, or hoard and stay top of the table.
 
+/**
+ * Who a powerup acts on.
+ *
+ * This is what decides whether using it opens a target picker. Without it every
+ * item silently applied to whoever pressed the button, which is why the four
+ * offensive items in the shop did nothing at all.
+ */
+export type PowerupTarget =
+  /** Applies to the buyer. */
+  | 'self'
+  /** Needs an opponent chosen before it can be used. */
+  | 'opponent'
+  /** Picks its victim itself — no prompt. */
+  | 'leader';
+
 export type ShopItem = {
   id: PowerupType;
   name: string;
   icon: string;
   description: string;
   price: number;
+  target: PowerupTarget;
+  /** Shown while choosing a victim. */
+  targetPrompt?: string;
 };
 
 export const SHOP_ITEMS: ShopItem[] = [
-  { id: 'boost', name: 'Rocket Nitro', icon: '🚀', description: 'Advance +3 spaces instantly', price: 50 },
-  { id: 'rewind', name: 'Rewind Trap', icon: '⏪', description: 'Push back -2 spaces', price: 75 },
-  { id: 'shield', name: 'Magic Shield', icon: '🛡️', description: 'Block the next debuff or dare', price: 100 },
-  { id: 'dare_gun', name: 'Dare Gun', icon: '🎤', description: 'Force an opponent into a live dare', price: 110 },
-  { id: 'freeze', name: 'Ice Freeze', icon: '❄️', description: 'Freeze an opponent for 1 round', price: 125 },
-  { id: 'bomb', name: 'Point Bomb', icon: '💣', description: 'Blast 50 points off the leader', price: 150 },
+  { id: 'boost', name: 'Rocket Nitro', icon: '🚀', description: 'Fly 3 spaces further down the road', price: 50, target: 'self' },
+  {
+    id: 'rewind',
+    name: 'Rewind Trap',
+    icon: '⏪',
+    // Named "Trap" and priced above a self-boost, so it was never meant to
+    // rewind the person using it — which is what it actually did.
+    description: 'Shove a rival back 2 spaces',
+    price: 75,
+    target: 'opponent',
+    targetPrompt: 'Who gets shoved back?',
+  },
+  { id: 'shield', name: 'Magic Shield', icon: '🛡️', description: 'Block the next asteroid, dare or freeze', price: 100, target: 'self' },
+  {
+    id: 'dare_gun',
+    name: 'Dare Gun',
+    icon: '🎤',
+    description: 'Force an opponent into a live dare',
+    price: 110,
+    target: 'opponent',
+    targetPrompt: 'Who has to perform?',
+  },
+  {
+    id: 'freeze',
+    name: 'Ice Freeze',
+    icon: '❄️',
+    description: 'Make an opponent miss their next roll',
+    price: 125,
+    target: 'opponent',
+    targetPrompt: 'Who loses their turn?',
+  },
+  { id: 'bomb', name: 'Point Bomb', icon: '💣', description: 'Blast 50 coins off whoever is leading', price: 150, target: 'leader' },
 ];
+
+/** Coins a Supply Drop tile pays out. */
+export const SUPPLY_DROP_COINS = 75;
+
+/** Coins the Point Bomb strips from the leader. */
+export const BOMB_DAMAGE = 50;
 
 export function getShopItem(id: string): ShopItem | undefined {
   return SHOP_ITEMS.find((item) => item.id === id);
@@ -433,6 +483,8 @@ export type TileOutcome = {
    * along the road, so callers cannot tell by comparing before/after.
    */
   setback?: boolean;
+  /** Coins the tile pays out (or takes, if negative). */
+  coins?: number;
 };
 
 export function resolveTile(position: number, playerHasShield: boolean = false): TileOutcome {
@@ -508,23 +560,55 @@ export function resolveTile(position: number, playerHasShield: boolean = false):
     }
   }
 
+  // SUPPLY DROP (Bonus)
+  //
+  // There are two of these on the board and they had no case here at all, so
+  // landing on one printed "Landed safely" and did nothing. Coins rather than
+  // movement, so the board has a tile that feeds the shop instead of the race.
+  if (nodeType === 'bonus') {
+    return {
+      position: clamped,
+      banner: '📦 SUPPLY DROP! +75 COINS!',
+      message: `Salvage secured — ${SUPPLY_DROP_COINS} coins for the buff shop.`,
+      triggersDare: false,
+      triggersDuel: false,
+      triggersTrap: false,
+      isFinish: false,
+      coins: SUPPLY_DROP_COINS,
+    };
+  }
+
   if (nodeType === 'dare') {
+    // The shield is sold as blocking "the next asteroid, dare or freeze", and
+    // this is the dare half of that promise.
+    if (playerHasShield) {
+      return {
+        position: clamped,
+        banner: '🛡️ DARE DEFLECTED!',
+        message: 'Your shield talked the crew out of it. Shield spent.',
+        triggersDare: false,
+        triggersDuel: false,
+        triggersTrap: false,
+        isFinish: false,
+        breaksShield: true,
+      };
+    }
     return {
       position: clamped,
       banner: '🎤 DARE TILE!',
-      message: 'Get ready for a dare!',
+      message: 'The crew has a dare for you — and they are judging it.',
       triggersDare: true,
       triggersDuel: false,
       triggersTrap: false,
       isFinish: false,
     };
   }
-  
+
   if (nodeType === 'duel') {
     return {
       position: clamped,
       banner: '⚔️ DUEL TILE!',
-      message: 'Challenge another player to a duel!',
+      message: 'A rival is pulled in to argue it out — the room decides.',
       triggersDare: false,
       triggersDuel: true,
       triggersTrap: false,

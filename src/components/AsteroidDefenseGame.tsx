@@ -1,11 +1,11 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { Player, RoomState } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
-import { speechEngine } from '@/lib/speechService';
+import { SpeechDiagnostics, speechEngine } from '@/lib/speechService';
 import { measurePixelText } from '@/lib/pixelFont';
 import { BakedSprite, ROCK_PALETTES, makeAsteroidSprite, makeHeartSprite } from '@/lib/pixelSprites';
 import {
@@ -98,6 +98,7 @@ export default function AsteroidDefenseGame({
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [bgmMuted, setBgmMuted] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
+  const [speechDiag, setSpeechDiag] = useState<SpeechDiagnostics | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sessionRef = useRef<{ stop: () => void } | null>(null);
@@ -111,7 +112,7 @@ export default function AsteroidDefenseGame({
    * Rocks are baked up front rather than at spawn.
    *
    * Generating a sprite costs a few hundred microseconds of pixel work, and
-   * doing it inside the loop dropped a frame every time a rock appeared — which
+   * doing it inside the loop dropped a frame every time a rock appeared â€” which
    * is exactly the stutter that reads as the game being laggy. Twenty variants
    * across four palettes is more than enough that repeats go unnoticed.
    */
@@ -130,7 +131,7 @@ export default function AsteroidDefenseGame({
   }, []);
 
   useEffect(() => {
-    // The page-wide starfield is pure decoration and this screen has its own —
+    // The page-wide starfield is pure decoration and this screen has its own â€”
     // no reason to pay for both while a game loop is running.
     (window as any).pauseStarfield = true;
     game.current.heart = makeHeartSprite(PALETTE.danger);
@@ -207,7 +208,7 @@ export default function AsteroidDefenseGame({
     return () => cancelAnimationFrame(handle);
   }, [ready, status]);
 
-  // ── spawning ──────────────────────────────────────────────────────────────
+  // â”€â”€ spawning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const spawnAsteroid = () => {
     const s = game.current;
@@ -220,7 +221,7 @@ export default function AsteroidDefenseGame({
 
     const word = available[Math.floor(Math.random() * available.length)];
 
-    // Taken from the pre-baked pool — see rockPool. Falls back to baking one
+    // Taken from the pre-baked pool â€” see rockPool. Falls back to baking one
     // only if the pool somehow has not finished, which the intro gate prevents.
     const pool = rockPool.current;
     const picked = pool.length > 0
@@ -290,7 +291,7 @@ export default function AsteroidDefenseGame({
     audioSFX.playChoiSuccess();
   };
 
-  // ── voice ─────────────────────────────────────────────────────────────────
+  // â”€â”€ voice â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const handleSpeech = (text: string) => {
     const s = game.current;
@@ -302,8 +303,8 @@ export default function AsteroidDefenseGame({
     const now = Date.now();
     // The recogniser streams the same interim phrase over and over, so every
     // word in it is considered but each may only fire once per second. Keying
-    // the debounce on the word — rather than on "the last word changed", which
-    // is what this used to do — means saying the same word twice in a row
+    // the debounce on the word â€” rather than on "the last word changed", which
+    // is what this used to do â€” means saying the same word twice in a row
     // works, and so does calling two targets in one breath.
     for (const word of spoken) {
       if (now - (s.firedAt.get(word) ?? 0) < 1000) continue;
@@ -316,7 +317,7 @@ export default function AsteroidDefenseGame({
     }
   };
 
-  // ── the loop ──────────────────────────────────────────────────────────────
+  // â”€â”€ the loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const finish = useCallback(() => {
     const earned = Math.min(MAX_POINTS, game.current.score);
@@ -325,7 +326,22 @@ export default function AsteroidDefenseGame({
     setTimeout(() => onCompleteRef.current(earned), 4000);
   }, [stopEverything]);
 
-  const step = useCallback(() => {
+  const timeAccRef = useRef<number>(0);
+  const lastTimeRef = useRef<number>(0);
+
+  const step = useCallback((time: number) => {
+    if (!lastTimeRef.current) lastTimeRef.current = time;
+    const dt = Math.min(time - lastTimeRef.current, 100);
+    lastTimeRef.current = time;
+
+    timeAccRef.current += dt;
+    if (timeAccRef.current < 16) {
+      rafRef.current = requestAnimationFrame(step);
+      return;
+    }
+    timeAccRef.current -= 16.666;
+    if (timeAccRef.current > 16.666) timeAccRef.current = 16.666;
+
     const s = game.current;
     const canvas = canvasRef.current;
     if (!s.active || !canvas) return;
@@ -334,13 +350,13 @@ export default function AsteroidDefenseGame({
 
     s.frames++;
 
-    // Difficulty: a new wave every ~6s, each faster and busier. The ramp leans
+    // Difficulty: a new wave every ~12s, each faster and busier. The ramp leans
     // on the spawn rate as much as the speed, because more words in the sky is
     // what actually raises the reading load.
-    if (s.frames % 360 === 0) {
+    if (s.frames % 720 === 0) {
       s.wave++;
-      s.spawnEvery = Math.max(28, s.spawnEvery - 11);
-      s.baseSpeed += 0.08;
+      s.spawnEvery = Math.max(40, s.spawnEvery - 10);
+      s.baseSpeed += 0.05;
       audioSFX.playPowerUpZap();
     }
     if (s.frames % s.spawnEvery === 0) spawnAsteroid();
@@ -437,7 +453,7 @@ export default function AsteroidDefenseGame({
     if (s.frames % 45 === 0) {
       roomStore.pushLiveState(room.roomId, activePlayer.id, {
         score: s.score,
-        status: `Wave ${s.wave} — ${s.lives} shield${s.lives === 1 ? '' : 's'} left`,
+        status: `Wave ${s.wave} â€” ${s.lives} shield${s.lives === 1 ? '' : 's'} left`,
         prompt: threat?.word,
         good: s.lives > 1,
       });
@@ -448,10 +464,10 @@ export default function AsteroidDefenseGame({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.roomId, activePlayer.id, finish]);
 
-  // ── start ─────────────────────────────────────────────────────────────────
+  // â”€â”€ start â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const startGame = async () => {
-    const accessError = await speechEngine.requestMicAccess();
+    const accessError = await speechEngine.probeMicPermission();
     if (accessError) {
       setMicError(
         typeof accessError === 'string'
@@ -477,7 +493,7 @@ export default function AsteroidDefenseGame({
     if (audioRef.current) {
       audioRef.current.volume = 0.25;
       audioRef.current.play().catch(() => {
-        /* autoplay refused — the game plays perfectly well without music */
+        /* autoplay refused â€” the game plays perfectly well without music */
       });
     }
 
@@ -498,6 +514,27 @@ export default function AsteroidDefenseGame({
     rafRef.current = requestAnimationFrame(step);
   };
 
+  /**
+   * Watches for a round where the recogniser is running but hearing nothing.
+   *
+   * On a phone this is otherwise indistinguishable from a broken game: the mic
+   * indicator is on, words fall, and no laser ever fires. Reading back what the
+   * speech layer actually did turns "it doesn't work on mobile" into something
+   * with a cause attached.
+   */
+  useEffect(() => {
+    if (status !== 'playing') {
+      setSpeechDiag(null);
+      return;
+    }
+    const timer = setInterval(() => {
+      const d = speechEngine.getDiagnostics();
+      const silentFor = d.startedAt ? Date.now() - d.startedAt : 0;
+      setSpeechDiag(d.results === 0 && silentFor > 7000 ? d : null);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [status]);
+
   const toggleMic = () => setIsMicMuted(speechEngine.toggleMicMute());
 
   const toggleBgm = () => {
@@ -507,7 +544,7 @@ export default function AsteroidDefenseGame({
     setBgmMuted(next);
   };
 
-  // ── chrome ────────────────────────────────────────────────────────────────
+  // â”€â”€ chrome â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   return (
     <div className="rounded-3xl border border-cyan-500/30 bg-[#080b12] p-3 sm:p-5 space-y-3 shadow-2xl">
@@ -515,7 +552,7 @@ export default function AsteroidDefenseGame({
 
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <span className="text-2xl leading-none">☄️</span>
+          <span className="text-2xl leading-none">â˜„ï¸</span>
           <div className="min-w-0">
             <h2 className="text-base sm:text-lg font-black tracking-[0.2em] text-cyan-300">
               ASTEROID DEFENSE
@@ -550,7 +587,7 @@ export default function AsteroidDefenseGame({
         )}
       </div>
 
-      {/* The screen. Fixed 16:9 so the pixel grid is never stretched — the old
+      {/* The screen. Fixed 16:9 so the pixel grid is never stretched â€” the old
           version drew at 600x400 into a wider box, squashing every rock. */}
       <div className="relative w-full aspect-video rounded-xl overflow-hidden border-2 border-cyan-900/60 bg-[#080b12]">
         <canvas
@@ -560,6 +597,29 @@ export default function AsteroidDefenseGame({
           className="absolute inset-0 w-full h-full"
           style={{ imageRendering: 'pixelated' }}
         />
+
+        {/* Nothing heard for several seconds — say why, rather than letting the
+            player shout at a game that looks fine. */}
+        {speechDiag && (
+          <div className="absolute inset-x-2 bottom-2 rounded-lg border border-amber-500/50 bg-black/85 px-3 py-2 text-[10px] leading-relaxed text-amber-200">
+            <p className="font-black tracking-wider">NOT HEARING YOU</p>
+            <p className="text-amber-300/80">
+              {!speechDiag.supported
+                ? 'This browser has no speech recognition. Chrome on Android works; Firefox and most in-app browsers do not.'
+                : speechDiag.lastError === 'not-allowed' || speechDiag.lastError === 'service-not-allowed'
+                ? 'Microphone permission was refused. Tap the padlock in the address bar and allow it.'
+                : speechDiag.lastError === 'language-not-supported'
+                ? `No speech model for ${speechDiag.locale} on this device.`
+                : speechDiag.lastError === 'network'
+                ? 'Speech recognition needs a network connection on this device.'
+                : 'The microphone opened but no speech came through. Check that another app is not holding it.'}
+            </p>
+            <p className="mt-1 font-mono text-[9px] text-amber-500/70">
+              {speechDiag.locale} · restarts {speechDiag.restarts} · mic{' '}
+              {speechDiag.suspendedMic ? 'handed over' : 'shared'} · err {speechDiag.lastError ?? 'none'}
+            </p>
+          </div>
+        )}
 
         {/* Scanlines, for the arcade cabinet feel. */}
         <div
@@ -579,7 +639,7 @@ export default function AsteroidDefenseGame({
               </p>
               <p className="text-[11px] sm:text-sm text-gray-400 leading-relaxed">
                 Every rock carries a word. Say it out loud and the station fires.
-                They fall faster each wave — and anything that drops past the
+                They fall faster each wave â€” and anything that drops past the
                 <span className="text-cyan-400"> scan line</span> is out of the
                 turret&apos;s reach.
               </p>
@@ -593,7 +653,7 @@ export default function AsteroidDefenseGame({
                 disabled={!ready}
                 className="px-8 py-3 bg-cyan-500 hover:bg-cyan-400 disabled:bg-cyan-900 disabled:text-cyan-500 text-[#080b12] rounded-lg font-black tracking-[0.2em] text-sm shadow-lg shadow-cyan-500/30 transition active:scale-95 disabled:active:scale-100"
               >
-                {ready ? 'START DEFENSE' : 'CALIBRATING…'}
+                {ready ? 'START DEFENSE' : 'CALIBRATINGâ€¦'}
               </button>
             </div>
           </div>
@@ -606,10 +666,10 @@ export default function AsteroidDefenseGame({
                 STATION BREACHED
               </h3>
               <p className="text-sm text-gray-300">
-                Final score <span className="text-yellow-400 font-black">{hud.score}</span> · reached
+                Final score <span className="text-yellow-400 font-black">{hud.score}</span> Â· reached
                 wave <span className="text-cyan-300 font-black">{hud.wave}</span>
               </p>
-              <p className="text-[11px] text-gray-500">Returning to the board…</p>
+              <p className="text-[11px] text-gray-500">Returning to the boardâ€¦</p>
             </div>
           </div>
         )}
@@ -619,10 +679,11 @@ export default function AsteroidDefenseGame({
         <div className="flex items-center gap-2 text-[11px] font-mono">
           <span className="text-gray-500 shrink-0">HEARD</span>
           <span className="flex-1 truncate rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-cyan-300">
-            {transcript || '…'}
+            {transcript || 'â€¦'}
           </span>
         </div>
       )}
     </div>
   );
 }
+

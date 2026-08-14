@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -147,7 +147,7 @@ export default function SpellingBeeGame({ room, activePlayer, onCompleteTurn }: 
       setIsMicMuted(false);
     }
 
-    const accessError = await speechEngine.requestMicAccess();
+    const accessError = await speechEngine.probeMicPermission();
     if (accessError) {
       setError(accessError);
       return;
@@ -222,7 +222,7 @@ export default function SpellingBeeGame({ room, activePlayer, onCompleteTurn }: 
           : transcript
           ? `heard: "${transcript}"`
           : status === 'listening'
-          ? 'listening…'
+          ? 'listeningâ€¦'
           : status === 'reading'
           ? 'Reading the word...'
           : 'about to start',
@@ -362,3 +362,4 @@ export default function SpellingBeeGame({ room, activePlayer, onCompleteTurn }: 
     </div>
   );
 }
+

@@ -260,6 +260,51 @@ export type LiveMiniGameState = {
   good?: boolean;
 };
 
+/** Every dramatic thing the board can do to somebody. */
+export type BoardEventKind =
+  | 'wormhole'
+  | 'asteroid'
+  | 'shield_block'
+  | 'shield_gain'
+  | 'supply_drop'
+  | 'dare'
+  | 'duel'
+  | 'finish'
+  | 'boost'
+  | 'rewind'
+  | 'freeze'
+  | 'bomb'
+  | 'shield_up';
+
+/**
+ * The last thing that happened on the board, broadcast to the whole room.
+ *
+ * Tile effects used to live in the rolling player's local component state, so
+ * the wormhole that flung somebody across the map was invisible to everyone
+ * else — the five people watching saw a token teleport with no explanation.
+ * The board is the shared screen; what happens on it has to be shared state.
+ *
+ * Clients animate whenever `id` changes, which makes this naturally idempotent
+ * across the repeated snapshots a subscription delivers.
+ */
+export type BoardEvent = {
+  id: string;
+  kind: BoardEventKind;
+  playerId: string;
+  playerName: string;
+  /** Set when one player did something to another. */
+  targetPlayerId?: string;
+  targetPlayerName?: string;
+  banner: string;
+  message: string;
+  /** Board nodes, so the animation can fly a token along the right path. */
+  fromNode?: number;
+  toNode?: number;
+  /** Coins gained or lost, when the event moved somebody's score. */
+  coins?: number;
+  at: number;
+};
+
 export type SocialReactionId = 'laugh' | 'fire' | 'almost' | 'drama';
 
 export type SocialReaction = {
@@ -332,6 +377,16 @@ export type RoomState = {
   socialRound?: SocialRound | null;
   /** What the performer is doing right now, for spectators. */
   liveState?: LiveMiniGameState | null;
+  /** The last thing the board did to somebody, for the whole room to watch. */
+  boardEvent?: BoardEvent | null;
+  /**
+   * Epoch ms by which the active player must roll.
+   *
+   * Presence pruning only catches players who left. Somebody who is still
+   * connected but has wandered off holds the dice indefinitely, and the other
+   * five have no way to move the game on.
+   */
+  rollDeadline?: number | null;
 
   // ── Round-based loop ──────────────────────────────────────────────────────
   // A round is: every player takes the mini-game one at a time, then everyone

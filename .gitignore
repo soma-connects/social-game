@@ -21,6 +21,16 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+# Every env file, not just the .local ones. .env.production holds a live
+# GEMINI_API_KEY and the Firebase config, and the old patterns did not match it
+# — it was one `git add .` away from being published.
+.env.*
+!.env.example
+
+# firebase
+# Deploy cache. It is ~700MB of packed function bundles and is rebuilt on every
+# deploy; committing it would be larger than the entire rest of the repo.
+/.firebase/
 
 # vercel
 .vercel

@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { PowerupItem, EventLog, Player, PowerupType } from '@/lib/types';
+import { PowerupItem, EventLog, Player } from '@/lib/types';
+import { SHOP_ITEMS } from '@/lib/gameRules';
 import PowerupCard from './PowerupCard';
 import EventFeed from './EventFeed';
 import { Package } from 'lucide-react';
@@ -15,25 +16,19 @@ interface RightSidebarProps {
   onUsePowerup: (powerupId: string) => void;
 }
 
-const POWERUP_CATALOGUE: { id: PowerupType; name: string; icon: string; description: string }[] = [
-  { id: 'boost', name: 'Rocket Nitro', icon: '🚀', description: 'Advance +3 spaces instantly' },
-  { id: 'rewind', name: 'Rewind Trap', icon: '⏪', description: 'Push back -2 spaces' },
-  { id: 'shield', name: 'Magic Shield', icon: '🛡️', description: 'Block the next debuff or dare' },
-  { id: 'dare_gun', name: 'Dare Gun', icon: '🎤', description: 'Force an opponent into a live dare' },
-  { id: 'freeze', name: 'Ice Freeze', icon: '❄️', description: 'Freeze an opponent for 1 round' },
-  { id: 'bomb', name: 'Point Bomb', icon: '💣', description: 'Blast 50 points off the leader' },
-];
-
 export default function RightSidebar({ activePlayer, myPlayer, events, onUsePowerup }: RightSidebarProps) {
   const isMyTurn = activePlayer.id === myPlayer.id;
 
-  // Counts come straight from the inventory. The old version defaulted the boost
-  // to 1 even when the player had none, so the button offered a powerup the
-  // server would reject.
-  // Filter to only items the active player actually owns (count > 0)
-  const ownedPowerups: PowerupItem[] = POWERUP_CATALOGUE.map((item) => ({
-    ...item,
-    count: activePlayer.inventory.filter((i) => i === item.id).length,
+  // Read from MY inventory, not the active player's. The old version listed
+  // whoever's turn it was, so on someone else's turn you were shown their
+  // powerups — other people's hands are not yours to see, and it made your own
+  // items vanish from the panel until your turn came round.
+  const ownedPowerups: PowerupItem[] = SHOP_ITEMS.map((item) => ({
+    id: item.id,
+    name: item.name,
+    icon: item.icon,
+    description: item.description,
+    count: myPlayer.inventory.filter((i) => i === item.id).length,
   })).filter((p) => p.count > 0);
 
   return (

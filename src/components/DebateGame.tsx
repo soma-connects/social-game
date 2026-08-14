@@ -90,7 +90,7 @@ export default function DebateGame({
     }
     setIsRecording(true);
     try {
-      const accessError = await speechEngine.requestMicAccess();
+      const accessError = await speechEngine.probeMicPermission();
       if (accessError) {
         setIsRecording(false);
         return;
@@ -382,4 +382,5 @@ export default function DebateGame({
     </div>
   );
 }
+
 

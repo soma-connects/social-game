@@ -1,6 +1,16 @@
 import { NextResponse } from 'next/server';
-import { GamePhase, MiniGameId, Player, RoomState, SocialReactionId, SocialRound, TeamId } from '@/lib/types';
-import { AVATARS } from '@/lib/gameContent';
+import {
+  BoardEvent,
+  BoardEventKind,
+  GamePhase,
+  MiniGameId,
+  Player,
+  RoomState,
+  SocialReactionId,
+  SocialRound,
+  TeamId,
+} from '@/lib/types';
+import { AVATARS, DARES, DUEL_TOPICS } from '@/lib/gameContent';
 import {
   DEFAULT_TURN_SECONDS,
   JUDGE_PASS_BONUS,
@@ -10,8 +20,11 @@ import {
   MINIGAME_LABELS,
   REACTION_POINTS,
   BOARD_GRAPH,
+  BOMB_DAMAGE,
   FINISH_NODE,
+  TileOutcome,
   alternateByTeam,
+  boardProgress,
   balanceTeams,
   describePerformance,
   getShopItem,
@@ -277,10 +290,39 @@ function openBoardPhase(room: RoomState): void {
   }
 }
 
+/**
+ * Points the room at whoever is up in the roll order, skipping frozen players.
+ *
+ * Ice Freeze sets `skipNextTurn`, which nothing used to read — the powerup was
+ * bought, spent and silently ignored. The flag is cleared as it is honoured, so
+ * a freeze costs exactly one roll.
+ */
 function syncActiveToRollOrder(room: RoomState): void {
-  const id = (room.rollOrder ?? [])[room.rollIndex ?? 0];
-  const idx = room.players.findIndex((p) => p.id === id);
-  if (idx !== -1) room.activePlayerIndex = idx;
+  const order = room.rollOrder ?? [];
+
+  while ((room.rollIndex ?? 0) < order.length) {
+    const id = order[room.rollIndex ?? 0];
+    const player = room.players.find((p) => p.id === id);
+
+    if (player?.skipNextTurn) {
+      player.skipNextTurn = false;
+      pushEvent(room, `❄️ ${player.name} is frozen and loses this roll`, 'debuff');
+      pushBoardEvent(room, 'freeze', player, {
+        banner: '❄️ FROZEN SOLID',
+        message: `${player.name} sits this roll out.`,
+      });
+      room.rollIndex = (room.rollIndex ?? 0) + 1;
+      continue;
+    }
+
+    const idx = room.players.findIndex((p) => p.id === id);
+    if (idx !== -1) room.activePlayerIndex = idx;
+    armRollDeadline(room);
+    return;
+  }
+
+  // Everybody left in the order was frozen — the round is over.
+  startNextRound(room);
 }
 
 // ─── who is allowed to do what ──────────────────────────────────────────────
@@ -406,6 +448,189 @@ function authorize(
   return { caller: { player, isHost } };
 }
 
+/**
+ * Records what the board just did, for the whole room to animate.
+ *
+ * Tile effects used to be drawn from the rolling client's local state, so the
+ * other five players watched a token move for no visible reason. This is the
+ * shared version of that moment.
+ */
+function pushBoardEvent(
+  room: RoomState,
+  kind: BoardEventKind,
+  player: Player,
+  fields: Partial<Omit<BoardEvent, 'id' | 'kind' | 'playerId' | 'playerName' | 'at'>> = {}
+): void {
+  room.boardEvent = {
+    id: `be_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    playerId: player.id,
+    playerName: player.name,
+    banner: '',
+    message: '',
+    at: Date.now(),
+    ...fields,
+  };
+}
+
+/** How long the active player has to roll before the room moves on without them. */
+const ROLL_DEADLINE_MS = 60_000;
+
+function armRollDeadline(room: RoomState): void {
+  room.rollDeadline = Date.now() + ROLL_DEADLINE_MS;
+}
+
+/**
+ * Moves the board on when the active player has stopped rolling.
+ *
+ * Presence pruning only catches players whose tab has gone. Somebody who is
+ * still heartbeating but has put their phone down holds the dice forever, and
+ * the other five have no way to reach the next round. Ridden on the heartbeat,
+ * so it needs no timer of its own and no client to request it.
+ */
+function expireStalledRoll(room: RoomState, now: number): void {
+  // branch_choice counts too: a player who walks away at a fork stalls the room
+  // exactly as hard as one who never rolls.
+  if (room.phase !== 'roadmap_turn' && room.phase !== 'branch_choice') return;
+  if (!room.rollDeadline || now < room.rollDeadline) return;
+
+  const stalled = room.players[room.activePlayerIndex];
+  if (stalled) {
+    pushEvent(room, `⏳ ${stalled.name} ran out of time to roll`, 'system');
+    // A fork left hanging is resolved down the first branch rather than left
+    // mid-move, so the token never sits between two nodes.
+    if (room.phase === 'branch_choice') {
+      const node = BOARD_GRAPH[stalled.boardPosition];
+      if (node?.next.length) applyLanding(room, stalled, node.next[0]);
+      delete stalled.remainingSteps;
+      if (room.phase === 'branch_choice') room.phase = 'roadmap_turn';
+    }
+  }
+  advanceRoll(room);
+}
+
+/**
+ * Applies everything that happens when a player comes to rest on a node.
+ *
+ * Shared by `roll_dice` and `choose_branch`, which had grown two near-identical
+ * copies of this — and the copies had already drifted, so a tile effect fixed in
+ * one path stayed broken in the other.
+ */
+function applyLanding(room: RoomState, player: Player, node: number): TileOutcome {
+  const from = player.boardPosition;
+  const outcome = resolveTile(node, player.hasShield);
+
+  player.boardPosition = outcome.position;
+  if (outcome.grantsShield) player.hasShield = true;
+  if (outcome.breaksShield) player.hasShield = false;
+  if (outcome.coins) player.score = Math.max(0, player.score + outcome.coins);
+
+  if (outcome.banner) {
+    pushEvent(room, `${outcome.banner} (${player.name})`, outcome.setback ? 'debuff' : 'buff');
+  }
+
+  if (outcome.isFinish) {
+    pushBoardEvent(room, 'finish', player, {
+      banner: outcome.banner ?? '🏆 FINISH LINE REACHED!',
+      message: outcome.message,
+      fromNode: from,
+      toNode: outcome.position,
+    });
+    declareWinner(room, player);
+    return outcome;
+  }
+
+  // The kind drives which animation the room plays, so it is derived from what
+  // the tile actually did rather than from parsing the banner text.
+  const kind: BoardEventKind = outcome.grantsShield
+    ? 'shield_gain'
+    : outcome.breaksShield
+    ? 'shield_block'
+    : outcome.coins
+    ? 'supply_drop'
+    : outcome.triggersDuel
+    ? 'duel'
+    : outcome.triggersDare
+    ? 'dare'
+    : outcome.setback
+    ? 'asteroid'
+    : 'wormhole';
+
+  if (outcome.banner) {
+    pushBoardEvent(room, kind, player, {
+      banner: outcome.banner,
+      message: outcome.message,
+      fromNode: from,
+      toNode: outcome.position,
+      coins: outcome.coins,
+    });
+  }
+
+  if (outcome.triggersDare) {
+    startDare(room, player);
+  } else if (outcome.triggersDuel) {
+    startDuel(room, player);
+  } else if (outcome.triggersTrap) {
+    room.phase = 'debate';
+    pushEvent(room, `🚨 SUDDEN DEATH TRAP! ${player.name} triggered a Debate!`, 'system');
+  }
+
+  return outcome;
+}
+
+/**
+ * Puts a dare on the table where the whole room can see it.
+ *
+ * The dare used to be invented inside the modal on the rolling player's screen,
+ * which meant nobody else knew what had been asked, and refreshing lost it.
+ */
+function startDare(room: RoomState, target: Player, challenger?: Player): void {
+  const rivals = activePlayers(room).filter((p) => p.id !== target.id);
+  const picked = challenger ?? rivals[Math.floor(Math.random() * rivals.length)];
+  if (!picked) return;
+
+  room.currentDare = {
+    dareText: DARES[Math.floor(Math.random() * DARES.length)],
+    targetPlayerId: target.id,
+    challengerPlayerId: picked.id,
+  };
+  room.phase = 'peer_dare';
+  pushEvent(room, `🎤 ${picked.name} dares ${target.name}!`, 'dare');
+}
+
+/**
+ * Pulls a rival into a head-to-head over the duel tile.
+ *
+ * Reuses the debate round rather than inventing a second head-to-head format:
+ * it already pairs two players, gives them a topic and lets the rest of the
+ * room vote, which is exactly what a duel wants to be.
+ */
+function startDuel(room: RoomState, challenger: Player): void {
+  const pool = activePlayers(room).filter((p) => p.id !== challenger.id);
+  if (pool.length === 0) return;
+
+  // The player closest ahead on the road — a duel should threaten the person
+  // you are actually racing, not a random bystander.
+  const myDepth = boardProgress(challenger.boardPosition);
+  const ahead = pool
+    .filter((p) => boardProgress(p.boardPosition) >= myDepth)
+    .sort((a, b) => boardProgress(a.boardPosition) - boardProgress(b.boardPosition));
+  const rival = ahead[0] ?? pool.sort((a, b) => boardProgress(b.boardPosition) - boardProgress(a.boardPosition))[0];
+
+  const topic = DUEL_TOPICS[Math.floor(Math.random() * DUEL_TOPICS.length)];
+  room.debateState = {
+    player1Id: challenger.id,
+    player2Id: rival.id,
+    topic,
+    side1: 'For',
+    side2: 'Against',
+    phase: 'p1_speaking',
+    votes: {},
+  };
+  room.phase = 'debate';
+  pushEvent(room, `⚔️ DUEL: ${challenger.name} vs ${rival.name} — ${topic}`, 'system');
+}
+
 /** Ends the match. In team mode one player crossing wins it for their whole crew. */
 function declareWinner(room: RoomState, player: Player): void {
   room.winner = player;
@@ -419,6 +644,25 @@ function declareWinner(room: RoomState, player: Player): void {
   }
 }
 
+/** Hands the dice to the next player, or starts the next round if that was the last. */
+function advanceRoll(room: RoomState): void {
+  room.rollIndex = (room.rollIndex ?? 0) + 1;
+  room.boardEvent = null;
+
+  if (room.rollIndex >= (room.rollOrder ?? []).length) {
+    startNextRound(room);
+    return;
+  }
+
+  syncActiveToRollOrder(room);
+  // syncActiveToRollOrder may have run off the end skipping frozen players and
+  // started the next round, in which case there is nobody to announce.
+  if (room.phase !== 'roadmap_turn') return;
+
+  const next = room.players[room.activePlayerIndex];
+  if (next) pushEvent(room, `🎲 ${next.name} is up to roll`, 'system');
+}
+
 /** Wipes round state and sends everyone back to the mini-game. */
 function startNextRound(room: RoomState): void {
   room.roundNumber = (room.roundNumber ?? 0) + 1;
@@ -427,6 +671,8 @@ function startNextRound(room: RoomState): void {
   room.rollIndex = 0;
   room.shopReady = [];
   room.turnResult = null;
+  room.rollDeadline = null;
+  room.boardEvent = null;
   room.truthBluffState = null;
   room.storyBuilderState = null;
   room.debateState = null;
@@ -1439,23 +1685,8 @@ async function applyAction(
         remaining--;
       }
 
-      const outcome = resolveTile(currentId, active.hasShield);
-      active.boardPosition = outcome.position;
-
-      if (outcome.grantsShield) active.hasShield = true;
-      if (outcome.breaksShield) active.hasShield = false;
-
-      pushEvent(room, `🎲 ${active.name} rolled ${roll} → node #${outcome.position + 1}`, 'system');
-      if (outcome.banner) {
-        pushEvent(room, `${outcome.banner} (${active.name})`, outcome.setback ? 'debuff' : 'buff');
-      }
-
-      if (outcome.isFinish) {
-        declareWinner(room, active);
-      } else if (outcome.triggersTrap) {
-        room.phase = 'debate';
-        pushEvent(room, `🚨 SUDDEN DEATH TRAP! ${active.name} triggered a Debate!`, 'system');
-      }
+      pushEvent(room, `🎲 ${active.name} rolled ${roll}`, 'system');
+      const outcome = applyLanding(room, active, currentId);
 
       return NextResponse.json({ room: await writeRoom(room), roll, outcome });
     }
@@ -1494,23 +1725,10 @@ async function applyAction(
 
       // Reached the end of remaining steps
       delete active.remainingSteps;
-      room.phase = 'roadmap_turn'; // Back to the normal roadmap turn phase
-      const outcome = resolveTile(currentId, active.hasShield);
-      active.boardPosition = outcome.position;
-
-      if (outcome.grantsShield) active.hasShield = true;
-      if (outcome.breaksShield) active.hasShield = false;
-
-      if (outcome.banner) {
-        pushEvent(room, `${outcome.banner} (${active.name})`, outcome.setback ? 'debuff' : 'buff');
-      }
-
-      if (outcome.isFinish) {
-        declareWinner(room, active);
-      } else if (outcome.triggersTrap) {
-        room.phase = 'debate';
-        pushEvent(room, `🚨 SUDDEN DEATH TRAP! ${active.name} triggered a Debate!`, 'system');
-      }
+      // Back to the normal roadmap turn phase — applyLanding may move it on
+      // again if the tile starts a dare, a duel or the sudden-death trap.
+      room.phase = 'roadmap_turn';
+      const outcome = applyLanding(room, active, currentId);
 
       return NextResponse.json({ room: await writeRoom(room), outcome });
     }
@@ -1527,29 +1745,150 @@ async function applyAction(
         }
       }
       room.currentDare = null;
+      // Hand the board back. startDare parks the room in `peer_dare`, so
+      // without this the game would sit on a resolved dare forever.
+      if (room.phase === 'peer_dare') {
+        room.phase = 'roadmap_turn';
+        armRollDeadline(room);
+      }
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    /**
+     * Spends a powerup.
+     *
+     * Four of the six used to fall through to a log line that changed nothing —
+     * the shop sold shields, dare guns, freezes and bombs that did not exist.
+     * Each now has a real effect, and the offensive ones require a target that
+     * the server validates rather than trusting.
+     */
     case 'use_powerup': {
       const active = room.players[room.activePlayerIndex];
       const powerupId = String(body.powerupId ?? '');
       if (!active) return NextResponse.json({ error: 'No active player' }, { status: 409 });
 
+      const item = getShopItem(powerupId);
+      if (!item) return NextResponse.json({ error: 'Unknown powerup' }, { status: 400 });
+
       const owned = active.inventory.indexOf(powerupId);
       if (owned === -1) {
         return NextResponse.json({ error: 'Powerup not in inventory' }, { status: 409 });
       }
+
+      // Resolve the victim before spending anything, so a bad target does not
+      // consume the item.
+      let target: Player | undefined;
+      if (item.target === 'opponent') {
+        target = room.players.find((p) => p.id === String(body.targetPlayerId ?? ''));
+        if (!target || target.id === active.id) {
+          return NextResponse.json({ error: 'Choose an opponent to use that on' }, { status: 400 });
+        }
+        if (target.connected === false) {
+          return NextResponse.json({ error: `${target.name} has dropped out` }, { status: 409 });
+        }
+      } else if (item.target === 'leader') {
+        target = [...activePlayers(room)].sort((a, b) => b.score - a.score)[0];
+        if (!target) return NextResponse.json({ error: 'Nobody to target' }, { status: 409 });
+      }
+
       active.inventory.splice(owned, 1);
 
-      if (powerupId === 'boost') {
-        active.boardPosition = walkForward(active.boardPosition, 3);
-        pushEvent(room, `🚀 ${active.name} used Rocket Nitro (+3 spaces)`, 'buff');
-        if (active.boardPosition === FINISH_NODE) declareWinner(room, active);
-      } else if (powerupId === 'rewind') {
-        active.boardPosition = walkBack(active.boardPosition, 2);
-        pushEvent(room, `⏪ ${active.name} used Rewind`, 'debuff');
-      } else {
-        pushEvent(room, `⚡ ${active.name} used ${powerupId}`, 'buff');
+      // A shield on the victim eats the whole effect. This is the promise the
+      // shop makes — "block the next asteroid, dare or freeze" — and it applies
+      // to incoming powerups, not just to tiles.
+      const shielded = !!target && target.id !== active.id && !!target.hasShield;
+      if (shielded && target) {
+        target.hasShield = false;
+        pushEvent(room, `🛡️ ${target.name} blocked ${active.name}'s ${item.name}!`, 'buff');
+        pushBoardEvent(room, 'shield_block', active, {
+          targetPlayerId: target.id,
+          targetPlayerName: target.name,
+          banner: '🛡️ BLOCKED!',
+          message: `${target.name}'s shield absorbed the ${item.name}.`,
+        });
+        return NextResponse.json({ room: await writeRoom(room), blocked: true });
+      }
+
+      switch (powerupId) {
+        case 'boost': {
+          const from = active.boardPosition;
+          active.boardPosition = walkForward(from, 3);
+          pushEvent(room, `🚀 ${active.name} used Rocket Nitro (+3 spaces)`, 'buff');
+          pushBoardEvent(room, 'boost', active, {
+            banner: '🚀 ROCKET NITRO!',
+            message: `${active.name} burns 3 spaces further down the road.`,
+            fromNode: from,
+            toNode: active.boardPosition,
+          });
+          if (active.boardPosition === FINISH_NODE) declareWinner(room, active);
+          break;
+        }
+
+        case 'rewind': {
+          if (!target) break;
+          const from = target.boardPosition;
+          target.boardPosition = walkBack(from, 2);
+          pushEvent(room, `⏪ ${active.name} shoved ${target.name} back 2 spaces`, 'debuff');
+          pushBoardEvent(room, 'rewind', active, {
+            targetPlayerId: target.id,
+            targetPlayerName: target.name,
+            banner: '⏪ REWIND TRAP!',
+            message: `${active.name} shoved ${target.name} back 2 spaces.`,
+            fromNode: from,
+            toNode: target.boardPosition,
+          });
+          break;
+        }
+
+        case 'shield': {
+          active.hasShield = true;
+          pushEvent(room, `🛡️ ${active.name} raised a Magic Shield`, 'buff');
+          pushBoardEvent(room, 'shield_up', active, {
+            banner: '🛡️ SHIELD UP!',
+            message: `${active.name} is protected from the next hit.`,
+          });
+          break;
+        }
+
+        case 'dare_gun': {
+          if (!target) break;
+          startDare(room, target, active);
+          pushBoardEvent(room, 'dare', active, {
+            targetPlayerId: target.id,
+            targetPlayerName: target.name,
+            banner: '🎤 DARE GUN!',
+            message: `${active.name} put ${target.name} on the spot.`,
+          });
+          break;
+        }
+
+        case 'freeze': {
+          if (!target) break;
+          target.skipNextTurn = true;
+          pushEvent(room, `❄️ ${active.name} froze ${target.name} — they miss their next roll`, 'debuff');
+          pushBoardEvent(room, 'freeze', active, {
+            targetPlayerId: target.id,
+            targetPlayerName: target.name,
+            banner: '❄️ ICE FREEZE!',
+            message: `${target.name} misses their next roll.`,
+          });
+          break;
+        }
+
+        case 'bomb': {
+          if (!target) break;
+          const damage = Math.min(BOMB_DAMAGE, target.score);
+          target.score -= damage;
+          pushEvent(room, `💣 ${active.name} bombed ${target.name} for ${damage} coins`, 'debuff');
+          pushBoardEvent(room, 'bomb', active, {
+            targetPlayerId: target.id,
+            targetPlayerName: target.name,
+            banner: '💣 POINT BOMB!',
+            message: `${target.name} lost ${damage} coins off the top.`,
+            coins: -damage,
+          });
+          break;
+        }
       }
 
       return NextResponse.json({ room: await writeRoom(room) });
@@ -1699,14 +2038,7 @@ async function applyAction(
 
     /** Hands the dice to the next player in the round's roll order. */
     case 'advance_turn': {
-      room.rollIndex = (room.rollIndex ?? 0) + 1;
-      if (room.rollIndex >= (room.rollOrder ?? []).length) {
-        startNextRound(room);
-      } else {
-        syncActiveToRollOrder(room);
-        const next = room.players[room.activePlayerIndex];
-        if (next) pushEvent(room, `🎲 ${next.name} is up to roll`, 'system');
-      }
+      advanceRoll(room);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -1730,7 +2062,16 @@ async function applyAction(
       // room document on every beat from every player pushes a snapshot to the
       // entire room several times a second to move one number.
       const needsRefresh = now - (me.lastSeen ?? 0) > PRESENCE_TIMEOUT_MS / 3;
-      if (!wasAway && !needsRefresh) {
+      // A blown roll deadline has to break out of the skip too, otherwise the
+      // stall is only noticed on whichever heartbeat happens to also be due a
+      // timestamp refresh — up to twice as long as the deadline the room was
+      // shown on the clock.
+      const rollStalled =
+        (room.phase === 'roadmap_turn' || room.phase === 'branch_choice') &&
+        !!room.rollDeadline &&
+        now >= room.rollDeadline;
+
+      if (!wasAway && !needsRefresh && !rollStalled) {
         return NextResponse.json({ ok: true });
       }
 
@@ -1740,6 +2081,7 @@ async function applyAction(
         pushEvent(room, `🔌 ${me.name} reconnected`, 'system');
       }
       prunePresence(room);
+      expireStalledRoll(room, now);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

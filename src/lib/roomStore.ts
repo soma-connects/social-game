@@ -362,6 +362,11 @@ class RoomStoreManager {
   }
 
   /** Starts the match and deals the host their first mini-game. */
+  /** Abandons the current match and puts everyone back in the lobby. Host only. */
+  public endMatch(roomId: string) {
+    return this.post(roomId, { action: 'end_match' });
+  }
+
   public startMatch(roomId: string) {
     return this.post(roomId, { action: 'start_match' });
   }

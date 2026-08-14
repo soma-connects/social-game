@@ -35,6 +35,15 @@ export interface VoiceState {
   peers: PeerState[];
   /** True while the local player is above the speaking threshold. */
   speaking: boolean;
+  /**
+   * Set when the browser refused to play incoming audio.
+   *
+   * Autoplay policy blocks media until the page has been interacted with. The
+   * call itself connects perfectly — tracks arrive, ICE completes, everything
+   * reports healthy — and the player simply hears nothing. It is invisible from
+   * every other signal, so the UI has to be told about it explicitly.
+   */
+  audioBlocked: boolean;
 }
 
 type SignalMessage =
@@ -76,6 +85,10 @@ class VoiceChatManager {
   private error: string | null = null;
   /** Remote playback gain. Ducked while the voice arena is listening. */
   private remoteVolume = 1;
+  /** True once the browser has refused to play a peer's audio. */
+  private audioBlocked = false;
+  /** Removes the "unlock on next interaction" listeners once audio is running. */
+  private releaseAudioUnlock: (() => void) | null = null;
 
   private listeners = new Set<(state: VoiceState) => void>();
 
@@ -95,6 +108,7 @@ class VoiceChatManager {
       muted: micStream.isMuted(),
       error: this.error,
       speaking: this.localSpeaking && !micStream.isMuted(),
+      audioBlocked: this.audioBlocked,
       peers: [...this.peers.values()].map((peer) => ({
         playerId: peer.id,
         connection: peer.pc.connectionState,
@@ -191,6 +205,8 @@ class VoiceChatManager {
   public leave(): void {
     this.unsubscribeStream?.();
     this.unsubscribeStream = null;
+    this.releaseAudioUnlock?.();
+    this.audioBlocked = false;
     micStream.setCallActive(false);
 
     if (this.roomId && this.myId) {
@@ -348,8 +364,13 @@ class VoiceChatManager {
       if (this.audioCtx && this.audioCtx.state === 'suspended') {
         void this.audioCtx.resume();
       }
-      void audio.play().catch((err) => {
-        console.warn('Peer audio autoplay blocked by browser policy:', err);
+      void audio.play().catch(() => {
+        // Blocked by autoplay policy. Logging it was all this used to do, so
+        // the player heard silence for the rest of the session on a call that
+        // was otherwise completely healthy — and the only cure anyone found was
+        // leaving and rejoining, because the button press was itself the
+        // gesture the browser was waiting for.
+        this.markAudioBlocked();
       });
       this.attachRemoteAnalyser(peer, stream);
     };
@@ -367,13 +388,56 @@ class VoiceChatManager {
     return peer;
   }
 
+  /**
+   * Records that playback was refused and arms a retry.
+   *
+   * The retry rides on the next interaction anywhere in the page — a tap, a
+   * key, anything. That is the exact thing the autoplay policy is waiting for,
+   * and it means the player usually never notices: the first time they touch
+   * the board, the call comes alive.
+   */
+  private markAudioBlocked(): void {
+    this.audioBlocked = true;
+    this.emit();
+
+    if (this.releaseAudioUnlock || typeof window === 'undefined') return;
+
+    const unlock = () => this.resumeAudio();
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    window.addEventListener('touchstart', unlock);
+    this.releaseAudioUnlock = () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('touchstart', unlock);
+      this.releaseAudioUnlock = null;
+    };
+  }
+
+  /**
+   * Starts, or restarts, playback of every peer's audio.
+   *
+   * Safe to call repeatedly. Clears the blocked flag only once a play() has
+   * actually resolved, so the banner cannot disappear while the player is still
+   * hearing nothing.
+   */
   public resumeAudio(): void {
     if (this.audioCtx && this.audioCtx.state === 'suspended') {
       void this.audioCtx.resume();
     }
-    this.peers.forEach((peer) => {
-      if (peer.audio && peer.audio.play) {
-        void peer.audio.play().catch(() => {});
+
+    const attempts = [...this.peers.values()]
+      .filter((peer) => peer.audio?.play && peer.audio.srcObject)
+      .map((peer) => peer.audio.play().then(() => true).catch(() => false));
+
+    if (attempts.length === 0) return;
+
+    void Promise.all(attempts).then((results) => {
+      if (!results.some(Boolean)) return;
+      this.releaseAudioUnlock?.();
+      if (this.audioBlocked) {
+        this.audioBlocked = false;
+        this.emit();
       }
     });
   }

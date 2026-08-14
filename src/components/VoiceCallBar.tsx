@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, PhoneCall, PhoneOff, Loader2, AlertTriangle } from 'lucide-react';
+import { Mic, MicOff, PhoneCall, PhoneOff, Loader2, AlertTriangle, Volume2 } from 'lucide-react';
 import { Player } from '@/lib/types';
 import { voiceChat, VoiceState } from '@/lib/voiceChat';
 import { micStream } from '@/lib/micStream';
@@ -86,27 +86,24 @@ export default function VoiceCallBar({
     setJoining(false);
   };
 
-  // Auto-join once the match is underway.
-  //
-  // This is a voice game — hearing each other is the point, not an opt-in. The
-  // routing was already correct (listeners hear the performer live at full
-  // volume; only the performer's own incoming audio is ducked so the recogniser
-  // hears them rather than the room), but with the call left off by default
-  // nobody heard anything at all. Tried once per room; if the browser refuses
-  // permission the manual join button is still there.
-  const autoJoinedRef = useRef(false);
-  useEffect(() => {
-    if (autoJoin && !autoJoinedRef.current && !voiceChat.isJoined() && state.status === 'off') {
-      autoJoinedRef.current = true;
-      void handleJoin();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoJoin, state.status]);
+  /**
+   * Prompt to join, rather than joining silently.
+   *
+   * Auto-join looked like the right call for a voice game — hearing each other
+   * is the point. In practice it was the cause of the "I had to leave and
+   * rejoin before I could hear anyone" bug: joining from an effect is not a
+   * user gesture, so the browser refused to play any incoming audio and the
+   * player sat on a healthy call in silence.
+   *
+   * A button press is a gesture. Making the join deliberate both answers the
+   * request for a prompt and removes the condition that broke playback, which
+   * is why this is a fix and not just a preference.
+   */
+  const shouldPrompt = autoJoin && state.status === 'off' && !joining;
 
-  // A failed auto-join must not lock the feature out for the session — a
-  // permission prompt gets dismissed by accident all the time.
+  // A failed join must not lock the feature out for the session — a permission
+  // prompt gets dismissed by accident all the time.
   const retry = () => {
-    autoJoinedRef.current = false;
     void handleJoin();
   };
 
@@ -139,8 +136,44 @@ export default function VoiceCallBar({
     );
   }
 
+  // Everyone is here but nobody is on the call yet. This is deliberately loud:
+  // it is the difference between a voice party game and a silent one.
+  if (shouldPrompt) {
+    return (
+      <div className="glass-card rounded-2xl px-4 py-3.5 border border-emerald-400/50 bg-emerald-500/10 flex flex-wrap items-center justify-between gap-3 animate-pulse-slow">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/25 text-emerald-300 flex items-center justify-center shrink-0">
+            <PhoneCall className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-black text-white">JOIN THE VOICE CALL</p>
+            <p className="text-[11px] text-emerald-200/80">
+              {players.length} in the room. Tap to talk and hear everyone.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={handleJoin}
+          className="bg-emerald-500 hover:bg-emerald-400 text-partyDark font-black text-sm px-6 py-2.5 rounded-xl transition-all active:scale-95 shadow-lg shrink-0"
+        >
+          JOIN CALL
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="glass-card rounded-2xl px-4 py-3 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-3 bg-slate-900/70">
+      {/* The call is up but the browser refused to play incoming audio. Without
+          this the player just hears nothing and has no idea why. */}
+      {state.audioBlocked && (
+        <button
+          onClick={() => voiceChat.resumeAudio()}
+          className="w-full mb-1 rounded-xl bg-amber-500/20 border border-amber-400/60 text-amber-100 text-xs font-black px-3 py-2 flex items-center justify-center gap-2 active:scale-95 transition"
+        >
+          <Volume2 className="w-4 h-4" /> TAP TO HEAR EVERYONE
+        </button>
+      )}
       <div className="flex items-center gap-3 min-w-0">
         <div
           className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${

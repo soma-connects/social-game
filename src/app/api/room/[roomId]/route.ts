@@ -491,6 +491,7 @@ const HOST_ONLY_ACTIONS = new Set([
   'update_minigames',
   'update_phase',
   'start_match',
+  'end_match',
   'set_team_mode',
   'set_team',
   'switch_team',
@@ -2226,6 +2227,59 @@ async function applyAction(
         pushEvent(room, `🚀 Round 1 begins`, 'system');
         advanceRoundOrOpenShop(room);
       }
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /**
+     * Ends the current match and returns the room to the lobby.
+     *
+     * The only exit before this was "leave game", which removes you from the
+     * room altogether — so a group who wanted to abandon a match and start a
+     * different mode had to disband and re-share the code. This keeps everyone
+     * where they are and just clears the board.
+     *
+     * Per-match state is wiped so the next match starts fresh; social
+     * progression (level, vibe, badges) is earned by the person, not the match,
+     * and survives.
+     */
+    case 'end_match': {
+      if (room.phase === 'lobby') {
+        return NextResponse.json({ error: 'Already in the lobby' }, { status: 409 });
+      }
+
+      for (const player of room.players) {
+        player.boardPosition = 0;
+        player.score = 0;
+        player.inventory = [];
+        delete player.hasShield;
+        delete player.skipNextTurn;
+        delete player.remainingSteps;
+      }
+
+      room.phase = 'lobby';
+      room.winner = null;
+      room.winningTeam = null;
+      room.teamScores = room.roomType === 'team_battle' ? { red: 0, blue: 0 } : undefined;
+      room.teamBattleState = null;
+      room.roundNumber = 0;
+      room.roundResults = [];
+      room.rollOrder = [];
+      room.rollIndex = 0;
+      room.shopReady = [];
+      room.turnResult = null;
+      room.boardEvent = null;
+      room.rollDeadline = null;
+      room.currentDare = null;
+      room.socialRound = null;
+      room.liveState = null;
+      room.recentMiniGames = [];
+      room.truthBluffState = null;
+      room.storyBuilderState = null;
+      room.debateState = null;
+      room.triviaState = null;
+      room.guessTheVoiceState = null;
+
+      pushEvent(room, `🏁 ${room.players.find((p) => p.id === body.callerId)?.name ?? 'The host'} ended the match — back to the lobby`, 'system');
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

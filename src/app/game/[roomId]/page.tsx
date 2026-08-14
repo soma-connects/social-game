@@ -388,6 +388,8 @@ export default function GameRoomPage() {
         onOpenTrapPicker={() => setShowTrapPicker(true)}
         onGoHome={() => router.push('/')}
         onLeaveGame={handleLeaveGame}
+        onEndMatch={() => roomStore.endMatch(roomId)}
+        canEndMatch={myPlayer.isHost && room.phase !== 'lobby'}
         showThemeSelector={room.phase !== 'lobby'}
       />
 

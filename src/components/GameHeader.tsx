@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Volume2, VolumeX, Mic, MicOff, Share2, Home, LogOut, MoreVertical, X } from 'lucide-react';
+import { Volume2, VolumeX, Mic, MicOff, Share2, Home, LogOut, MoreVertical, X, Flag } from 'lucide-react';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { micStream } from '@/lib/micStream';
@@ -17,6 +17,10 @@ interface GameHeaderProps {
   onGoHome: () => void;
   /** Leaves the room properly so the others are not left waiting on a ghost. */
   onLeaveGame: () => void;
+  /** Ends the match and returns the whole room to the lobby. Host only. */
+  onEndMatch?: () => void;
+  /** True when a match is actually running and the caller may end it. */
+  canEndMatch?: boolean;
   showThemeSelector?: boolean;
 }
 
@@ -27,9 +31,12 @@ export default function GameHeader({
   onOpenTrapPicker,
   onGoHome,
   onLeaveGame,
+  onEndMatch,
+  canEndMatch = false,
   showThemeSelector = true,
 }: GameHeaderProps) {
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState(() => speechEngine.getIsMicMuted());
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -187,13 +194,29 @@ export default function GameHeader({
                   BACK TO HOME
                 </button>
 
+                {/* Ending the match is a different thing from leaving the room,
+                    and only the second existed. A group who wanted to abandon a
+                    match and try another mode had to disband and re-share the
+                    room code. */}
+                {canEndMatch && (
+                  <div className="border-t border-white/10 pt-1 mt-1">
+                    <button
+                      onClick={() => { setConfirmEnd(true); setShowMobileMenu(false); }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-amber-300 hover:bg-amber-500/15 transition-all"
+                    >
+                      <Flag className="w-4 h-4" />
+                      END MATCH — BACK TO LOBBY
+                    </button>
+                  </div>
+                )}
+
                 <div className="border-t border-white/10 pt-1 mt-1">
                   <button
                     onClick={() => { setConfirmLeave(true); setShowMobileMenu(false); }}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/15 transition-all"
                   >
                     <LogOut className="w-4 h-4" />
-                    LEAVE GAME
+                    LEAVE ROOM
                   </button>
                 </div>
               </div>
@@ -201,6 +224,38 @@ export default function GameHeader({
           </div>
         </div>
       </div>
+
+      {/* Ending affects everyone in the room, not just the person pressing it. */}
+      {confirmEnd && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="glass-card max-w-sm w-full rounded-3xl p-6 border border-amber-500/40 space-y-4 text-center bg-slate-900/95">
+            <Flag className="w-10 h-10 text-amber-300 mx-auto" />
+            <h3 className="text-xl font-black text-white">END THE MATCH?</h3>
+            <p className="text-xs text-gray-300">
+              Everyone goes back to the lobby and this match&apos;s scores and board
+              positions are cleared. Nobody leaves the room, so you can start
+              another mode straight away.
+            </p>
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setConfirmEnd(false)}
+                className="flex-1 glass-pill hover:bg-white/20 text-white font-bold text-sm py-3 rounded-2xl border border-white/20"
+              >
+                KEEP PLAYING
+              </button>
+              <button
+                onClick={() => {
+                  onEndMatch?.();
+                  setConfirmEnd(false);
+                }}
+                className="flex-1 bg-amber-500 hover:bg-amber-400 text-partyDark font-black text-sm py-3 rounded-2xl transition-all"
+              >
+                END MATCH
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Leaving drops you out of the turn order, so make it deliberate. */}
       {confirmLeave && (

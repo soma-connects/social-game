@@ -373,6 +373,14 @@ export type RoomState = {
   enabledMiniGames?: MiniGameId[];
   /** Which mini-game the active player is facing this turn. */
   currentMiniGame?: MiniGameId;
+  /**
+   * The last few mini-games picked, newest last.
+   *
+   * Feeds the repeat rule in pickMiniGame. Uniform random will cheerfully serve
+   * the same game four turns in a row, which a room reads as a broken shuffle
+   * rather than bad luck.
+   */
+  recentMiniGames?: MiniGameId[];
   /** Result of this turn's mini-game, cleared once the player has moved. */
   turnResult?: TurnResult | null;
   /** Laugh meter and peer judge votes for the active voice-related round. */

@@ -8,7 +8,8 @@ import { LudoColor } from '@/lib/ludo/ludoTypes';
 import LudoBoard from './LudoBoard';
 import LudoDice from './LudoDice';
 import { audioSFX } from '@/lib/audioFeedback';
-import { Volume2, VolumeX, Sparkles, Trophy } from 'lucide-react';
+import { Sparkles, Trophy } from 'lucide-react';
+import BackgroundMusic from '../BackgroundMusic';
 
 interface LudoGameProps {
   room: RoomState;
@@ -25,19 +26,11 @@ const COLOR_NAMES: Record<LudoColor, string> = {
 
 export default function LudoGame({ room, myPlayer, roomId }: LudoGameProps) {
   const ls = room.ludoState;
-  const [isMuted, setIsMuted] = useState(false);
   const [isBotProcessing, setIsBotProcessing] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Background party music management
-  useEffect(() => {
-    if (!audioRef.current) return;
-    if (isMuted) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play().catch(() => {});
-    }
-  }, [isMuted]);
+  // Music, including its mute button, is handled by BackgroundMusic below. The
+  // local copy that used to live here only muted this one screen and forgot the
+  // choice the moment you left it.
 
   // Find my color slot
   const myLudoPlayer = ls?.players.find((p) => p.playerId === myPlayer.id);
@@ -108,19 +101,11 @@ export default function LudoGame({ room, myPlayer, roomId }: LudoGameProps) {
 
   return (
     <div className="flex flex-col items-center w-full max-w-lg mx-auto space-y-4 px-2 py-4 select-none relative">
-      {/* Ludo gets its own track. It was sharing the lobby's ambient bed, so
-          launching a match changed nothing you could hear and the game never
-          felt like it had started. Each screen now owns one track:
-          lobby = lexin ambient, board game = maksymmalko, asteroids =
-          psychronic, ludo = space station. */}
-      <audio
-        ref={audioRef}
-        src="/audios/drmseq-space-station-247790.mp3"
-        autoPlay
-        loop
-      />
+      {/* Track assignment lives in lib/soundtrack.ts. Ludo was sharing the
+          lobby's ambient bed, so launching a match changed nothing you
+          could hear and the game never felt like it had started. */}
+      <BackgroundMusic screen="ludo" />
 
-      {/* Header with Music Mute Button */}
       <div className="flex items-center justify-between w-full px-2">
         <div className="flex items-center gap-2">
           <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-widest flex items-center gap-1.5">
@@ -130,15 +115,6 @@ export default function LudoGame({ room, myPlayer, roomId }: LudoGameProps) {
             {myColor ? `You: ${COLOR_NAMES[myColor].toUpperCase()}` : 'Spectating'}
           </span>
         </div>
-
-        {/* Music Mute Toggle */}
-        <button
-          onClick={() => setIsMuted(!isMuted)}
-          className="p-2 rounded-xl bg-slate-900 border border-white/10 hover:border-amber-400 text-slate-300 transition active:scale-95"
-          title={isMuted ? 'Unmute Party Music' : 'Mute Music'}
-        >
-          {isMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-amber-400" />}
-        </button>
       </div>
 
       {/* Turn Indicator & Status Banner */}

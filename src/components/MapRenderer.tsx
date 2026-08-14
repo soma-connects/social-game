@@ -49,7 +49,10 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
 
   return (
     <div
-      className="relative w-full rounded-3xl p-6 sm:p-8 border border-white/20 shadow-2xl overflow-hidden transition-all duration-700 min-h-[580px] sm:min-h-[640px] flex flex-col justify-between"
+      // Padding and minimum height were tuned for a desktop card. On a phone
+      // they ate roughly a third of the width and forced dead space below a
+      // board that is now only as tall as it is wide.
+      className="relative w-full rounded-3xl p-3 sm:p-6 md:p-8 border border-white/20 shadow-2xl overflow-hidden transition-all duration-700 flex flex-col justify-between"
       style={{
         backgroundImage: `url('/images/galactic_background.jpg')`,
         backgroundSize: 'cover',
@@ -61,19 +64,21 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
 
       {/* Scattered Space Assets (Background Layer) */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        {/* Scenery scales with the board. At fixed desktop sizes a 320px planet
+            sat on top of a 327px phone board and buried the tiles under it. */}
         {/* Ringed Planet - Top Right */}
-        <img src="/images/planet_ringed.jpg" alt="Planet" className="absolute -top-10 -right-16 w-80 h-80 object-contain mix-blend-screen opacity-80 rotate-12" style={{ WebkitMaskImage: 'radial-gradient(circle, black 50%, transparent 75%)', maskImage: 'radial-gradient(circle, black 50%, transparent 75%)' }} />
+        <img src="/images/planet_ringed.jpg" alt="" aria-hidden className="absolute -top-6 -right-10 w-40 sm:w-64 md:w-80 aspect-square object-contain mix-blend-screen opacity-70 rotate-12" style={{ WebkitMaskImage: 'radial-gradient(circle, black 50%, transparent 75%)', maskImage: 'radial-gradient(circle, black 50%, transparent 75%)' }} />
         {/* Glowing Sun - Bottom Left */}
-        <img src="/images/glowing_sun.jpg" alt="Sun" className="absolute -bottom-20 -left-20 w-96 h-96 object-contain mix-blend-screen opacity-70" style={{ WebkitMaskImage: 'radial-gradient(circle, black 50%, transparent 75%)', maskImage: 'radial-gradient(circle, black 50%, transparent 75%)' }} />
+        <img src="/images/glowing_sun.jpg" alt="" aria-hidden className="absolute -bottom-12 -left-12 w-48 sm:w-72 md:w-96 aspect-square object-contain mix-blend-screen opacity-60" style={{ WebkitMaskImage: 'radial-gradient(circle, black 50%, transparent 75%)', maskImage: 'radial-gradient(circle, black 50%, transparent 75%)' }} />
         {/* Asteroid Field - Top Left */}
-        <img src="/images/asteroids.jpg" alt="Asteroids" className="absolute top-10 -left-10 w-48 h-48 object-contain mix-blend-screen opacity-90" style={{ WebkitMaskImage: 'radial-gradient(circle, black 55%, transparent 75%)', maskImage: 'radial-gradient(circle, black 55%, transparent 75%)' }} />
+        <img src="/images/asteroids.jpg" alt="" aria-hidden className="absolute top-6 -left-6 w-24 sm:w-36 md:w-48 aspect-square object-contain mix-blend-screen opacity-80" style={{ WebkitMaskImage: 'radial-gradient(circle, black 55%, transparent 75%)', maskImage: 'radial-gradient(circle, black 55%, transparent 75%)' }} />
         {/* Satellite - Bottom Right */}
-        <img src="/images/satellite.jpg" alt="Satellite" className="absolute bottom-10 right-4 w-40 h-40 object-contain mix-blend-screen opacity-90 -rotate-12" style={{ WebkitMaskImage: 'radial-gradient(circle, black 50%, transparent 75%)', maskImage: 'radial-gradient(circle, black 50%, transparent 75%)' }} />
+        <img src="/images/satellite.jpg" alt="" aria-hidden className="absolute bottom-6 right-2 w-20 sm:w-32 md:w-40 aspect-square object-contain mix-blend-screen opacity-80 -rotate-12" style={{ WebkitMaskImage: 'radial-gradient(circle, black 50%, transparent 75%)', maskImage: 'radial-gradient(circle, black 50%, transparent 75%)' }} />
       </div>
 
       {/* Central Space Station Hub */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 sm:w-80 sm:h-80 pointer-events-none z-0 opacity-90 drop-shadow-[0_0_40px_rgba(34,211,238,0.4)]">
-        <img src="/images/space_station.jpg" alt="Space Station" className="w-full h-full object-contain mix-blend-screen" style={{ WebkitMaskImage: 'radial-gradient(circle, black 55%, transparent 75%)', maskImage: 'radial-gradient(circle, black 55%, transparent 75%)' }} />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-36 sm:w-64 md:w-80 aspect-square pointer-events-none z-0 opacity-80 drop-shadow-[0_0_40px_rgba(34,211,238,0.4)]">
+        <img src="/images/space_station.jpg" alt="" aria-hidden className="w-full h-full object-contain mix-blend-screen" style={{ WebkitMaskImage: 'radial-gradient(circle, black 55%, transparent 75%)', maskImage: 'radial-gradient(circle, black 55%, transparent 75%)' }} />
       </div>
 
       {/* Map Header */}
@@ -85,8 +90,22 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
         <span className="text-[10px] font-mono font-bold text-gray-300">{totalTiles} ADVENTURE NODES</span>
       </div>
 
-      {/* SVG Winding Road Path Track Intersecting Nodes */}
-      <div className="relative w-full h-[460px] sm:h-[500px] my-2">
+      {/*
+        The board is drawn in a 100x100 coordinate space — every node sits at a
+        percentage of this box, and the road SVG stretches to fill it.
+
+        So the box has to stay square. It used to be `w-full h-[460px]`, which on
+        a 375px phone is 327 wide by 460 tall: the whole map stretched vertically
+        by about 1.4x, which is why it looked squashed on a handset and subtly
+        wrong (stretched the other way) on a wide desktop.
+
+        Capped and centred so a big screen gets a sensible board rather than an
+        enormous one.
+      */}
+      {/* A wrapper handles centring so the square box only has to worry about
+          filling the width it is given, up to the cap. */}
+      <div className="w-full flex justify-center my-2">
+      <div className="relative w-full max-w-[560px] aspect-square">
         <svg
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
@@ -170,6 +189,7 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
             />
           );
         })}
+      </div>
       </div>
 
       {/* Bottom Landmark Track Decoration */}

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -45,8 +45,10 @@ import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
-import { MAX_PLAYERS, BOARD_GRAPH, ShopItem, getShopItem, getTeam } from '@/lib/gameRules';
+import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam } from '@/lib/gameRules';
 import PowerupTargetPicker from '@/components/PowerupTargetPicker';
+import MiniGameBriefing, { useMiniGameBriefing } from '@/components/MiniGameBriefing';
+import { MINIGAME_BRIEFINGS } from '@/lib/miniGameBriefings';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { voiceChat } from '@/lib/voiceChat';
@@ -62,6 +64,7 @@ import {
   Zap,
   X,
   Map,
+  Package,
   ChevronDown,
 } from 'lucide-react';
 
@@ -74,6 +77,7 @@ export default function GameRoomPage() {
   const [showTrapPicker, setShowTrapPicker] = useState(false);
   const [showMobilePlayers, setShowMobilePlayers] = useState(false);
   const [showMobileFeed, setShowMobileFeed] = useState(false);
+  const [showMobileInventory, setShowMobileInventory] = useState(false);
   const [showGeminiMode, setShowGeminiMode] = useState(false);
   const [comingSoonTitle, setComingSoonTitle] = useState<string | null>(null);
   const [activeDareTarget, setActiveDareTarget] = useState<Player | null>(null);
@@ -97,7 +101,7 @@ export default function GameRoomPage() {
 
   const { room, status, error } = snapshot;
 
-  // ── Voice replay ──────────────────────────────────────────────────────────
+  // â”€â”€ Voice replay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Passed explicitly: identity is stored per room, and this reads during the
   // first render, before the effect below tells the store which room we watch.
   const myPlayerId = roomStore.getMyPlayerId(roomId);
@@ -123,9 +127,19 @@ export default function GameRoomPage() {
   const { clip: replayClip, isRecording: isCapturing } = useVoiceRecorder({
     stream: captureStream,
     active: isAttemptPhase && !!captureStream,
+    /**
+     * A clip belongs to exactly one attempt: this performer, this round, this
+     * game. Any of those changing discards it.
+     *
+     * The game id matters as much as the performer. Keying on performer and
+     * round alone left the clip alive when the same player moved to a different
+     * mini-game â€” which is the common case in a Team Battle series, and the one
+     * where the wrong audio is most confusing.
+     */
+    sessionKey: `${room?.roundNumber ?? 0}:${performer?.id ?? 'none'}:${room?.currentMiniGame ?? 'none'}`,
   });
 
-  // ── Presence ──────────────────────────────────────────────────────────────
+  // â”€â”€ Presence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!myPlayerId) return;
 
@@ -140,6 +154,20 @@ export default function GameRoomPage() {
       window.removeEventListener('pagehide', onUnload);
     };
   }, [roomId, myPlayerId]);
+
+  /**
+   * First-time explanation for whichever mini-game is on screen.
+   *
+   * Spectators get it too â€” they are about to play the same game next turn, and
+   * watching something you do not understand is worse than playing it.
+   */
+  const inMiniGame = !!room && !!room.currentMiniGame && !!MINIGAME_BRIEFINGS[room.currentMiniGame];
+  const {
+    showing: briefingGame,
+    dismiss: dismissBriefing,
+    open: openBriefing,
+  } = useMiniGameBriefing(room?.currentMiniGame, inMiniGame);
+  const [reviewingBriefing, setReviewingBriefing] = useState(false);
 
   const handleLeaveGame = useCallback(async () => {
     if (myPlayerId) await roomStore.leaveRoom(roomId, myPlayerId);
@@ -174,8 +202,8 @@ export default function GameRoomPage() {
     return (
       <div className="min-h-screen flex items-center justify-center text-white bg-partyDark">
         <div className="text-center space-y-3">
-          <div className="animate-spin text-5xl">🎙️</div>
-          <p className="text-sm font-mono text-partyYellow">CONNECTING TO ROOM {roomId}…</p>
+          <div className="animate-spin text-5xl">ðŸŽ™ï¸</div>
+          <p className="text-sm font-mono text-partyYellow">CONNECTING TO ROOM {roomId}â€¦</p>
         </div>
       </div>
     );
@@ -233,7 +261,7 @@ export default function GameRoomPage() {
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Sisi Vibe, Sharp Guy…"
+                  placeholder="e.g. Sisi Vibe, Sharp Guyâ€¦"
                   value={guestNameInput}
                   onChange={(e) => setGuestNameInput(e.target.value)}
                   maxLength={20}
@@ -254,7 +282,7 @@ export default function GameRoomPage() {
                 className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl glow-emerald"
               >
                 <UserPlus className="w-5 h-5" />
-                <span>{isJoining ? 'JOINING…' : `JOIN AS PLAYER ${room.players.length + 1}`}</span>
+                <span>{isJoining ? 'JOININGâ€¦' : `JOIN AS PLAYER ${room.players.length + 1}`}</span>
               </button>
             </form>
           )}
@@ -298,9 +326,9 @@ export default function GameRoomPage() {
     } else if (mode === 'ai_master') {
       setShowGeminiMode(true);
     } else if (mode === 'karaoke') {
-      setComingSoonTitle('🎤 Karaoke & Pitch Arcade Mode');
+      setComingSoonTitle('ðŸŽ¤ Karaoke & Pitch Arcade Mode');
     } else if (mode === 'hangout') {
-      setComingSoonTitle('🍻 15s Roast & Open-Mic Lounge Mode');
+      setComingSoonTitle('ðŸ» 15s Roast & Open-Mic Lounge Mode');
     }
   };
 
@@ -404,7 +432,7 @@ export default function GameRoomPage() {
           {comingSoonTitle && (
             <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
               <div className="glass-card rounded-3xl p-6 sm:p-8 max-w-md w-full border border-partyYellow text-center space-y-4">
-                <div className="text-4xl">🚀</div>
+                <div className="text-4xl">ðŸš€</div>
                 <h3 className="text-xl font-black text-white">{comingSoonTitle}</h3>
                 <p className="text-xs text-gray-300">
                   This dedicated mode feature is currently in active development for the next update. Launch Board Game or AI Master Mode to play right now!
@@ -480,7 +508,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
-                  label="is flying in PitchBird 🐦"
+                  label="is flying in PitchBird ðŸ¦"
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
@@ -513,7 +541,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
-                  label="is on the karaoke mic 🎵"
+                  label="is on the karaoke mic ðŸŽµ"
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
@@ -533,7 +561,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
-                  label="is spelling in the Spelling Bee 🐝"
+                  label="is spelling in the Spelling Bee ðŸ"
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
@@ -606,7 +634,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
-                  label="is answering Trivia in Trivia Showdown 🧠"
+                  label="is answering Trivia in Trivia Showdown ðŸ§ "
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
@@ -626,7 +654,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
-                  label="is defending the station from ASTEROIDS ☄️"
+                  label="is defending the station from ASTEROIDS â˜„ï¸"
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
@@ -664,7 +692,7 @@ export default function GameRoomPage() {
             </div>
           )}
 
-          {/* Step 3 — move on the main board */}
+          {/* Step 3 â€” move on the main board */}
           {(room.phase === 'roadmap_turn' || room.phase === 'branch_choice') && (
             <>
               <RoadmapBoard
@@ -699,7 +727,7 @@ export default function GameRoomPage() {
                                     : 'bg-emerald-500/20 border-emerald-500 hover:bg-emerald-500/40 text-emerald-200'
                                 }`}
                               >
-                                <span>{isRisky ? '💀 RISKY PATH' : '🌱 SAFE PATH'}</span>
+                                <span>{isRisky ? 'ðŸ’€ RISKY PATH' : 'ðŸŒ± SAFE PATH'}</span>
                                 <span className="opacity-60 text-sm">Node #{nextId + 1}</span>
                               </button>
                             );
@@ -801,14 +829,90 @@ export default function GameRoomPage() {
           <span className="text-[10px] font-black uppercase">FEED ({room.events?.length ?? 0})</span>
         </button>
 
+        {/* Replaces the old TRAPS shortcut. Traps are armed from the header and
+            almost nobody used the button, while the inventory â€” which decides
+            whether you can act on your turn â€” had no route at all on a phone:
+            RightSidebar is `hidden lg:block`, so below 1024px it never renders. */}
         <button
-          onClick={() => setShowTrapPicker(true)}
-          className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyPink active:scale-95 transition-all"
+          onClick={() => setShowMobileInventory(true)}
+          className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyPink active:scale-95 transition-all relative"
         >
-          <Zap className="w-5 h-5 text-partyPink" />
-          <span className="text-[10px] font-black uppercase">TRAPS</span>
+          <Package className="w-5 h-5 text-partyPink" />
+          <span className="text-[10px] font-black uppercase">ITEMS ({myPlayer.inventory.length})</span>
+          {myPlayer.inventory.length > 0 && (
+            <span className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-partyPink animate-pulse" />
+          )}
         </button>
       </div>
+
+      {/* Mobile inventory. Same powerups and the same rules as the desktop
+          sidebar, including the target picker for the offensive items. */}
+      {showMobileInventory && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-md animate-fadeIn lg:hidden">
+          <div className="glass-card rounded-t-3xl sm:rounded-3xl p-5 border border-partyPink/50 w-full sm:max-w-md space-y-4 bg-slate-900/95 shadow-2xl max-h-[80vh] overflow-y-auto pb-8">
+            <div className="flex items-center justify-between pb-2 border-b border-white/10">
+              <h3 className="text-base font-black text-white flex items-center gap-2">
+                <Package className="w-5 h-5 text-partyPink" /> YOUR ITEMS
+              </h3>
+              <button
+                onClick={() => setShowMobileInventory(false)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-gray-400">
+              {isMyTurn ? 'Your turn â€” items can be used now.' : 'You can only use items on your own turn.'}
+            </p>
+
+            {(() => {
+              const owned = SHOP_ITEMS.map((item) => ({
+                item,
+                count: myPlayer.inventory.filter((i) => i === item.id).length,
+              })).filter((entry) => entry.count > 0);
+
+              if (owned.length === 0) {
+                return (
+                  <div className="p-5 rounded-2xl bg-white/5 border border-white/10 text-center space-y-1">
+                    <p className="text-xs font-bold text-gray-300">Nothing yet</p>
+                    <p className="text-[10px] text-gray-400">Buy powerups in the shop between rounds.</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-2">
+                  {owned.map(({ item, count }) => (
+                    <button
+                      key={item.id}
+                      disabled={!isMyTurn}
+                      onClick={() => {
+                        setShowMobileInventory(false);
+                        handleUsePowerup(item.id);
+                      }}
+                      className="w-full flex items-center gap-3 p-3 rounded-2xl border border-white/15 bg-white/5 enabled:hover:border-partyPink enabled:active:scale-[0.98] disabled:opacity-40 transition text-left"
+                    >
+                      <span className="text-2xl shrink-0">{item.icon}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-black text-sm text-white truncate">
+                          {item.name} {count > 1 && <span className="text-partyPink">x{count}</span>}
+                        </span>
+                        <span className="block text-[10px] text-gray-400 leading-snug">{item.description}</span>
+                      </span>
+                      {item.target === 'opponent' && (
+                        <span className="text-[9px] font-black text-partyYellow border border-partyYellow/40 rounded-full px-1.5 py-0.5 shrink-0">
+                          PICK
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
 
       {/* Mobile Player Roster Pop-up Modal */}
       {showMobilePlayers && (
@@ -847,7 +951,7 @@ export default function GameRoomPage() {
                         <div className="flex items-center gap-1.5">
                           <h4 className="font-extrabold text-xs text-white">{player.name}</h4>
                           {isMe && <span className="bg-partyCyan text-partyDark text-[8px] px-1 rounded font-black">YOU</span>}
-                          {isLeader && <span>👑</span>}
+                          {isLeader && <span>ðŸ‘‘</span>}
                         </div>
                         <p className="text-[10px] text-partyYellow font-mono">Node #{player.boardPosition + 1}</p>
                       </div>
@@ -893,7 +997,7 @@ export default function GameRoomPage() {
                     key={ev.id}
                     className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-200 font-bold flex items-start gap-2"
                   >
-                    <span>{ev.type === 'buff' ? '🚀' : ev.type === 'debuff' ? '💥' : ev.type === 'social' ? '🤣' : '🎮'}</span>
+                    <span>{ev.type === 'buff' ? 'ðŸš€' : ev.type === 'debuff' ? 'ðŸ’¥' : ev.type === 'social' ? 'ðŸ¤£' : 'ðŸŽ®'}</span>
                     <span>{ev.text}</span>
                   </div>
                 ))
@@ -936,6 +1040,33 @@ export default function GameRoomPage() {
         );
       })()}
 
+      {briefingGame && (
+        <MiniGameBriefing
+          game={briefingGame}
+          isReview={reviewingBriefing}
+          onDismiss={(opts) => {
+            setReviewingBriefing(false);
+            dismissBriefing(opts);
+          }}
+        />
+      )}
+
+      {/* Lets anyone pull the rules back up without waiting for the game to
+          come round again. Hidden once the briefing itself is open. */}
+      {inMiniGame && !briefingGame && room.currentMiniGame && (
+        <button
+          onClick={() => {
+            setReviewingBriefing(true);
+            openBriefing(room.currentMiniGame!);
+          }}
+          aria-label="How does this game work?"
+          title="How does this game work?"
+          className="fixed bottom-24 right-4 lg:bottom-6 z-40 w-11 h-11 rounded-full bg-slate-900/90 border border-partyYellow/50 text-partyYellow font-black text-lg shadow-xl backdrop-blur-md hover:bg-slate-800 active:scale-95 transition"
+        >
+          ?
+        </button>
+      )}
+
       {pendingPowerup && (
         <PowerupTargetPicker
           item={pendingPowerup}
@@ -951,7 +1082,7 @@ export default function GameRoomPage() {
 /**
  * The board, collapsed by default outside the board phase.
  *
- * It is ~600px tall — on a phone that pushed the actual mini-game controls off
+ * It is ~600px tall â€” on a phone that pushed the actual mini-game controls off
  * screen during a round nobody spends looking at the map. Still one tap away
  * for anyone who wants to check positions.
  */
@@ -995,7 +1126,8 @@ function WaitingPanel({ activePlayer, label }: { activePlayer: Player; label: st
       <h3 className="text-xl font-black text-white">
         {activePlayer.name} {label}
       </h3>
-      <p className="text-xs text-gray-400">Hang tight — your turn is coming up.</p>
+      <p className="text-xs text-gray-400">Hang tight â€” your turn is coming up.</p>
     </div>
   );
 }
+

@@ -8,6 +8,7 @@ import { roomStore } from '@/lib/roomStore';
 import confetti from 'canvas-confetti';
 import AvatarIllustration from './AvatarIllustration';
 import MapRenderer from './MapRenderer';
+import BackgroundMusic from './BackgroundMusic';
 import DiceRoller from './DiceRoller';
 import TileEventOverlay from './TileEventOverlay';
 import { TOTAL_TILES } from '@/lib/gameRules';
@@ -160,7 +161,7 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
       <div className="absolute bottom-10 right-1/4 w-80 h-80 bg-partyYellow/15 blur-3xl rounded-full pointer-events-none" />
 
       {/* Board Background Music */}
-      <audio src="/audios/maksymmalko-game-minecraft-gaming-background-music-402451.mp3" autoPlay loop className="hidden" />
+      <BackgroundMusic screen="board" />
 
       {/* Whose turn it is, and how long they have left. Without the clock the
           room has no idea whether to wait or whether the game has stalled. */}

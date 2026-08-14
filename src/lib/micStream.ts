@@ -68,6 +68,25 @@ class MicStreamManager {
   private streamListeners = new Set<(stream: MediaStream | null) => void>();
   /** True while the device is deliberately handed to the speech recogniser. */
   private suspended = false;
+  /**
+   * True while a live voice call is using the microphone.
+   *
+   * Handing the device to the speech recogniser is only safe when nobody else
+   * needs it. With a call up, suspending takes this player off the air for the
+   * length of the round and starves the attempt recorder at the same time —
+   * which is exactly what happened in real play: the room could not hear each
+   * other, and nothing got recorded.
+   */
+  private callActive = false;
+
+  public setCallActive(active: boolean): void {
+    this.callActive = active;
+  }
+
+  /** Whether it is safe to hand the device to the speech recogniser. */
+  public canSuspendForSpeech(): boolean {
+    return !this.callActive;
+  }
 
   public isSupported(): boolean {
     return (

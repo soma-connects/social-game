@@ -7,6 +7,7 @@ import { RoomState, Player } from '@/lib/types';
 import { MINIGAME_ICONS, MINIGAME_LABELS, TEAMS, getTeam } from '@/lib/gameRules';
 import { roomStore } from '@/lib/roomStore';
 import AvatarIllustration from './AvatarIllustration';
+import BackgroundMusic from './BackgroundMusic';
 
 interface TeamBattleIntroProps {
   room: RoomState;
@@ -36,6 +37,9 @@ export default function TeamBattleIntro({ room, myPlayer }: TeamBattleIntroProps
       animate={{ opacity: 1, y: 0 }}
       className="w-full max-w-3xl mx-auto space-y-6"
     >
+      {/* The most competitive screen in the app gets the most aggressive track. */}
+      <BackgroundMusic screen="team_battle" />
+
       <div className="text-center space-y-2">
         <p className="text-xs font-black uppercase tracking-[0.3em] text-partyYellow">
           Game {state.currentGameIndex + 1} of {state.seriesLength}

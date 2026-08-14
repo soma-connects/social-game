@@ -36,6 +36,7 @@ const MINI_GAMES: { id: MiniGameId; name: string; icon: string; blurb: string }[
 ];
 import { audioSFX } from '@/lib/audioFeedback';
 import AvatarIllustration from './AvatarIllustration';
+import BackgroundMusic from './BackgroundMusic';
 
 interface RoomLobbyProps {
   room: RoomState;
@@ -146,13 +147,15 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-2 sm:px-4 py-4 space-y-6 animate-fadeIn relative">
+    // pb-28 on small screens keeps the whole lobby clear of the fixed mobile
+    // action bar, which otherwise covers whatever ends up last on the page.
+    <div className="max-w-5xl mx-auto px-2 sm:px-4 pt-4 pb-28 lg:pb-4 space-y-6 animate-fadeIn relative">
       {/* Ambient Glow Blobs */}
       <div className="absolute top-10 left-10 w-72 h-72 bg-purple-600/15 blur-3xl rounded-full pointer-events-none" />
       <div className="absolute bottom-10 right-10 w-80 h-80 bg-emerald-500/15 blur-3xl rounded-full pointer-events-none" />
 
       {/* Ambient Dashboard Background Music */}
-      <audio src="/audios/lexin_music-space-ambient-sci-fi-121842.mp3" autoPlay loop className="hidden" />
+      <BackgroundMusic screen="lobby" />
 
       {/* Compact WhatsApp Direct Invite Banner */}
       <div className="glass-card rounded-2xl p-3.5 sm:p-4 border border-emerald-400/20 relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
@@ -691,8 +694,11 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
           </div>
 
           {/* HIDDEN UNTIL USER OPENS DECK SETTINGS */}
+          {/* pb-8 so the last row clears the fixed mobile action bar. Without it
+              the bottom game in the deck list sat underneath the bar and could
+              not be tapped. */}
           {showCustomDecks && (
-            <div className="space-y-6 pt-4 border-t border-white/10 animate-fadeIn">
+            <div className="space-y-6 pt-4 pb-8 border-t border-white/10 animate-fadeIn">
               {/* Language Decks */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">

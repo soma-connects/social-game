@@ -8,6 +8,7 @@ import { getBotMove } from '@/lib/chess/chessEngine';
 import { ChessPieceColor, ChessMoveProposal } from '@/lib/chess/chessTypes';
 import ChessBoard from './ChessBoard';
 import ChessClocks from './ChessClocks';
+import BackgroundMusic from '../BackgroundMusic';
 import { audioSFX } from '@/lib/audioFeedback';
 import { Flag, RotateCcw, MessageSquare, Check, X, ShieldAlert, Sparkles } from 'lucide-react';
 
@@ -158,6 +159,9 @@ export default function ChessGame({ room, myPlayer, roomId }: ChessGameProps) {
 
   return (
     <div className="flex flex-col items-center w-full max-w-lg mx-auto space-y-4 px-2 py-4 select-none">
+      {/* Chess had no music at all. Deliberately the sparsest track in the set —
+          this screen is thinking time, and a busy loop turns irritating fast. */}
+      <BackgroundMusic screen="chess" />
       {/* Game Mode Badge & Status Header */}
       <div className="flex items-center justify-between w-full px-2">
         <div className="flex items-center gap-2">

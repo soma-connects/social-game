@@ -136,6 +136,8 @@ class VoiceChatManager {
     }
 
     this.localStream = stream;
+    // Tells the speech recogniser it must not take the microphone away.
+    micStream.setCallActive(true);
     this.startLevelMeter();
 
     // On a phone the mic is handed to the speech recogniser during a mini-game
@@ -167,7 +169,14 @@ class VoiceChatManager {
     const track = next?.getAudioTracks()[0] ?? null;
 
     this.peers.forEach((peer) => {
-      const sender = peer.pc?.getSenders().find((s) => s.track?.kind === 'audio' || !s.track);
+      // Found via the transceiver rather than by inspecting sender.track, which
+      // is null exactly when the mic is suspended — the moment this matters.
+      const sender = peer.pc
+        ?.getTransceivers()
+        .find((t) => t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio')
+        ?.sender
+        ?? peer.pc?.getSenders()[0];
+
       if (!sender) return;
       sender.replaceTrack(track).catch(() => {
         /* the connection is going away anyway */
@@ -182,6 +191,7 @@ class VoiceChatManager {
   public leave(): void {
     this.unsubscribeStream?.();
     this.unsubscribeStream = null;
+    micStream.setCallActive(false);
 
     if (this.roomId && this.myId) {
       // Best effort — the peers also notice via connection state.
@@ -299,7 +309,25 @@ class VoiceChatManager {
       remoteDescriptionSet: false,
     };
 
-    this.localStream?.getAudioTracks().forEach((track) => pc.addTrack(track, this.localStream!));
+    /**
+     * Always create the outgoing audio sender, even with no track to put in it.
+     *
+     * This used to be `localStream?.getAudioTracks().forEach(addTrack)`, which
+     * adds nothing when there is no local stream — and there is no local stream
+     * for the whole time the microphone is suspended for speech recognition. A
+     * peer connected during that window ended up with no sender at all, so the
+     * later replaceTrack had nothing to attach to and that player was silent to
+     * them for the rest of the session, with no error anywhere.
+     *
+     * A transceiver guarantees the sender exists up front, so restoring the mic
+     * is always just a replaceTrack.
+     */
+    const track = this.localStream?.getAudioTracks()[0] ?? null;
+    const transceiver = pc.addTransceiver('audio', {
+      direction: 'sendrecv',
+      streams: this.localStream ? [this.localStream] : [],
+    });
+    if (track) void transceiver.sender.replaceTrack(track).catch(() => {});
 
     pc.onicecandidate = (event) => {
       if (event.candidate && this.myId) {

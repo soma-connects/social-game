@@ -252,7 +252,10 @@ class SpeechRecognitionService {
     const error = await this.requestMicAccess();
     if (error) return error;
 
-    if (isMobileAudioPlatform() && this.holdsMicRef) {
+    // Only let go of the device when nothing else needs it. Releasing while a
+    // call is live can drop the refcount to zero and stop the tracks, taking
+    // the player off the air.
+    if (isMobileAudioPlatform() && this.holdsMicRef && micStream.canSuspendForSpeech()) {
       micStream.release();
       this.holdsMicRef = false;
       this.micStream = null;
@@ -382,11 +385,18 @@ class SpeechRecognitionService {
     this.recognition = recognition;
     this.wantsToListen = true;
 
-    // Hand the device to the recogniser on phones. See isMobileAudioPlatform:
-    // a live getUserMedia stream and a running recogniser cannot share a mobile
-    // microphone, and the recogniser is the one that loses. Synchronous, so the
-    // start() below stays inside the user gesture that iOS insists on.
-    const suspendedMic = isMobileAudioPlatform();
+    // Hand the device to the recogniser on phones — but only when nothing else
+    // is using it.
+    //
+    // A live getUserMedia stream and a running recogniser cannot share a mobile
+    // microphone, so suspending helps when the player is on their own. With a
+    // voice call up it does the opposite: it drops them off the call for the
+    // whole round and leaves the attempt recorder with a dead stream. Both
+    // happened in real play. Keeping the call is worth more than a mobile
+    // recogniser that may work anyway.
+    //
+    // Synchronous, so the start() below stays inside the user gesture iOS needs.
+    const suspendedMic = isMobileAudioPlatform() && micStream.canSuspendForSpeech();
     if (suspendedMic) micStream.suspend();
 
     this.diagnostics = {

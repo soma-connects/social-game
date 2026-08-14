@@ -27,6 +27,20 @@ interface Options {
   active: boolean;
   /** Hard cap so a long turn cannot grow the buffer without bound. */
   maxMs?: number;
+  /**
+   * Identifies the attempt being recorded — performer, round and game.
+   *
+   * A clip belongs to one turn. When this changes the previous clip is dropped
+   * immediately, whether or not a new one is ever produced.
+   *
+   * Without it the hook only ever *replaced* a clip on a successful recording,
+   * and both failure paths below return early — no chunks, or a blob too small
+   * to be real audio. So a turn that recorded nothing kept the last good clip
+   * on screen, and the roast played one player's attempt under another
+   * player's name. Games that never record at all inherited whatever the last
+   * recording game had captured.
+   */
+  sessionKey?: string;
 }
 
 /** Picks a container the browser can actually produce. Safari differs from Chrome. */
@@ -47,7 +61,7 @@ function pickMimeType(): string | undefined {
   });
 }
 
-export function useVoiceRecorder({ stream, active, maxMs = 15000 }: Options) {
+export function useVoiceRecorder({ stream, active, maxMs = 15000, sessionKey }: Options) {
   const [clip, setClip] = useState<VoiceClip | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<RecorderErrorCode | null>(null);
@@ -113,13 +127,22 @@ export function useVoiceRecorder({ stream, active, maxMs = 15000 }: Options) {
       rec.onstop = () => {
         const parts = chunksRef.current;
         chunksRef.current = [];
-        if (parts.length === 0) return;
 
-        const blob = new Blob(parts, { type: mimeType || 'audio/webm' });
-        // Silence still produces a container header, so ignore tiny blobs
-        // rather than showing the room a replay button that plays nothing.
-        // Lowered to 200 because a 15s silent WebM or quick turn can be small.
-        if (blob.size < 200) return;
+        const blob = parts.length > 0 ? new Blob(parts, { type: mimeType || 'audio/webm' }) : null;
+
+        // Silence still produces a container header, so a tiny blob is treated
+        // as nothing recorded.
+        //
+        // Critically, that case now CLEARS the clip instead of returning early.
+        // Returning left the previous round's recording in state, so a turn that
+        // captured nothing replayed the last player's audio — the room heard a
+        // recording of someone else, from a different game, presented as this
+        // player's attempt.
+        if (!blob || blob.size < 200) {
+          revoke();
+          setClip(null);
+          return;
+        }
 
         revoke();
         const url = URL.createObjectURL(blob);
@@ -143,6 +166,22 @@ export function useVoiceRecorder({ stream, active, maxMs = 15000 }: Options) {
       setIsRecording(false);
     }
   }, [stream, maxMs, revoke, stop]);
+
+  /**
+   * A new turn owns no audio until it records some.
+   *
+   * This is the half of the stale-replay bug that clearing inside `onstop`
+   * cannot reach: games that never record at all. Only three phases capture
+   * audio, so after a Voice Arena turn the clip simply sat there, and Trivia,
+   * Asteroid Defense and Spelling Bee all replayed it as though it were theirs.
+   * Nothing ever ran `onstop` for those rounds to clear it.
+   */
+  useEffect(() => {
+    if (sessionKey === undefined) return;
+    revoke();
+    setClip(null);
+    setError(null);
+  }, [sessionKey, revoke]);
 
   useEffect(() => {
     if (active) start();

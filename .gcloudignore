@@ -1,3 +1,8 @@
+# What NOT to upload to Cloud Build.
+#
+# This governs the source tarball only. The image contents are controlled
+# separately by .dockerignore.
+
 .gcloudignore
 .git
 .gitignore
@@ -7,3 +12,22 @@ node_modules/
 node_modules/**
 npm-debug.log
 PROJECT_GOALS.md
+
+# Firebase deploy cache — hundreds of MB, rebuilt on every deploy.
+.firebase/
+.firebase/**
+
+# Env files. The build gets the public Firebase config through --build-arg and
+# the Gemini key at runtime, so no env file ever needs to leave this machine.
+.env
+.env.*
+
+# Source/reference art. Nothing under src/ imports these and they are the
+# single largest thing in the upload — roughly 4MB of PNGs that would be sent
+# on every build for nothing.
+public/designs/
+public/designs/**
+
+# Local service account keys, if one is ever downloaded again.
+sa-key.json
+*serviceAccountKey*.json

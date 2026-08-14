@@ -321,14 +321,53 @@ export function miniGamePhase(game: MiniGameId): GamePhase {
   return 'qualifying_voice';
 }
 
-/** Picks the mini-game for a turn from whatever the host enabled. */
-export function pickMiniGame(enabled: MiniGameId[], isBoardGame: boolean = true): MiniGameId {
+/** How many recent picks the repeat rule looks back over. */
+export const MINIGAME_HISTORY_WINDOW = 6;
+
+/** Appearances inside that window before a game is rested. */
+export const MINIGAME_REPEAT_LIMIT = 2;
+
+/**
+ * Picks the mini-game for a turn from whatever the host enabled.
+ *
+ * Uniform random is memoryless, which is not what "random" means to a room full
+ * of people: it will happily serve the same game four turns running, and that
+ * reads as broken rather than unlucky. With six board games a straight repeat is
+ * a one-in-six event on every single turn.
+ *
+ * So a game that has already come up `MINIGAME_REPEAT_LIMIT` times in the last
+ * `MINIGAME_HISTORY_WINDOW` picks is rested, and the game played immediately
+ * before is skipped outright. Both rules are preferences, not guarantees — they
+ * relax in order if they would leave nothing to choose from, so a host who
+ * enabled a single game still gets that game.
+ */
+export function pickMiniGame(
+  enabled: MiniGameId[],
+  isBoardGame: boolean = true,
+  recent: MiniGameId[] = []
+): MiniGameId {
   let pool = enabled.length > 0 ? enabled : ALL_MINI_GAMES;
   if (isBoardGame) {
-    pool = pool.filter(g => BOARD_MINI_GAMES.includes(g));
+    pool = pool.filter((g) => BOARD_MINI_GAMES.includes(g));
     if (pool.length === 0) pool = ['voice_arena'];
   }
-  return pool[Math.floor(Math.random() * pool.length)];
+
+  const window = recent.slice(-MINIGAME_HISTORY_WINDOW);
+  const appearances = (game: MiniGameId) => window.filter((g) => g === game).length;
+  const previous = recent[recent.length - 1];
+
+  // Strictest first: rested games out, and never the same game twice running.
+  const fresh = pool.filter((g) => appearances(g) < MINIGAME_REPEAT_LIMIT && g !== previous);
+  // Then allow an over-played game back, but still not back-to-back.
+  const notPrevious = pool.filter((g) => g !== previous);
+
+  const candidates = fresh.length > 0 ? fresh : notPrevious.length > 0 ? notPrevious : pool;
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+/** Records a pick, keeping only what the repeat rule needs. */
+export function rememberMiniGame(recent: MiniGameId[] | undefined, game: MiniGameId): MiniGameId[] {
+  return [...(recent ?? []), game].slice(-MINIGAME_HISTORY_WINDOW);
 }
 
 export const BOARD_GRAPH: Record<number, BoardNode> = {

@@ -42,6 +42,7 @@ import {
   miniGamePhase,
   performanceToSteps,
   pickMiniGame,
+  rememberMiniGame,
   resolveTile,
   scoreToPerformance,
   sumReactionBonus,
@@ -254,8 +255,16 @@ function advanceRoundOrOpenShop(room: RoomState): void {
     // so the series decides it. The board game rolls a fresh game per turn.
     const game =
       room.roomType === 'team_battle'
-        ? currentSeriesGame(room) ?? pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES)
-        : pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES);
+        ? currentSeriesGame(room) ??
+          pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES, true, room.recentMiniGames)
+        : pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES, true, room.recentMiniGames);
+
+    // Only the board game's random picks feed the repeat rule. A Team Battle
+    // series is a deliberate playlist — recording it here would make the board
+    // game avoid whatever the host had just chosen on purpose.
+    if (room.roomType !== 'team_battle') {
+      room.recentMiniGames = rememberMiniGame(room.recentMiniGames, game);
+    }
 
     room.currentMiniGame = game;
     room.phase = miniGamePhase(game);

@@ -15,7 +15,7 @@ interface LeftSidebarProps {
   /** Only the host gets the remove control. */
   canManage?: boolean;
   onKickPlayer?: (player: Player) => void;
-  roomType?: 'board_game' | 'team_battle';
+  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo';
 }
 
 export default function LeftSidebar({

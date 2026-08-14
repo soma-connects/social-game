@@ -15,10 +15,11 @@ import {
   Users,
   X,
   Swords,
-  Scale,
+  Shuffle,
   Bot,
   Settings,
 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
 import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState } from '@/lib/types';
@@ -40,7 +41,7 @@ interface RoomLobbyProps {
   room: RoomState;
   myPlayer: Player;
   onStartGame: () => void;
-  onSelectMode?: (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle') => void;
+  onSelectMode?: (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo') => void;
 }
 
 const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
@@ -57,8 +58,9 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   const [newPlayerName, setNewPlayerName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
-  const [activeMode, setActiveMode] = useState<'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle'>('board');
+  const [activeMode, setActiveMode] = useState<'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo'>('board');
   const [showCustomDecks, setShowCustomDecks] = useState(false);
+  const [isShuffling, setIsShuffling] = useState(false);
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
   );
@@ -131,9 +133,9 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
     setAddError(null);
     // Adding a pass-and-play player must not steal this browser's identity, so
     // the returned playerId is deliberately ignored here.
-    const myId = roomStore.getMyPlayerId();
+    const myId = roomStore.getMyPlayerId(room.roomId);
     const result = await roomStore.joinRoom(room.roomId, name);
-    if (myId) roomStore.setMyPlayerId(myId);
+    if (myId) roomStore.setMyPlayerId(myId, room.roomId);
 
     if (result.error) {
       setAddError(result.error);
@@ -297,7 +299,12 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                     
                     <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
                       {members.map((player) => (
-                        <div
+                        // `layout` + a stable key means a shuffle physically
+                        // slides people between the two crews instead of the
+                        // rosters blinking into a new arrangement.
+                        <motion.div
+                          layout
+                          transition={{ type: 'spring', stiffness: 320, damping: 28 }}
                           key={player.id}
                           className="glass-pill rounded-2xl p-4 space-y-3 border transition-all text-center relative overflow-hidden flex flex-col items-center"
                           style={{ borderColor: `${team.color}50` }}
@@ -322,7 +329,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                           <div className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-1 rounded-full border whitespace-nowrap" style={{ backgroundColor: `${team.color}30`, borderColor: `${team.color}50`, color: team.color }}>
                             <CheckCircle2 className="w-3 h-3 shrink-0" /> READY
                           </div>
-                        </div>
+                        </motion.div>
                       ))}
                       {members.length === 0 && (
                         <div className="col-span-full py-8 text-center text-sm font-bold opacity-50" style={{ color: team.color }}>
@@ -333,6 +340,30 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   </div>
                 );
               })}
+
+              {/* Nobody has to pick anybody. Deciding teams out loud is the part
+                  of a party game where somebody gets chosen last — this lets the
+                  room blame the dice instead. SWAP above stays for fine-tuning. */}
+              {myPlayer.isHost && (
+                <div className="md:col-span-2 flex flex-col items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      audioSFX.playDiceRoll();
+                      setIsShuffling(true);
+                      await roomStore.balanceTeams(room.roomId);
+                      setIsShuffling(false);
+                    }}
+                    disabled={isShuffling || room.players.length < 2}
+                    className="glass-pill hover:bg-white/15 disabled:opacity-40 text-partyCyan font-extrabold text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 border border-partyCyan/30 transition-all active:scale-95"
+                  >
+                    <Shuffle className={`w-4 h-4 text-partyYellow ${isShuffling ? 'animate-spin' : ''}`} />
+                    <span>{isShuffling ? 'DRAWING CREWS…' : 'SHUFFLE THE CREWS'}</span>
+                  </button>
+                  <p className="text-[10px] text-gray-400">
+                    Random and even — press again for a different draw
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
@@ -570,17 +601,84 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   </p>
                 </div>
               </button>
+
+              {/* 6. Chess Arena (1v1, 2v2 Consultation, vs AI) */}
+              <button
+                onClick={() => {
+                  setActiveMode('chess');
+                  audioSFX.playChoiSuccess();
+                }}
+                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
+                  activeMode === 'chess'
+                    ? 'bg-gradient-to-r from-sky-950/80 via-slate-900/90 to-indigo-900/50 border-cyan-400 text-white shadow-xl glow-cyan'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                }`}
+              >
+                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-cyan-500/15 border border-cyan-400/30 shrink-0">
+                  ♟️
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
+                    CHESS ARENA
+                    {activeMode === 'chess' && (
+                      <span className="bg-cyan-400 text-slate-950 text-[9px] px-2 py-0.5 rounded-full font-black">
+                        SELECTED
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-gray-300 mt-1 leading-snug">
+                    1v1 Duels, 2v2 Team Consultation with secret strategy voice, or Solo vs AI Bot!
+                  </p>
+                </div>
+              </button>
+
+              {/* 7. Ludo Party (2-4 Players, Bots & Music) */}
+              <button
+                onClick={() => {
+                  setActiveMode('ludo');
+                  audioSFX.playChoiSuccess();
+                }}
+                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
+                  activeMode === 'ludo'
+                    ? 'bg-gradient-to-r from-amber-950/80 via-slate-900/90 to-yellow-900/50 border-amber-400 text-white shadow-xl glow-yellow'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                }`}
+              >
+                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-amber-500/15 border border-amber-400/30 shrink-0">
+                  🎲
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
+                    LUDO VOICE PARTY
+                    {activeMode === 'ludo' && (
+                      <span className="bg-amber-400 text-slate-950 text-[9px] px-2 py-0.5 rounded-full font-black">
+                        SELECTED
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-gray-300 mt-1 leading-snug">
+                    Classic 4-player Ludo with animated dice, background party music, and bot fill!
+                  </p>
+                </div>
+              </button>
             </div>
           </div>
 
           {/* Toggle Button for Custom Deck Settings (HIDDEN BY DEFAULT) */}
           <div className="pt-2 flex flex-col gap-3 border-t border-white/10">
+            {/* Team Battle takes two presses on purpose: the first switches the
+                room into team mode so the crew roster appears above and people
+                can arrange sides, the second actually starts the series. */}
             <button
               onClick={() => (onSelectMode ? onSelectMode(activeMode) : onStartGame())}
               className="w-full bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-sm sm:text-base py-3 sm:py-3.5 px-6 sm:px-8 rounded-2xl flex items-center justify-center gap-2 sm:gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-yellow"
             >
               <Play className="w-5 h-5 fill-current" />
-              <span>LAUNCH MATCH NOW</span>
+              <span>
+                {activeMode === 'team_battle' && room.roomType !== 'team_battle'
+                  ? 'SET UP THE CREWS'
+                  : 'LAUNCH MATCH NOW'}
+              </span>
             </button>
 
             <button

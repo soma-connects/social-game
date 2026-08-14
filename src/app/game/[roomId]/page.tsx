@@ -17,6 +17,15 @@ import DebateGame from '@/components/DebateGame';
 import GuessTheVoiceGame from '@/components/GuessTheVoiceGame';
 import TriviaShowdownGame from '@/components/TriviaShowdownGame';
 import AsteroidDefenseGame from '@/components/AsteroidDefenseGame';
+import dynamic from 'next/dynamic';
+
+const ChessGame = dynamic(() => import('@/components/chess/ChessGame'), {
+  loading: () => <div className="p-8 text-center text-cyan-400 font-bold animate-pulse">Loading Chess Arena...</div>,
+});
+
+const LudoGame = dynamic(() => import('@/components/ludo/LudoGame'), {
+  loading: () => <div className="p-8 text-center text-amber-400 font-bold animate-pulse">Loading Ludo Arena...</div>,
+});
 import PowerupShop from '@/components/PowerupShop';
 import RoadmapBoard from '@/components/RoadmapBoard';
 import TrapWordPicker from '@/components/TrapWordPicker';
@@ -30,6 +39,8 @@ import SpectatorView from '@/components/SpectatorView';
 import RoastIntermission from '@/components/RoastIntermission';
 import BattleScoreboard from '@/components/BattleScoreboard';
 import TeamBattleGameSelect from '@/components/TeamBattleGameSelect';
+import TeamBattleIntro from '@/components/TeamBattleIntro';
+import TeamBattleRecap from '@/components/TeamBattleRecap';
 import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
@@ -87,7 +98,9 @@ export default function GameRoomPage() {
   const { room, status, error } = snapshot;
 
   // ── Voice replay ──────────────────────────────────────────────────────────
-  const myPlayerId = roomStore.getMyPlayerId();
+  // Passed explicitly: identity is stored per room, and this reads during the
+  // first render, before the effect below tells the store which room we watch.
+  const myPlayerId = roomStore.getMyPlayerId(roomId);
   const performer = room?.players[room.activePlayerIndex] ?? null;
   const isPerformer = !!performer && performer.id === myPlayerId;
   const isAttemptPhase =
@@ -262,11 +275,25 @@ export default function GameRoomPage() {
     roomStore.startMatch(roomId);
   };
 
-  const handleSelectMode = async (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle') => {
+  const handleSelectMode = async (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo') => {
     if (mode === 'board') {
       handleStartMatch();
+    } else if (mode === 'chess') {
+      audioSFX.playChoiSuccess();
+      const numPlayers = room.players.length;
+      const chessMode = numPlayers >= 4 ? '2v2' : numPlayers === 1 ? 'vs_ai' : '1v1';
+      await roomStore.startChessMatch(roomId, chessMode, 'blitz_5m', 'navigator');
+    } else if (mode === 'ludo') {
+      audioSFX.playChoiSuccess();
+      await roomStore.startLudoMatch(roomId);
     } else if (mode === 'team_battle') {
-      await roomStore.setTeamMode(roomId, true);
+      // Two steps. Switching the room into team mode reveals the crew roster in
+      // the lobby; starting immediately would skip past the one chance anybody
+      // has to arrange sides.
+      if (room.roomType !== 'team_battle') {
+        await roomStore.setTeamMode(roomId, true);
+        return;
+      }
       handleStartMatch();
     } else if (mode === 'ai_master') {
       setShowGeminiMode(true);
@@ -401,12 +428,24 @@ export default function GameRoomPage() {
             />
           )}
 
-          {room.roomType === 'team_battle' && room.phase !== 'lobby' && room.phase !== 'game_over' && (
-            <BattleScoreboard room={room} />
-          )}
+          {/* The intro and the recap both carry their own, larger scoreboard,
+              so the compact bar would just be a second copy on those screens. */}
+          {room.roomType === 'team_battle' &&
+            room.phase !== 'lobby' &&
+            room.phase !== 'game_over' &&
+            room.phase !== 'team_battle_intro' &&
+            room.phase !== 'team_battle_recap' && <BattleScoreboard room={room} />}
 
           {room.phase === 'team_battle_select' && (
             <TeamBattleGameSelect room={room} myPlayerId={myPlayer.id} />
+          )}
+
+          {room.phase === 'team_battle_intro' && (
+            <TeamBattleIntro room={room} myPlayer={myPlayer} />
+          )}
+
+          {room.phase === 'team_battle_recap' && (
+            <TeamBattleRecap room={room} myPlayer={myPlayer} onGoHome={() => router.push('/')} />
           )}
 
           {room.phase === 'qualifying_voice' && (
@@ -592,6 +631,20 @@ export default function GameRoomPage() {
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+            </div>
+          )}
+
+          {room.phase === 'chess_match' && (
+            <div className="space-y-6">
+              <ChessGame room={room} myPlayer={myPlayer} roomId={roomId} />
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+            </div>
+          )}
+
+          {room.phase === 'ludo_match' && (
+            <div className="space-y-6">
+              <LudoGame room={room} myPlayer={myPlayer} roomId={roomId} />
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
             </div>
           )}
 

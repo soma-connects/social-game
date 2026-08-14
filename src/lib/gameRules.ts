@@ -225,12 +225,58 @@ export function getTeam(id: TeamId | undefined) {
   return TEAMS.find((t) => t.id === id) ?? TEAMS[0];
 }
 
-/** Spreads players evenly, preserving anyone already placed. */
-export function balanceTeams<T extends { id: string; teamId?: TeamId }>(players: T[]): T[] {
-  return players.map((player, index) => ({
-    ...player,
-    teamId: (index % 2 === 0 ? 'red' : 'blue') as TeamId,
-  }));
+/** Do two arrangements pair the same people together? Colour swaps do not count. */
+function sameGrouping(a: Set<string>, redBefore: Set<string>, blueBefore: Set<string>): boolean {
+  const equals = (x: Set<string>, y: Set<string>) =>
+    x.size === y.size && [...x].every((id) => y.has(id));
+  return equals(a, redBefore) || equals(a, blueBefore);
+}
+
+/**
+ * Draws crews at random, evenly.
+ *
+ * Deciding teams out loud is the least fun part of a party game — somebody ends
+ * up picked last. Letting the room blame the shuffle removes that entirely.
+ *
+ * Replaces an older `balanceTeams` that alternated by array index. That was
+ * fully deterministic: the same set of players in the same join order always
+ * produced the same two crews, so pressing the button again visibly did
+ * nothing, and the first crew you were given was the only one on offer.
+ *
+ * An odd headcount puts the spare player on red. Re-rolling avoids handing back
+ * the grouping the room already has, so a second press is never a no-op while
+ * another arrangement exists.
+ */
+export function shuffleTeams<T extends { id: string; teamId?: TeamId }>(players: T[]): T[] {
+  if (players.length < 2) {
+    return players.map((player) => ({ ...player, teamId: 'red' as TeamId }));
+  }
+
+  const redBefore = new Set(players.filter((p) => p.teamId === 'red').map((p) => p.id));
+  const blueBefore = new Set(players.filter((p) => p.teamId === 'blue').map((p) => p.id));
+  // Only worth avoiding a repeat if everyone already had a crew, and if more
+  // than one arrangement actually exists — with two players there is only one.
+  const avoidRepeat = redBefore.size + blueBefore.size === players.length && players.length >= 3;
+
+  let assignment = new Map<string, TeamId>();
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const order = [...players];
+    // Fisher-Yates. Sorting by Math.random() is the usual shortcut here and it
+    // is biased — with six players that bias is visible over an evening.
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+
+    assignment = new Map(order.map((p, i) => [p.id, (i % 2 === 0 ? 'red' : 'blue') as TeamId]));
+    if (!avoidRepeat) break;
+
+    const redNow = new Set(order.filter((p) => assignment.get(p.id) === 'red').map((p) => p.id));
+    if (!sameGrouping(redNow, redBefore, blueBefore)) break;
+  }
+
+  return players.map((player) => ({ ...player, teamId: assignment.get(player.id) ?? 'red' }));
 }
 
 /** Interleaves the roll order so the sides alternate instead of batching. */

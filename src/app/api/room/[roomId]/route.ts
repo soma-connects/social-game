@@ -10,6 +10,16 @@ import {
   SocialRound,
   TeamId,
 } from '@/lib/types';
+import { Chess } from 'chess.js';
+import { ChessRoomState, ChessTimeControl, BotDifficulty, ChessPieceColor } from '@/lib/chess/chessTypes';
+import { LudoRoomState, LudoColor, LudoPlayer, LudoToken } from '@/lib/ludo/ludoTypes';
+import {
+  canMoveLudoToken,
+  getLudoNextPosition,
+  chooseBestLudoMove,
+  LUDO_COLOR_ORDER,
+  SAFE_POSITIONS,
+} from '@/lib/ludo/ludoRules';
 import { AVATARS, DARES, DUEL_TOPICS } from '@/lib/gameContent';
 import {
   DEFAULT_TURN_SECONDS,
@@ -25,7 +35,7 @@ import {
   TileOutcome,
   alternateByTeam,
   boardProgress,
-  balanceTeams,
+  shuffleTeams,
   describePerformance,
   getShopItem,
   getTeam,
@@ -240,7 +250,13 @@ function advanceRoundOrOpenShop(room: RoomState): void {
   if (next) {
     room.activePlayerIndex = room.players.findIndex((p) => p.id === next.id);
     room.turnResult = null;
-    const game = pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES);
+    // Team Battle plays one chosen game at a time, the same one for everybody,
+    // so the series decides it. The board game rolls a fresh game per turn.
+    const game =
+      room.roomType === 'team_battle'
+        ? currentSeriesGame(room) ?? pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES)
+        : pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES);
+
     room.currentMiniGame = game;
     room.phase = miniGamePhase(game);
     room.socialRound = { targetPlayerId: next.id, reactions: [], judgeVotes: [] };
@@ -249,11 +265,131 @@ function advanceRoundOrOpenShop(room: RoomState): void {
     return;
   }
 
-  // Everyone has played: the whole room shops together.
   room.liveState = null;
+
+  // Everyone has played this game.
+  //
+  // Team Battle has no board and no shop — the series is the whole structure,
+  // so it goes straight on to the next game or to the final recap. The board
+  // game sends the room shopping before it rolls.
+  if (room.roomType === 'team_battle') {
+    advanceSeries(room);
+    return;
+  }
+
   room.phase = 'powerup_shop';
   room.shopReady = [];
   pushEvent(room, `🛒 Round ${room.roundNumber ?? 1}: everyone to the buff shop`, 'system');
+}
+
+/** Copies a fresh set of team assignments onto the live player objects. */
+function applyTeamAssignment(room: RoomState, assigned: { id: string; teamId?: TeamId }[]): void {
+  const byId = new Map(assigned.map((p) => [p.id, p.teamId]));
+  for (const player of room.players) {
+    const teamId = byId.get(player.id);
+    if (teamId) player.teamId = teamId;
+  }
+}
+
+/** One line naming who ended up with whom, for the event feed. */
+function describeCrews(room: RoomState): string {
+  const names = (team: TeamId) =>
+    room.players
+      .filter((p) => p.teamId === team)
+      .map((p) => p.name)
+      .join(', ') || '—';
+  return `${getTeam('red').icon} ${names('red')}  vs  ${getTeam('blue').icon} ${names('blue')}`;
+}
+
+/**
+ * Puts anybody without a crew on the smaller side.
+ *
+ * `join` assigns a team, but `createRoom` never did — so the host of a Team
+ * Battle room had no `teamId` at all, and since scoring is credited by team,
+ * every point the host earned went nowhere. Also covers players who joined
+ * before the room was switched into team mode.
+ */
+function ensureTeams(room: RoomState): void {
+  if (room.roomType !== 'team_battle') return;
+
+  for (const player of room.players) {
+    if (player.teamId) continue;
+    const red = room.players.filter((p) => p.teamId === 'red').length;
+    const blue = room.players.filter((p) => p.teamId === 'blue').length;
+    player.teamId = red <= blue ? 'red' : 'blue';
+  }
+}
+
+/** The mini-game the series is currently on. */
+function currentSeriesGame(room: RoomState): MiniGameId | null {
+  const state = room.teamBattleState;
+  if (!state) return null;
+  return state.selectedGames[state.currentGameIndex] ?? null;
+}
+
+/**
+ * Moves the series on once every player has performed the current game.
+ *
+ * This is the step that never existed: `team_battle_start_series` parked the
+ * room in `team_battle_intro` and nothing was capable of moving it forward, so
+ * the mode dead-ended on a blank screen the moment the host pressed start.
+ */
+function advanceSeries(room: RoomState): void {
+  const state = room.teamBattleState;
+  if (!state) return;
+
+  const finished = currentSeriesGame(room);
+  if (finished) {
+    const red = room.teamScores?.red ?? 0;
+    const blue = room.teamScores?.blue ?? 0;
+    pushEvent(
+      room,
+      `🏁 ${MINIGAME_LABELS[finished]} done — Red ${red}, Blue ${blue}`,
+      'system'
+    );
+  }
+
+  state.currentGameIndex += 1;
+  state.currentRound += 1;
+
+  if (state.currentGameIndex >= state.seriesLength) {
+    finishSeries(room);
+    return;
+  }
+
+  room.roundResults = [];
+  room.currentMiniGame = state.selectedGames[state.currentGameIndex];
+  room.phase = 'team_battle_intro';
+}
+
+/** Ends the series and crowns the crew with the most points. */
+function finishSeries(room: RoomState): void {
+  const red = room.teamScores?.red ?? 0;
+  const blue = room.teamScores?.blue ?? 0;
+
+  room.winningTeam = red > blue ? 'red' : blue > red ? 'blue' : null;
+  room.phase = 'team_battle_recap';
+
+  if (room.winningTeam) {
+    const team = getTeam(room.winningTeam);
+    pushEvent(room, `🏆 ${team.name} takes the series ${Math.max(red, blue)}–${Math.min(red, blue)}!`, 'system');
+  } else {
+    pushEvent(room, `🤝 The series ends level at ${red}–${red}`, 'system');
+  }
+}
+
+/**
+ * Credits a performance to the player's crew.
+ *
+ * Team Battle scoring used to depend on `team_battle_score`, which nothing
+ * called and which awarded a flat 100 to a team the client named. Points now
+ * come from what the player actually earned, which is the documented intent:
+ * everyone still performs solo, the points just feed a shared total.
+ */
+function creditTeam(room: RoomState, player: Player, coins: number): void {
+  if (room.roomType !== 'team_battle' || !player.teamId || coins <= 0) return;
+  room.teamScores ??= { red: 0, blue: 0 };
+  room.teamScores[player.teamId] += coins;
 }
 
 /** Opens the board, ordering rolls by this round's mini-game performance. */
@@ -350,7 +486,9 @@ const HOST_ONLY_ACTIONS = new Set([
   'set_team',
   'switch_team',
   'balance_teams',
+  'shuffle_teams',
   'team_battle_start_series',
+  'team_battle_begin_game',
   'team_battle_next_game',
   'kick_player',
 ]);
@@ -1469,6 +1607,9 @@ async function applyAction(
       const coinsEarned = Math.floor(performance * 100);
 
       active.score += coinsEarned;
+      // In Team Battle the same points also feed the crew total, which is what
+      // the series is actually won on.
+      creditTeam(room, active, coinsEarned);
       active.vibeScore = (active.vibeScore ?? 0) + reactionBonus + passVotes * 10;
       const badge = pickSocialBadge(socialRound, performance);
       const gotNewBadge = addBadge(active, badge);
@@ -1523,8 +1664,15 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    /**
+     * Kept for the debate round, which finishes through here in team mode.
+     *
+     * It used to jump straight to the final recap, ending the whole series on
+     * the first game that used it. It now closes out the player's turn like any
+     * other mini-game and lets the series decide whether anything follows.
+     */
     case 'complete_team_battle': {
-      room.phase = 'team_battle_recap';
+      advanceRoundOrOpenShop(room);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -1553,6 +1701,9 @@ async function applyAction(
       const coinsEarned = Math.floor(performance * 100);
 
       active.score += coinsEarned;
+      // In Team Battle the same points also feed the crew total, which is what
+      // the series is actually won on.
+      creditTeam(room, active, coinsEarned);
       active.vibeScore = (active.vibeScore ?? 0) + reactionBonus + passVotes * 10;
       const badge = pickSocialBadge(socialRound, performance);
       const gotNewBadge = addBadge(active, badge);
@@ -1898,12 +2049,12 @@ async function applyAction(
       const on = body.teamMode === true || body.roomType === 'team_battle';
       room.roomType = on ? 'team_battle' : 'board_game';
       if (on) {
-        // Balance on the way in so nobody has to sort six people by hand.
-        const balanced = balanceTeams(room.players);
-        room.players.forEach((p, i) => {
-          p.teamId = balanced[i].teamId;
-        });
-        pushEvent(room, `🤝 Team mode on — Red Crew vs Blue Crew`, 'system');
+        // Drawn at random on the way in, so the room is looking at a real set of
+        // crews the moment team mode turns on rather than sorting six people by
+        // hand. The host can re-roll or swap individuals from there.
+        applyTeamAssignment(room, shuffleTeams(room.players));
+        pushEvent(room, `🤝 Team mode on — crews drawn at random`, 'system');
+        pushEvent(room, describeCrews(room), 'system');
       } else {
         // Deleted rather than set to undefined: Firestore treats an explicit
         // undefined as an error, not as "no value".
@@ -1927,12 +2078,30 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
-    case 'balance_teams': {
-      const balanced = balanceTeams(room.players);
-      room.players.forEach((p, i) => {
-        p.teamId = balanced[i].teamId;
-      });
-      pushEvent(room, `⚖️ Teams rebalanced`, 'system');
+    /**
+     * Re-draws both crews at random.
+     *
+     * Named `balance_teams` for the clients that already call it. It used to
+     * alternate by array index, which meant it produced the same two crews every
+     * single time — pressing it twice did nothing at all.
+     */
+    case 'balance_teams':
+    case 'shuffle_teams': {
+      if (room.players.length < 2) {
+        return NextResponse.json({ error: 'Need at least two players to make crews' }, { status: 409 });
+      }
+      // Only before the whistle. Re-drawing crews mid-series would move points
+      // that have already been banked to a team.
+      if (room.phase !== 'lobby' && room.phase !== 'team_battle_select') {
+        return NextResponse.json(
+          { error: 'Crews are locked once the battle has started' },
+          { status: 409 }
+        );
+      }
+
+      applyTeamAssignment(room, shuffleTeams(room.players));
+      pushEvent(room, `🎲 Crews re-drawn at random`, 'system');
+      pushEvent(room, describeCrews(room), 'system');
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -1952,6 +2121,9 @@ async function applyAction(
       if (games.length === 0) {
         return NextResponse.json({ error: 'No games selected' }, { status: 400 });
       }
+      // Nobody may sit the series out teamless — their points would vanish.
+      ensureTeams(room);
+
       room.phase = 'team_battle_intro';
       room.teamBattleState = {
         selectedGames: games,
@@ -1960,41 +2132,52 @@ async function applyAction(
         seriesLength: games.length,
       };
       room.teamScores = { red: 0, blue: 0 };
+      room.roundResults = [];
       room.currentMiniGame = games[0];
-      pushEvent(room, `⚔️ Team Battle Series started!`, 'system');
+      pushEvent(
+        room,
+        `⚔️ Team Battle: ${games.length} game${games.length === 1 ? '' : 's'}, Red Crew vs Blue Crew`,
+        'system'
+      );
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    /**
+     * Starts the game the series is currently sitting on.
+     *
+     * This is the missing link. `team_battle_start_series` left the room in
+     * `team_battle_intro` and nothing existed to take it further, so the mode
+     * stopped dead on the intro screen.
+     */
+    case 'team_battle_begin_game': {
+      if (!room.teamBattleState) {
+        return NextResponse.json({ error: 'Not in a team battle' }, { status: 400 });
+      }
+      if (room.phase !== 'team_battle_intro') {
+        return NextResponse.json({ error: 'The game has already started' }, { status: 409 });
+      }
+
+      const game = currentSeriesGame(room);
+      if (!game) return NextResponse.json({ error: 'The series is finished' }, { status: 409 });
+
+      // Everyone performs this game once, one at a time.
+      room.roundResults = [];
+      room.currentMiniGame = game;
+      pushEvent(
+        room,
+        `⚔️ Game ${room.teamBattleState.currentGameIndex + 1} of ${room.teamBattleState.seriesLength}: ${MINIGAME_LABELS[game]}`,
+        'system'
+      );
+      advanceRoundOrOpenShop(room);
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /** Host override to cut a game short and move the series on. */
     case 'team_battle_next_game': {
       if (!room.teamBattleState) {
         return NextResponse.json({ error: 'Not in a team battle' }, { status: 400 });
       }
-      room.teamBattleState.currentGameIndex++;
-      room.teamBattleState.currentRound++;
-      if (room.teamBattleState.currentGameIndex >= room.teamBattleState.seriesLength) {
-        room.phase = 'team_battle_recap';
-        const redScore = room.teamScores?.red ?? 0;
-        const blueScore = room.teamScores?.blue ?? 0;
-        room.winningTeam = redScore > blueScore ? 'red' : blueScore > redScore ? 'blue' : null;
-      } else {
-        room.phase = 'team_battle_intro';
-        room.currentMiniGame = room.teamBattleState.selectedGames[room.teamBattleState.currentGameIndex];
-      }
-      return NextResponse.json({ room: await writeRoom(room) });
-    }
-
-    case 'team_battle_score': {
-      const winnerTeam = body.winnerTeam as TeamId;
-      if (winnerTeam !== 'red' && winnerTeam !== 'blue') {
-        return NextResponse.json({ error: 'Invalid winner team' }, { status: 400 });
-      }
-      if (!room.teamScores) {
-        room.teamScores = { red: 0, blue: 0 };
-      }
-      room.teamScores[winnerTeam] += 100;
-      pushEvent(room, `🔥 Team ${winnerTeam.toUpperCase()} scored 100 points!`, 'system');
-      // Set to reveal state or next game. We'll set it to roast_intermission as a temporary reveal state.
-      room.phase = 'roast_intermission';
+      advanceSeries(room);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -2027,6 +2210,7 @@ async function applyAction(
       }
 
       if (room.roomType === 'team_battle') {
+        ensureTeams(room);
         room.phase = 'team_battle_select';
         pushEvent(room, `⚔️ Team Battle begins!`, 'system');
       } else {
@@ -2145,6 +2329,458 @@ async function applyAction(
 
       if (room.activePlayerIndex >= room.players.length) room.activePlayerIndex = 0;
       unstickPhase(room);
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    // ── Chess Game Actions ──────────────────────────────────────────────────
+    case 'chess_start_match': {
+      const mode = (body.mode as '1v1' | '2v2' | 'vs_ai') || '1v1';
+      const timeControl = (body.timeControl as ChessTimeControl) || 'blitz_5m';
+      const botDifficulty = (body.botDifficulty as BotDifficulty) || 'navigator';
+
+      let baseTimeMs = 300_000;
+      let incMs = 0;
+      if (timeControl === 'bullet_1m') { baseTimeMs = 60_000; incMs = 0; }
+      else if (timeControl === 'blitz_3m') { baseTimeMs = 180_000; incMs = 2_000; }
+      else if (timeControl === 'blitz_5m') { baseTimeMs = 300_000; incMs = 3_000; }
+      else if (timeControl === 'rapid_10m') { baseTimeMs = 600_000; incMs = 5_000; }
+      else if (timeControl === 'casual') { baseTimeMs = 86_400_000; incMs = 0; } // 24h
+
+      const chess = new Chess();
+      const whitePlayers: any[] = [];
+      const blackPlayers: any[] = [];
+      const spectators: string[] = [];
+
+      if (mode === 'vs_ai') {
+        const human = room.players[0] || makePlayer('Player', 0, true);
+        whitePlayers.push({ playerId: human.id, name: human.name, avatar: human.avatar?.faceUrl, color: 'w', teamSlot: 1 });
+        blackPlayers.push({ playerId: 'bot_ai', name: `Deep Star (${botDifficulty.toUpperCase()})`, avatar: '/avatars/robot_face.jpg', color: 'b', teamSlot: 1, isAi: true });
+      } else if (mode === '1v1') {
+        const p1 = room.players[0];
+        const p2 = room.players[1] || { id: 'p2_temp', name: 'Opponent' };
+        if (p1) whitePlayers.push({ playerId: p1.id, name: p1.name, avatar: p1.avatar?.faceUrl, color: 'w', teamSlot: 1 });
+        if (p2) blackPlayers.push({ playerId: p2.id, name: p2.name, avatar: (p2 as any).avatar?.faceUrl, color: 'b', teamSlot: 1 });
+        for (let i = 2; i < room.players.length; i++) spectators.push(room.players[i].id);
+      } else if (mode === '2v2') {
+        // 2v2 consultation mode
+        const p1 = room.players[0];
+        const p2 = room.players[1];
+        const p3 = room.players[2];
+        const p4 = room.players[3];
+        if (p1) whitePlayers.push({ playerId: p1.id, name: p1.name, avatar: p1.avatar?.faceUrl, color: 'w', teamSlot: 1 });
+        if (p2) whitePlayers.push({ playerId: p2.id, name: p2.name, avatar: p2.avatar?.faceUrl, color: 'w', teamSlot: 2 });
+        if (p3) blackPlayers.push({ playerId: p3.id, name: p3.name, avatar: p3.avatar?.faceUrl, color: 'b', teamSlot: 1 });
+        if (p4) blackPlayers.push({ playerId: p4.id, name: p4.name, avatar: p4.avatar?.faceUrl, color: 'b', teamSlot: 2 });
+        for (let i = 4; i < room.players.length; i++) spectators.push(room.players[i].id);
+      }
+
+      room.roomType = 'chess';
+      room.phase = 'chess_match';
+      room.chessState = {
+        mode,
+        timeControl,
+        fen: chess.fen(),
+        pgn: '',
+        history: [],
+        turn: 'w',
+        isCheck: false,
+        isCheckmate: false,
+        isDraw: false,
+        isStalemate: false,
+        whitePlayers,
+        blackPlayers,
+        spectators,
+        clocks: {
+          whiteTimeMs: baseTimeMs,
+          blackTimeMs: baseTimeMs,
+          incrementMs: incMs,
+          lastTickTimestamp: Date.now(),
+          activeColor: 'w',
+          isRunning: timeControl !== 'casual',
+        },
+        proposals: { w: null, b: null },
+        botDifficulty,
+        lastMove: null,
+      };
+
+      pushEvent(room, `♟️ Chess Match started! Mode: ${mode.toUpperCase()}`, 'system');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'chess_make_move': {
+      if (!room.chessState) {
+        return NextResponse.json({ error: 'No active chess match' }, { status: 400 });
+      }
+
+      const { from, to, promotion } = body;
+      const cs = room.chessState;
+      const chess = new Chess(cs.fen);
+
+      // Verify the caller is on the side to move.
+      //
+      // `|| cs.mode === 'vs_ai'` used to short-circuit this entirely, so in a
+      // match against the computer ANY caller — including a spectator — could
+      // play moves for either colour. The bot is now allowed only on Black's
+      // turn, and only from the client that drives it (the host).
+      const callerId = body.callerId ?? body.playerId;
+      const activeSlots = cs.turn === 'w' ? cs.whitePlayers : cs.blackPlayers;
+      const isOnActiveSide = activeSlots.some((s) => s.playerId === callerId);
+      const isBotMove = cs.mode === 'vs_ai' && cs.turn === 'b' && callerId === room.hostId;
+
+      if (!isOnActiveSide && !isBotMove) {
+        return NextResponse.json({ error: 'It is not your turn to move' }, { status: 403 });
+      }
+
+      try {
+        const move = chess.move({ from, to, promotion: promotion || 'q' });
+        if (!move) {
+          return NextResponse.json({ error: 'Illegal move' }, { status: 400 });
+        }
+
+        // Update Clock
+        const now = Date.now();
+        const elapsed = now - cs.clocks.lastTickTimestamp;
+        if (cs.clocks.isRunning) {
+          if (cs.turn === 'w') {
+            cs.clocks.whiteTimeMs = Math.max(0, cs.clocks.whiteTimeMs - elapsed + cs.clocks.incrementMs);
+          } else {
+            cs.clocks.blackTimeMs = Math.max(0, cs.clocks.blackTimeMs - elapsed + cs.clocks.incrementMs);
+          }
+        }
+        cs.clocks.lastTickTimestamp = now;
+        cs.clocks.activeColor = chess.turn();
+
+        cs.fen = chess.fen();
+        cs.pgn = chess.pgn();
+        cs.history.push(move.san);
+        cs.turn = chess.turn();
+        cs.isCheck = chess.inCheck();
+        cs.isCheckmate = chess.isCheckmate();
+        cs.isDraw = chess.isDraw();
+        cs.isStalemate = chess.isStalemate();
+        cs.lastMove = { from: move.from, to: move.to, san: move.san };
+
+        // Clear team proposals for the side that just moved
+        if (move.color === 'w') cs.proposals.w = null;
+        else cs.proposals.b = null;
+
+        if (cs.isCheckmate) {
+          cs.winner = move.color;
+          cs.winReason = 'Checkmate';
+          cs.clocks.isRunning = false;
+          pushEvent(room, `👑 Checkmate! ${move.color === 'w' ? 'White' : 'Black'} wins!`, 'system');
+        } else if (cs.isDraw || cs.isStalemate) {
+          cs.winner = 'draw';
+          cs.winReason = cs.isStalemate ? 'Stalemate' : 'Draw';
+          cs.clocks.isRunning = false;
+          pushEvent(room, `🤝 Game drawn (${cs.winReason})`, 'system');
+        } else if (cs.isCheck) {
+          pushEvent(room, `⚔️ ${move.san} - Check!`, 'system');
+        }
+
+        return NextResponse.json({ room: await writeRoom(room) });
+      } catch (err: any) {
+        return NextResponse.json({ error: err?.message || 'Invalid move' }, { status: 400 });
+      }
+    }
+
+    case 'chess_propose_move': {
+      if (!room.chessState || room.chessState.mode !== '2v2') {
+        return NextResponse.json({ error: '2v2 consultation mode required' }, { status: 400 });
+      }
+      const { from, to, promotion, san } = body;
+      const callerId = body.playerId;
+      const cs = room.chessState;
+      const player = room.players.find((p) => p.id === callerId);
+
+      const isWhite = cs.whitePlayers.some((p) => p.playerId === callerId);
+      const isBlack = cs.blackPlayers.some((p) => p.playerId === callerId);
+
+      if (!isWhite && !isBlack) {
+        return NextResponse.json({ error: 'Only active team members can propose moves' }, { status: 403 });
+      }
+
+      const proposal = {
+        proposerId: callerId,
+        proposerName: player?.name || 'Teammate',
+        from,
+        to,
+        promotion,
+        san,
+        timestamp: Date.now(),
+      };
+
+      if (isWhite) cs.proposals.w = proposal;
+      else cs.proposals.b = proposal;
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'chess_resign': {
+      if (!room.chessState) return NextResponse.json({ error: 'No chess game active' }, { status: 400 });
+      const cs = room.chessState;
+      const callerId = body.playerId;
+      const isWhite = cs.whitePlayers.some((p) => p.playerId === callerId);
+      const isBlack = cs.blackPlayers.some((p) => p.playerId === callerId);
+
+      if (!isWhite && !isBlack) return NextResponse.json({ error: 'Only players can resign' }, { status: 403 });
+
+      cs.winner = isWhite ? 'b' : 'w';
+      cs.winReason = 'Resignation';
+      cs.clocks.isRunning = false;
+      pushEvent(room, `🏳️ ${isWhite ? 'White' : 'Black'} resigned.`, 'system');
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /**
+     * Ends a match on time.
+     *
+     * The clock only ever moved when somebody made a move, so a player who ran
+     * out simply sat at 0:00 forever and the game could not finish. The server
+     * re-derives the remaining time rather than trusting the client that
+     * noticed — a browser claiming "they flagged" is not evidence.
+     */
+    case 'chess_timeout': {
+      const cs = room.chessState;
+      if (!cs) return NextResponse.json({ error: 'No chess game active' }, { status: 400 });
+      if (cs.winner) return NextResponse.json({ room, alreadyOver: true });
+      if (!cs.clocks.isRunning) {
+        return NextResponse.json({ error: 'The clock is not running' }, { status: 409 });
+      }
+
+      const elapsed = Date.now() - cs.clocks.lastTickTimestamp;
+      const remaining =
+        cs.turn === 'w' ? cs.clocks.whiteTimeMs - elapsed : cs.clocks.blackTimeMs - elapsed;
+
+      if (remaining > 0) {
+        return NextResponse.json({ error: 'That side still has time', remaining }, { status: 409 });
+      }
+
+      if (cs.turn === 'w') cs.clocks.whiteTimeMs = 0;
+      else cs.clocks.blackTimeMs = 0;
+
+      cs.winner = cs.turn === 'w' ? 'b' : 'w';
+      cs.winReason = 'Timeout';
+      cs.clocks.isRunning = false;
+      pushEvent(room, `⏰ ${cs.turn === 'w' ? 'White' : 'Black'} ran out of time.`, 'system');
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /** Withdraws a 2v2 move suggestion so the pair are not stuck with it. */
+    case 'chess_clear_proposal': {
+      const cs = room.chessState;
+      if (!cs) return NextResponse.json({ error: 'No chess game active' }, { status: 400 });
+
+      const callerId = body.callerId ?? body.playerId;
+      const isWhite = cs.whitePlayers.some((p) => p.playerId === callerId);
+      const isBlack = cs.blackPlayers.some((p) => p.playerId === callerId);
+      if (!isWhite && !isBlack) {
+        return NextResponse.json({ error: 'Only players on that side can clear it' }, { status: 403 });
+      }
+
+      if (isWhite) cs.proposals.w = null;
+      else cs.proposals.b = null;
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    // ── Ludo Game Actions ───────────────────────────────────────────────────
+    case 'ludo_start_match': {
+      const colors: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
+      const players: LudoPlayer[] = [];
+
+      // Assign existing human players to colors, fill remainder with bots
+      for (let i = 0; i < 4; i++) {
+        const color = colors[i];
+        if (i < room.players.length) {
+          const human = room.players[i];
+          players.push({
+            playerId: human.id,
+            name: human.name,
+            avatar: human.avatar?.faceUrl,
+            color,
+            isAi: false,
+          });
+        } else {
+          players.push({
+            playerId: `bot_${color}`,
+            name: `Bot ${color.toUpperCase()}`,
+            avatar: '/avatars/robot_face.jpg',
+            color,
+            isAi: true,
+          });
+        }
+      }
+
+      const tokens: Record<LudoColor, LudoToken[]> = {
+        red: [0, 1, 2, 3].map((id) => ({ id, color: 'red', position: -1 })),
+        green: [0, 1, 2, 3].map((id) => ({ id, color: 'green', position: -1 })),
+        yellow: [0, 1, 2, 3].map((id) => ({ id, color: 'yellow', position: -1 })),
+        blue: [0, 1, 2, 3].map((id) => ({ id, color: 'blue', position: -1 })),
+      };
+
+      room.roomType = 'ludo';
+      room.phase = 'ludo_match';
+      room.ludoState = {
+        players,
+        activeColor: 'red',
+        diceValue: null,
+        hasRolled: false,
+        consecutiveSixes: 0,
+        tokens,
+        winner: null,
+        rankings: [],
+        lastActionText: 'Game started! Red rolls first.',
+      };
+
+      pushEvent(room, `🎲 Ludo Match started! 4 Players ready.`, 'system');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'ludo_roll_dice': {
+      if (!room.ludoState) return NextResponse.json({ error: 'No active Ludo match' }, { status: 400 });
+      const ls = room.ludoState;
+      if (ls.hasRolled) return NextResponse.json({ error: 'Already rolled this turn' }, { status: 400 });
+
+      const roll = Math.floor(Math.random() * 6) + 1;
+      ls.diceValue = roll;
+      ls.hasRolled = true;
+
+      const activeColor = ls.activeColor;
+      const myTokens = ls.tokens[activeColor];
+
+      if (roll === 6) {
+        ls.consecutiveSixes += 1;
+      } else {
+        ls.consecutiveSixes = 0;
+      }
+
+      // Three consecutive 6s penalty -> forfeit turn immediately
+      if (ls.consecutiveSixes >= 3) {
+        ls.consecutiveSixes = 0;
+        ls.hasRolled = false;
+        ls.diceValue = null;
+        ls.lastActionText = `3 consecutive 6s! ${activeColor.toUpperCase()} forfeits turn.`;
+        // Advance turn
+        const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
+        ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
+        return NextResponse.json({ room: await writeRoom(room) });
+      }
+
+      const validMoves = myTokens.filter((t) => canMoveLudoToken(t, roll));
+
+      if (validMoves.length === 0) {
+        // No legal moves: pass turn to next color
+        ls.lastActionText = `${activeColor.toUpperCase()} rolled a ${roll} (no moves).`;
+        ls.hasRolled = false;
+        ls.diceValue = null;
+        const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
+        ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
+      } else if (validMoves.length === 1) {
+        // Auto-move single option for speedy mobile play!
+        const token = validMoves[0];
+        const nextPos = getLudoNextPosition(token, roll);
+        token.position = nextPos;
+
+        // Check capture
+        let captured = false;
+        if (nextPos >= 0 && nextPos < 52 && !SAFE_POSITIONS.has(nextPos)) {
+          for (const [color, enemyTokens] of Object.entries(ls.tokens)) {
+            if (color === activeColor) continue;
+            for (const enemy of enemyTokens) {
+              if (enemy.position === nextPos) {
+                enemy.position = -1; // Sent home!
+                captured = true;
+                pushEvent(room, `💥 ${activeColor.toUpperCase()} captured ${color.toUpperCase()}!`, 'debuff');
+              }
+            }
+          }
+        }
+
+        // Check victory
+        const isFinished = myTokens.every((t) => t.position === 999);
+        if (isFinished && !ls.winner) {
+          ls.winner = activeColor;
+          ls.rankings.push(activeColor);
+          pushEvent(room, `🏆 ${activeColor.toUpperCase()} won the Ludo Match!`, 'system');
+        }
+
+        ls.lastActionText = `${activeColor.toUpperCase()} moved token ${token.id + 1} with a ${roll}!`;
+
+        // Grant bonus turn on 6 or capture
+        if (roll === 6 || captured) {
+          ls.hasRolled = false;
+          ls.diceValue = null;
+          ls.lastActionText += ' (Bonus Roll!)';
+        } else {
+          ls.hasRolled = false;
+          ls.diceValue = null;
+          const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
+          ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
+        }
+      }
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'ludo_move_token': {
+      if (!room.ludoState) return NextResponse.json({ error: 'No active Ludo match' }, { status: 400 });
+      const ls = room.ludoState;
+      const { tokenId } = body;
+      const roll = ls.diceValue;
+
+      if (!ls.hasRolled || !roll) {
+        return NextResponse.json({ error: 'Must roll dice first' }, { status: 400 });
+      }
+
+      const activeColor = ls.activeColor;
+      const token = ls.tokens[activeColor].find((t) => t.id === tokenId);
+      if (!token || !canMoveLudoToken(token, roll)) {
+        return NextResponse.json({ error: 'Invalid token move' }, { status: 400 });
+      }
+
+      const nextPos = getLudoNextPosition(token, roll);
+      token.position = nextPos;
+
+      // Check capture
+      let captured = false;
+      if (nextPos >= 0 && nextPos < 52 && !SAFE_POSITIONS.has(nextPos)) {
+        for (const [color, enemyTokens] of Object.entries(ls.tokens)) {
+          if (color === activeColor) continue;
+          for (const enemy of enemyTokens) {
+            if (enemy.position === nextPos) {
+              enemy.position = -1;
+              captured = true;
+              pushEvent(room, `💥 ${activeColor.toUpperCase()} captured ${color.toUpperCase()}!`, 'debuff');
+            }
+          }
+        }
+      }
+
+      // Check victory
+      const isFinished = ls.tokens[activeColor].every((t) => t.position === 999);
+      if (isFinished && !ls.winner) {
+        ls.winner = activeColor;
+        ls.rankings.push(activeColor);
+        pushEvent(room, `🏆 ${activeColor.toUpperCase()} won the Ludo Match!`, 'system');
+      }
+
+      ls.lastActionText = `${activeColor.toUpperCase()} moved token ${token.id + 1} with a ${roll}!`;
+
+      // Bonus roll if 6 or capture
+      if (roll === 6 || captured) {
+        ls.hasRolled = false;
+        ls.diceValue = null;
+        ls.lastActionText += ' (Bonus Roll!)';
+      } else {
+        ls.hasRolled = false;
+        ls.diceValue = null;
+        const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
+        ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
+      }
+
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

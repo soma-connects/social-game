@@ -32,6 +32,14 @@ yarn-error.log*
 # deploy; committing it would be larger than the entire rest of the repo.
 /.firebase/
 
+# Service account keys. A leaked one is full read/write on the whole project,
+# and unlike a password it does not expire — assume any key that reaches a
+# remote is compromised for good.
+*serviceAccountKey*.json
+*-adminsdk-*.json
+gcp-key.json
+key.json
+
 # vercel
 .vercel
 

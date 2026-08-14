@@ -389,6 +389,10 @@ class AudioFeedbackEngine {
     osc.start(now);
     osc.stop(now + 0.05);
   }
+
+  public playTap() {
+    this.playPop();
+  }
 }
 
 export const audioSFX = new AudioFeedbackEngine();

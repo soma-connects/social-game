@@ -53,31 +53,53 @@ class RoomStoreManager {
 
   // ---------------------------------------------------------------- identity
 
-  public getMyPlayerId(): string | null {
+  /**
+   * Identity is stored per room, not globally.
+   *
+   * A single shared slot broke as soon as a browser touched two rooms: joining
+   * the second overwrote the first room's credentials, and a request still in
+   * flight to the old room came back 401 and wiped the session for the room the
+   * player had just walked into. Keying by room also means going back to an
+   * earlier room re-claims the same seat instead of creating a duplicate player.
+   *
+   * Callers that omit the room fall back to whichever room is being watched.
+   */
+  private roomKey(base: string, roomId?: string): string | null {
+    const id = (roomId ?? this.currentRoomId)?.toUpperCase();
+    return id ? `${base}_${id}` : null;
+  }
+
+  public getMyPlayerId(roomId?: string): string | null {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(MY_PLAYER_ID_KEY);
+    const key = this.roomKey(MY_PLAYER_ID_KEY, roomId);
+    return key ? localStorage.getItem(key) : null;
   }
 
-  public setMyPlayerId(id: string): void {
+  public setMyPlayerId(id: string, roomId?: string): void {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(MY_PLAYER_ID_KEY, id);
+    const key = this.roomKey(MY_PLAYER_ID_KEY, roomId);
+    if (key) localStorage.setItem(key, id);
   }
 
-  public getMyToken(): string | null {
+  public getMyToken(roomId?: string): string | null {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(MY_TOKEN_KEY);
+    const key = this.roomKey(MY_TOKEN_KEY, roomId);
+    return key ? localStorage.getItem(key) : null;
   }
 
-  public setMyToken(token: string): void {
+  public setMyToken(token: string, roomId?: string): void {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(MY_TOKEN_KEY, token);
+    const key = this.roomKey(MY_TOKEN_KEY, roomId);
+    if (key) localStorage.setItem(key, token);
   }
 
-  /** Forgets who this browser was, so the next screen offers a fresh join. */
-  public clearSession(): void {
+  /** Forgets who this browser was in one room, so it offers a fresh join. */
+  public clearSession(roomId?: string): void {
     if (typeof window === 'undefined') return;
-    localStorage.removeItem(MY_PLAYER_ID_KEY);
-    localStorage.removeItem(MY_TOKEN_KEY);
+    const idKey = this.roomKey(MY_PLAYER_ID_KEY, roomId);
+    const tokenKey = this.roomKey(MY_TOKEN_KEY, roomId);
+    if (idKey) localStorage.removeItem(idKey);
+    if (tokenKey) localStorage.removeItem(tokenKey);
   }
 
   public generateRoomCode(): string {
@@ -213,28 +235,32 @@ class RoomStoreManager {
       const res = await fetch(`/api/room/${roomId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Attached to every request; the server ignores it where it is not
-        // needed and rejects the request where it is missing.
-        body: JSON.stringify({ token: this.getMyToken() ?? '', ...payload }),
+        // The token for THIS room, not whichever room was touched last.
+        body: JSON.stringify({ token: this.getMyToken(roomId) ?? '', ...payload }),
       });
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         const error = (data as { error?: string }).error ?? `Request failed (${res.status})`;
 
-        // The stored credential no longer matches any player — the room was
-        // reset, or this is a session from before tokens existed. Clearing it
-        // drops the UI back to the join screen instead of retrying forever
-        // against an identity the server has never heard of.
+        // The stored credential no longer matches any player in this room — it
+        // was reset, or this is a session from before tokens existed. Clearing
+        // it drops the UI back to the join screen instead of retrying forever
+        // against an identity the server has never heard of. Scoped to the room
+        // that rejected us, so a late reply from a room the player has already
+        // left cannot log them out of the one they are in.
         if (res.status === 401 && (data as { code?: string }).code === 'no_session') {
-          this.clearSession();
+          this.clearSession(roomId);
         }
 
-        this.emit({ status: res.status === 404 ? 'missing' : 'error', error });
+        // A stale room's failure is not this room's problem either.
+        if (roomId.toUpperCase() === (this.currentRoomId ?? '').toUpperCase()) {
+          this.emit({ status: res.status === 404 ? 'missing' : 'error', error });
+        }
         return { error };
       }
 
-      if (typeof data.token === 'string') this.setMyToken(data.token);
+      if (typeof data.token === 'string') this.setMyToken(data.token, roomId);
 
       if (data.room) this.applyRoom(data.room as RoomState);
       return data;
@@ -258,7 +284,7 @@ class RoomStoreManager {
 
   public async createRoom(roomId: string, hostName: string, roomType: 'board_game' | 'team_battle' = 'board_game'): Promise<RoomState | null> {
     const data = await this.post(roomId, { action: 'create', playerName: hostName, roomType });
-    if (data.playerId) this.setMyPlayerId(String(data.playerId));
+    if (data.playerId) this.setMyPlayerId(String(data.playerId), roomId);
     return (data.room as RoomState) ?? null;
   }
 
@@ -268,10 +294,10 @@ class RoomStoreManager {
     const data = await this.post(roomId, {
       action: 'join',
       playerName,
-      playerId: this.getMyPlayerId() ?? '',
+      playerId: this.getMyPlayerId(roomId) ?? '',
     });
     if (data.error) return { room: null, error: data.error };
-    if (data.playerId) this.setMyPlayerId(String(data.playerId));
+    if (data.playerId) this.setMyPlayerId(String(data.playerId), roomId);
     return { room: (data.room as RoomState) ?? null };
   }
 
@@ -325,9 +351,11 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'team_battle_next_game' });
   }
 
-  public teamBattleScore(roomId: string, winnerTeam: TeamId) {
-    return this.post(roomId, { action: 'team_battle_score', winnerTeam });
+  /** Starts the game the series is sitting on. Host only. */
+  public teamBattleBeginGame(roomId: string) {
+    return this.post(roomId, { action: 'team_battle_begin_game' });
   }
+
 
   public balanceTeams(roomId: string) {
     return this.post(roomId, { action: 'balance_teams' });
@@ -401,6 +429,44 @@ class RoomStoreManager {
 
   public voteGuessVoice(roomId: string, voterId: string, guessedPlayerId: string) {
     return this.post(roomId, { action: 'guess_voice_vote', voterId, guessedPlayerId });
+  }
+
+  public startChessMatch(roomId: string, mode: '1v1' | '2v2' | 'vs_ai', timeControl: string, botDifficulty?: string) {
+    return this.post(roomId, { action: 'chess_start_match', mode, timeControl, botDifficulty });
+  }
+
+  public makeChessMove(roomId: string, playerId: string, from: string, to: string, promotion?: string) {
+    return this.post(roomId, { action: 'chess_make_move', playerId, from, to, promotion });
+  }
+
+  public proposeChessMove(roomId: string, playerId: string, from: string, to: string, san?: string, promotion?: string) {
+    return this.post(roomId, { action: 'chess_propose_move', playerId, from, to, san, promotion });
+  }
+
+  /** Reports that the side to move ran out of time. The server re-checks it. */
+  public chessTimeout(roomId: string) {
+    return this.post(roomId, { action: 'chess_timeout' });
+  }
+
+  /** Withdraws a 2v2 move suggestion. */
+  public clearChessProposal(roomId: string, playerId: string) {
+    return this.post(roomId, { action: 'chess_clear_proposal', playerId });
+  }
+
+  public resignChess(roomId: string, playerId: string) {
+    return this.post(roomId, { action: 'chess_resign', playerId });
+  }
+
+  public startLudoMatch(roomId: string) {
+    return this.post(roomId, { action: 'ludo_start_match' });
+  }
+
+  public rollLudoDice(roomId: string) {
+    return this.post(roomId, { action: 'ludo_roll_dice' });
+  }
+
+  public moveLudoToken(roomId: string, tokenId: number) {
+    return this.post(roomId, { action: 'ludo_move_token', tokenId });
   }
 
   /**

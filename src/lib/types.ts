@@ -132,6 +132,8 @@ export type GamePhase =
   | 'team_battle_recap'
   | 'trivia_showdown'
   | 'asteroid_defense'
+  | 'chess_match'
+  | 'ludo_match'
   | 'game_over';
 
 /** The qualifying mini-games that feed the main board game. */
@@ -353,7 +355,7 @@ export type RoomState = {
   } | null;
   winner: Player | null;
   /** The high-level mode the room is running in. */
-  roomType?: 'board_game' | 'team_battle';
+  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo';
   /** Set instead of a solo winner when the room is in team mode. */
   winningTeam?: TeamId | null;
   /** Cumulative scores in Team Battle mode. */
@@ -411,6 +413,10 @@ export type RoomState = {
   triviaState?: TriviaState | null;
   /** Guess the Voice state. */
   guessTheVoiceState?: GuessTheVoiceState | null;
+  /** Chess room state. */
+  chessState?: import('./chess/chessTypes').ChessRoomState | null;
+  /** Ludo room state. */
+  ludoState?: import('./ludo/ludoTypes').LudoRoomState | null;
   /** Session memory — small structured events for Who Said It? and AI callbacks. */
   sessionMemory?: SessionMemoryEvent[];
 };

@@ -12,8 +12,15 @@ import { micStream, MicError } from './micStream';
 
 const SIGNAL_POLL_MS = 1000;
 
-/** Google's public STUN servers cover most home and office networks. */
-const ICE_SERVERS: RTCIceServer[] = [
+/**
+ * Last-resort ICE config.
+ *
+ * The real list comes from /api/ice, which adds a TURN relay. STUN alone only
+ * discovers a browser's public address — it cannot carry audio — so a peer
+ * behind symmetric NAT has no path at all. That is normal on mobile carrier
+ * networks, and it made one player inaudible to an otherwise healthy room.
+ */
+const FALLBACK_STUN: RTCIceServer[] = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
 ];
 
@@ -26,6 +33,10 @@ export interface PeerState {
   speaking: boolean;
   /** They muted themselves, or we have no audio from them yet. */
   silent: boolean;
+  /** 'relay' means the audio is going through TURN, 'direct' peer-to-peer. */
+  route?: 'direct' | 'relay';
+  /** ICE could find no working path to this player. */
+  failed?: boolean;
 }
 
 export interface VoiceState {
@@ -63,6 +74,10 @@ interface Peer {
   /** Candidates that arrived before the remote description was set. */
   pendingCandidates: RTCIceCandidateInit[];
   remoteDescriptionSet: boolean;
+  /** How the media actually travels, once connected. Diagnostics only. */
+  route?: 'direct' | 'relay';
+  /** True once ICE gave up on this peer. */
+  failed?: boolean;
 }
 
 const SPEAKING_THRESHOLD = 12;
@@ -87,6 +102,12 @@ class VoiceChatManager {
   private remoteVolume = 1;
   /** True once the browser has refused to play a peer's audio. */
   private audioBlocked = false;
+
+  /** Relay configuration from /api/ice, cached until its credentials expire. */
+  private iceServers: RTCIceServer[] = [];
+  private iceExpiresAt = 0;
+  private hasRelay = false;
+  private iceProvider = 'unknown';
   /** Removes the "unlock on next interaction" listeners once audio is running. */
   private releaseAudioUnlock: (() => void) | null = null;
 
@@ -114,6 +135,8 @@ class VoiceChatManager {
         connection: peer.pc.connectionState,
         speaking: peer.speaking,
         silent: !peer.speaking,
+        route: peer.route,
+        failed: peer.failed,
       })),
     };
   }
@@ -125,6 +148,82 @@ class VoiceChatManager {
 
   public isJoined(): boolean {
     return this.status !== 'off';
+  }
+
+  // ----------------------------------------------------------------- ICE
+
+  /**
+   * Loads relay configuration from the server.
+   *
+   * Cached for the lifetime the provider gives us, because ephemeral TURN
+   * credentials expire and a call that outlives them would fail to reconnect a
+   * peer joining late.
+   *
+   * Failure is deliberately non-fatal: STUN alone still works for players on
+   * ordinary home networks, so a provider outage degrades voice rather than
+   * removing it.
+   */
+  private async loadIceConfig(): Promise<void> {
+    if (this.iceServers.length > 0 && Date.now() < this.iceExpiresAt) return;
+
+    try {
+      const res = await fetch('/api/ice');
+      if (!res.ok) throw new Error(`ICE config request failed: ${res.status}`);
+      const data = (await res.json()) as {
+        iceServers: RTCIceServer[];
+        hasRelay: boolean;
+        provider: string;
+        ttl: number;
+      };
+
+      this.iceServers = data.iceServers ?? FALLBACK_STUN;
+      this.hasRelay = !!data.hasRelay;
+      this.iceProvider = data.provider ?? 'unknown';
+      this.iceExpiresAt = Date.now() + (data.ttl ?? 600) * 1000;
+
+      if (!this.hasRelay) {
+        console.warn(
+          'Voice chat has no TURN relay configured. Players behind symmetric NAT — which is normal on mobile networks — will be inaudible. Set TURN_URLS/TURN_USERNAME/TURN_CREDENTIAL, or Twilio/Cloudflare credentials, on the server.'
+        );
+      }
+    } catch (error) {
+      console.error('Falling back to STUN-only ICE config:', error);
+      this.iceServers = FALLBACK_STUN;
+      this.hasRelay = false;
+      this.iceProvider = 'stun-only';
+      this.iceExpiresAt = Date.now() + 60_000;
+    }
+  }
+
+  /**
+   * Reports how a peer actually connected.
+   *
+   * The distinction that matters is host/srflx (a direct path) versus relay
+   * (through TURN). When somebody is silent, this is the difference between "the
+   * relay is missing" and "something else is wrong" — which is exactly the
+   * question that took three attempts to answer by guesswork.
+   */
+  private async recordConnectionRoute(peer: Peer): Promise<void> {
+    try {
+      const stats = await peer.pc.getStats();
+      let localType = '';
+      let remoteType = '';
+
+      stats.forEach((report: any) => {
+        if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+          const local = stats.get(report.localCandidateId) as any;
+          const remote = stats.get(report.remoteCandidateId) as any;
+          if (local) localType = local.candidateType ?? '';
+          if (remote) remoteType = remote.candidateType ?? '';
+        }
+      });
+
+      if (!localType && !remoteType) return;
+      peer.route = localType === 'relay' || remoteType === 'relay' ? 'relay' : 'direct';
+      this.emit();
+    } catch {
+      /* stats are diagnostics only; never let them break a working call */
+    }
   }
 
   // ------------------------------------------------------------- join/leave
@@ -153,6 +252,11 @@ class VoiceChatManager {
     // Tells the speech recogniser it must not take the microphone away.
     micStream.setCallActive(true);
     this.startLevelMeter();
+
+    // Fetched before any peer is created: a connection built with STUN-only
+    // config cannot be upgraded to use a relay afterwards, it has to be made
+    // with the relay already in hand.
+    await this.loadIceConfig();
 
     // On a phone the mic is handed to the speech recogniser during a mini-game
     // and given back afterwards. Peer connections outlive that, so the track on
@@ -304,7 +408,9 @@ class VoiceChatManager {
   }
 
   private createPeer(peerId: string): Peer {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({
+      iceServers: this.iceServers.length > 0 ? this.iceServers : FALLBACK_STUN,
+    });
 
     const audio = typeof window !== 'undefined' ? new Audio() : ({} as HTMLAudioElement);
     if (audio.style) {
@@ -376,10 +482,20 @@ class VoiceChatManager {
     };
 
     pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') {
+        void this.recordConnectionRoute(peer);
+        peer.failed = false;
+      }
+
       if (pc.connectionState === 'failed') {
-        // Usually a NAT that STUN cannot traverse; a TURN relay is the fix.
-        this.error =
-          'A peer could not connect directly. Some networks need a TURN relay for voice.';
+        peer.failed = true;
+        // Naming the actual cause. Without a relay this is almost always a NAT
+        // that STUN cannot get through — and the previous wording said "some
+        // networks need a TURN relay" while none was ever configured, so the
+        // message described the fix without anyone acting on it.
+        this.error = this.hasRelay
+          ? 'A peer connection failed even through the relay. That player may be offline.'
+          : 'No TURN relay is configured, so players on mobile networks cannot connect. See /api/ice.';
       }
       this.emit();
     };

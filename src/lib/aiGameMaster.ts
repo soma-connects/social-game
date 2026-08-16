@@ -6,6 +6,7 @@
 // State Machine: Welcome -> Player Turn -> Mini Game Intro -> Silent -> Reaction -> Shop -> Recap.
 
 import { MiniGameId, Player, RoomState, SessionMemoryEvent, TeamId } from './types';
+import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from './roomVibes';
 
 export type AiHostState =
   | 'idle'
@@ -297,12 +298,12 @@ class AiGameMasterEngine {
   }
 
   /** Async real-time Gemini LLM powered prompt generator */
-  public async fetchGeminiChallenge(playerName?: string): Promise<AiHostPrompt> {
+  public async fetchGeminiChallenge(playerName?: string, roomVibe?: RoomVibeId): Promise<AiHostPrompt> {
     try {
       const res = await fetch('/api/ai-master', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'challenge', playerName }),
+        body: JSON.stringify({ action: 'challenge', playerName, roomVibe }),
       });
       const data = await res.json();
       if (data.success && data.text) {
@@ -317,7 +318,9 @@ class AiGameMasterEngine {
     } catch (e) {
       console.error('Failed to fetch Gemini challenge:', e);
     }
-    return this.getRandomChallenge();
+    // Offline/no-API-key fallback: still lean toward the room's mood.
+    const preferredCategory = ROOM_VIBES[roomVibe ?? DEFAULT_ROOM_VIBE].preferredCategories[0];
+    return this.getRandomChallenge(preferredCategory);
   }
 
   /** Get unused AI Challenge prompt (Spec §4.2 No-Repeat & §4.4 Weighting) */

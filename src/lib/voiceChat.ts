@@ -416,6 +416,11 @@ class VoiceChatManager {
     if (audio.style) {
       audio.autoplay = true;
       audio.volume = this.remoteVolume;
+      audio.muted = false;
+      audio.defaultMuted = false;
+      audio.setAttribute('playsinline', 'true');
+      audio.setAttribute('webkit-playsinline', 'true');
+      (audio as any).playsInline = true;
       audio.style.display = 'none';
       document.body.appendChild(audio);
     }
@@ -467,32 +472,45 @@ class VoiceChatManager {
       if (!stream) return;
       peer.stream = stream;
       audio.srcObject = stream;
+      audio.muted = false;
       if (this.audioCtx && this.audioCtx.state === 'suspended') {
         void this.audioCtx.resume();
       }
-      void audio.play().catch(() => {
-        // Blocked by autoplay policy. Logging it was all this used to do, so
-        // the player heard silence for the rest of the session on a call that
-        // was otherwise completely healthy — and the only cure anyone found was
-        // leaving and rejoining, because the button press was itself the
-        // gesture the browser was waiting for.
-        this.markAudioBlocked();
-      });
-      this.attachRemoteAnalyser(peer, stream);
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn('[VoiceChat] Peer audio playback pending user gesture:', err);
+          this.markAudioBlocked();
+        });
+      }
+      // On mobile devices, connecting a remote MediaStream to Web Audio Analyser
+      // can cause WebKit/Android to route audio to null destination and silence the audio tag.
+      // We only attach Web Audio analyser on desktop browsers.
+      if (typeof navigator !== 'undefined' && !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        this.attachRemoteAnalyser(peer, stream);
+      }
     };
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'connected') {
         void this.recordConnectionRoute(peer);
         peer.failed = false;
+        // Attempt playback once connection completes
+        if (audio.paused && audio.srcObject) {
+          void audio.play().catch(() => this.markAudioBlocked());
+        }
       }
 
       if (pc.connectionState === 'failed') {
         peer.failed = true;
-        // Naming the actual cause. Without a relay this is almost always a NAT
-        // that STUN cannot get through — and the previous wording said "some
-        // networks need a TURN relay" while none was ever configured, so the
-        // message described the fix without anyone acting on it.
+        // Attempt automatic ICE restart before declaring dead
+        try {
+          if (typeof (pc as any).restartIce === 'function') {
+            (pc as any).restartIce();
+          }
+        } catch {
+          /* ignore restart error */
+        }
         this.error = this.hasRelay
           ? 'A peer connection failed even through the relay. That player may be offline.'
           : 'No TURN relay is configured, so players on mobile networks cannot connect. See /api/ice.';
@@ -518,10 +536,20 @@ class VoiceChatManager {
 
     if (this.releaseAudioUnlock || typeof window === 'undefined') return;
 
-    const unlock = () => this.resumeAudio();
-    window.addEventListener('pointerdown', unlock);
-    window.addEventListener('keydown', unlock);
-    window.addEventListener('touchstart', unlock);
+    const unlock = () => {
+      this.resumeAudio();
+      // Synchronously call play on all audio elements during the user touch event
+      this.peers.forEach((peer) => {
+        if (peer.audio && peer.audio.srcObject) {
+          peer.audio.muted = false;
+          void peer.audio.play().catch(() => {});
+        }
+      });
+    };
+
+    window.addEventListener('pointerdown', unlock, { passive: true });
+    window.addEventListener('keydown', unlock, { passive: true });
+    window.addEventListener('touchstart', unlock, { passive: true });
     this.releaseAudioUnlock = () => {
       window.removeEventListener('pointerdown', unlock);
       window.removeEventListener('keydown', unlock);
@@ -544,7 +572,10 @@ class VoiceChatManager {
 
     const attempts = [...this.peers.values()]
       .filter((peer) => peer.audio?.play && peer.audio.srcObject)
-      .map((peer) => peer.audio.play().then(() => true).catch(() => false));
+      .map((peer) => {
+        peer.audio.muted = false;
+        return peer.audio.play().then(() => true).catch(() => false);
+      });
 
     if (attempts.length === 0) return;
 

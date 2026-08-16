@@ -344,7 +344,8 @@ export const MINIGAME_REPEAT_LIMIT = 2;
 export function pickMiniGame(
   enabled: MiniGameId[],
   isBoardGame: boolean = true,
-  recent: MiniGameId[] = []
+  recent: MiniGameId[] = [],
+  preferred: MiniGameId[] = []
 ): MiniGameId {
   let pool = enabled.length > 0 ? enabled : ALL_MINI_GAMES;
   if (isBoardGame) {
@@ -362,7 +363,14 @@ export function pickMiniGame(
   const notPrevious = pool.filter((g) => g !== previous);
 
   const candidates = fresh.length > 0 ? fresh : notPrevious.length > 0 ? notPrevious : pool;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+
+  // Room-vibe bias: narrow to the vibe's preferred games when any survive the
+  // repeat rules above, so the mood shapes selection without ever overriding
+  // "don't repeat too much" or "the host only enabled these games".
+  const onVibe = candidates.filter((g) => preferred.includes(g));
+  const finalists = onVibe.length > 0 ? onVibe : candidates;
+
+  return finalists[Math.floor(Math.random() * finalists.length)];
 }
 
 /** Records a pick, keeping only what the repeat rule needs. */

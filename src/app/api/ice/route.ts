@@ -113,10 +113,30 @@ function fromStatic(): IceResponse | null {
   const credential = process.env.TURN_CREDENTIAL;
   if (!urls || !username || !credential) return null;
 
+  const rawUrls = urls.split(',').map((u) => u.trim()).filter(Boolean);
+  const expandedUrls: string[] = [];
+
+  rawUrls.forEach((u) => {
+    expandedUrls.push(u);
+    // Add explicit TCP transport variant if not present
+    if (u.startsWith('turn:') && !u.includes('transport=')) {
+      expandedUrls.push(`${u}?transport=tcp`);
+    }
+    // If openrelay/metered is used, add comprehensive mobile fallback ports
+    if (u.includes('openrelay.metered.ca')) {
+      expandedUrls.push('turn:openrelay.metered.ca:80');
+      expandedUrls.push('turn:openrelay.metered.ca:80?transport=tcp');
+      expandedUrls.push('turn:openrelay.metered.ca:443?transport=tcp');
+      expandedUrls.push('turns:openrelay.metered.ca:443?transport=tcp');
+    }
+  });
+
+  const uniqueUrls = Array.from(new Set(expandedUrls));
+
   return {
     iceServers: [
       ...STUN,
-      { urls: urls.split(',').map((u) => u.trim()).filter(Boolean), username, credential },
+      { urls: uniqueUrls, username, credential },
     ],
     hasRelay: true,
     provider: 'static',

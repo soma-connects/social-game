@@ -3,13 +3,15 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Volume2, VolumeX, Bot, Zap, MessageSquare } from 'lucide-react';
 import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
+import { RoomVibeId } from '@/lib/roomVibes';
 
 interface AiGameMasterBannerProps {
   currentSpeech?: string;
   onTriggerChallenge?: (prompt: AiHostPrompt) => void;
+  roomVibe?: RoomVibeId;
 }
 
-export default function AiGameMasterBanner({ currentSpeech, onTriggerChallenge }: AiGameMasterBannerProps) {
+export default function AiGameMasterBanner({ currentSpeech, onTriggerChallenge, roomVibe }: AiGameMasterBannerProps) {
   const [speechText, setSpeechText] = useState<string>('');
   const [isTtsMuted, setIsTtsMuted] = useState(false);
   const [activePrompt, setActivePrompt] = useState<AiHostPrompt | null>(null);
@@ -27,7 +29,7 @@ export default function AiGameMasterBanner({ currentSpeech, onTriggerChallenge }
 
   const handleRequestChallenge = async () => {
     setLoadingAi(true);
-    const prompt = await aiGameMaster.fetchGeminiChallenge();
+    const prompt = await aiGameMaster.fetchGeminiChallenge(undefined, roomVibe);
     setLoadingAi(false);
     setActivePrompt(prompt);
     aiGameMaster.speak(`🔥 GEMINI AI CHALLENGE: ${prompt.text}`);

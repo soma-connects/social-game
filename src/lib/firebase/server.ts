@@ -1,5 +1,6 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 
 /**
  * Firebase Admin, which is the only thing allowed to write game state.
@@ -104,4 +105,26 @@ try {
   adminDb.settings({ ignoreUndefinedProperties: true });
 } catch {
   /* already initialised — the setting from the first call still stands */
+}
+
+/**
+ * Turns a client-supplied Firebase ID token into a uid we can trust.
+ *
+ * The uid on its own is worth nothing: a browser can put any string in a
+ * request body and claim to be anyone. Only the signed token proves the claim,
+ * which is what makes it safe to attach match history — and later, purchases
+ * and entitlements — to the result.
+ *
+ * Returns null rather than throwing on a bad or missing token. Identity is an
+ * enhancement here, not a gate: a player whose token failed still gets to play,
+ * they just do not accumulate a permanent record.
+ */
+export async function verifyUid(idToken: unknown): Promise<string | null> {
+  if (typeof idToken !== 'string' || !idToken) return null;
+  try {
+    const decoded = await getAuth().verifyIdToken(idToken);
+    return decoded.uid;
+  } catch {
+    return null;
+  }
 }

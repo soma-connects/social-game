@@ -95,6 +95,9 @@ class MicStreamManager {
   }
 
   public getStream(): MediaStream | null {
+    if (this.stream && this.stream.getAudioTracks().every((t) => t.readyState === 'ended')) {
+      return null;
+    }
     return this.stream;
   }
 
@@ -143,11 +146,10 @@ class MicStreamManager {
   public suspend(): void {
     if (this.suspended) return;
     this.suspended = true;
-    if (!this.stream) return;
-
-    this.notifyStream(null);
-    this.stream.getTracks().forEach((track) => track.stop());
+    // Release the track so mobile OS hands the hardware mic to speech recognition
+    this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;
+    this.notifyStream(null);
   }
 
   /** Picks the microphone back up after the recogniser is done with it. */
@@ -160,6 +162,7 @@ class MicStreamManager {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      this.attachTrackListeners(stream);
       this.stream = stream;
       this.applyMute();
       this.notifyStream(stream);
@@ -200,6 +203,7 @@ class MicStreamManager {
     try {
       const stream = await this.pending;
       this.pending = null;
+      this.attachTrackListeners(stream);
       this.stream = stream;
       this.applyMute();
       this.refCount++;
@@ -209,6 +213,38 @@ class MicStreamManager {
       this.pending = null;
       this.stream = null;
       return { stream: null, error: micError(classify(err)) };
+    }
+  }
+
+  private attachTrackListeners(stream: MediaStream): void {
+    stream.getAudioTracks().forEach((track) => {
+      track.onended = () => {
+        // Track was killed by mobile OS or external interruption
+        if (this.callActive || this.refCount > 0) {
+          void this.recoverDeadTrack();
+        }
+      };
+      track.onmute = () => {
+        // On iOS Safari, track may mute temporarily on backgrounding
+      };
+      track.onunmute = () => {
+        this.applyMute();
+      };
+    });
+  }
+
+  private async recoverDeadTrack(): Promise<void> {
+    if (this.suspended) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      this.attachTrackListeners(stream);
+      this.stream = stream;
+      this.applyMute();
+      this.notifyStream(stream);
+    } catch {
+      /* could not auto-recover */
     }
   }
 

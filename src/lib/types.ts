@@ -1,3 +1,5 @@
+import type { RoomVibeId } from './roomVibes';
+
 export type MapTheme = 'forest' | 'village' | 'desert' | 'snow' | 'volcano' | 'space' | 'cyberpunk';
 
 export type AvatarExpression = 'normal' | 'talking' | 'surprised' | 'sweating' | 'laughing';
@@ -25,6 +27,15 @@ export type TeamId = 'red' | 'blue';
 
 export type Player = {
   id: string;
+  /**
+   * Durable Firebase Auth uid, verified server-side at join.
+   *
+   * `id` above is per-room and dies with the room; this survives across rooms
+   * and sessions, and is what match history, progression and purchases hang
+   * off. Optional because the game stays fully playable when auth is
+   * unavailable — those players simply cannot be aggregated over time.
+   */
+  uid?: string;
   name: string;
   avatar: AvatarStyle;
   score: number;
@@ -340,6 +351,15 @@ export type RoomState = {
   rev?: number;
   hostId: string;
   phase: GamePhase;
+  /**
+   * Identifies the current match for the permanent `matches` record. Minted
+   * when the room leaves the lobby and cleared when it returns, so it doubles
+   * as "a match is in progress".
+   */
+  matchId?: string | null;
+  matchStartedAt?: number | null;
+  /** Guards against writing the same match summary twice. */
+  matchArchived?: boolean;
   players: Player[];
   activePlayerIndex: number;
   selectedLanguages: LanguageCode[];
@@ -356,6 +376,8 @@ export type RoomState = {
   winner: Player | null;
   /** The high-level mode the room is running in. */
   roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo';
+  /** The social vibe the host picked, steering the AI Master's tone and mini-game mix. Undefined reads as classic_party. */
+  roomVibe?: RoomVibeId;
   /** Set instead of a solo winner when the room is in team mode. */
   winningTeam?: TeamId | null;
   /** Cumulative scores in Team Battle mode. */

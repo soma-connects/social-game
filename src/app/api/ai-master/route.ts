@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { callerKey, consume } from '@/lib/server/rateLimit';
+import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
 
 const SYSTEM_PROMPT = `You are the AI Game Master for "Voice Party", a high-energy multiplayer voice gaming platform.
 
@@ -10,6 +11,19 @@ YOUR ROLE & PERSONALITY:
 - Keep ALL responses under 2 short sentences (5-8 seconds when spoken aloud).
 - Never replace players, never insult players, and keep prompts fun, clever, and engaging.
 `;
+
+/**
+ * Room-vibe presets can name a 'grok' provider (e.g. the flirty_wild room),
+ * but there's no xAI integration yet — this is the single place that would
+ * change once a Grok key exists. Everything falls through to Gemini today.
+ */
+function resolveProvider(vibe: RoomVibeId): 'gemini' {
+  const preset = ROOM_VIBES[vibe] ?? ROOM_VIBES[DEFAULT_ROOM_VIBE];
+  if (preset.provider === 'grok') {
+    console.warn(`ai-master: room vibe "${vibe}" wants Grok, no xAI key configured yet — using Gemini.`);
+  }
+  return 'gemini';
+}
 
 export async function POST(req: Request) {
   // A room legitimately fires a few host lines back to back when a round turns
@@ -23,7 +37,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { action, playerName, gameContext } = await req.json();
+    const { action, playerName, gameContext, roomVibe } = await req.json();
+    const vibe: RoomVibeId = roomVibe && roomVibe in ROOM_VIBES ? roomVibe : DEFAULT_ROOM_VIBE;
+    resolveProvider(vibe);
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
@@ -50,6 +66,8 @@ export async function POST(req: Request) {
       promptText = gameContext || `Give a short 1-sentence party host commentary for ${playerName || 'the group'}!`;
     }
 
+    const vibePersona = ROOM_VIBES[vibe].hostPersona;
+
     // Call Gemini REST API
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
@@ -58,7 +76,7 @@ export async function POST(req: Request) {
         contents: [
           {
             parts: [
-              { text: `${SYSTEM_PROMPT}\n\nTask: ${promptText}` }
+              { text: `${SYSTEM_PROMPT}\n\nROOM VIBE: ${vibePersona}\n\nTask: ${promptText}` }
             ]
           }
         ]

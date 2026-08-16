@@ -24,6 +24,7 @@ import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
 import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState } from '@/lib/types';
 import { MAX_PLAYERS, TEAMS } from '@/lib/gameRules';
+import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
 
 const MINI_GAMES: { id: MiniGameId; name: string; icon: string; blurb: string }[] = [
   { id: 'voice_arena', name: 'Voice Arena', icon: '🎙️', blurb: 'Say the prompt before the timer dies' },
@@ -65,6 +66,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
   );
+  const roomVibe: RoomVibeId = room.roomVibe ?? DEFAULT_ROOM_VIBE;
   const currentAvatarIndex = Math.max(
     0,
     AVATARS.findIndex((avatar) => avatar.id === myPlayer.avatar.id)
@@ -88,6 +90,12 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   const rotateAvatar = (direction: -1 | 1) => {
     const nextIndex = (currentAvatarIndex + direction + AVATARS.length) % AVATARS.length;
     selectAvatar(AVATARS[nextIndex].id);
+  };
+
+  const selectVibe = (id: RoomVibeId) => {
+    if (!myPlayer.isHost || id === roomVibe) return;
+    roomStore.setRoomVibe(room.roomId, id);
+    audioSFX.playChoiSuccess();
   };
 
   const toggleMiniGame = (id: MiniGameId) => {
@@ -180,6 +188,55 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
           <MessageCircle className="w-4 h-4 fill-current" />
           <span>SHARE TO WHATSAPP</span>
         </button>
+      </div>
+
+      {/* Room Vibe — tunes the AI Master's tone and game mix to who's actually in the room */}
+      <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-3 border border-white/5 shadow-2xl relative z-10">
+        <div>
+          <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-partyYellow" />
+            SET THE ROOM VIBE
+          </h3>
+          <p className="text-xs text-gray-400">
+            {myPlayer.isHost
+              ? 'Tell the AI Master who is in the room so it can read the mood right.'
+              : `Room vibe: ${ROOM_VIBES[roomVibe].label} — set by the host.`}
+          </p>
+        </div>
+
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(180px,1fr))]">
+          {Object.values(ROOM_VIBES).map((vibe) => {
+            const isSelected = vibe.id === roomVibe;
+            const disabled = !myPlayer.isHost;
+            return (
+              <button
+                key={vibe.id}
+                type="button"
+                onClick={() => selectVibe(vibe.id)}
+                disabled={disabled}
+                className={`p-3.5 rounded-2xl border text-left transition-all relative ${
+                  isSelected
+                    ? 'bg-partyPink/20 border-partyPink text-white shadow-lg glow-yellow'
+                    : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/30'
+                } ${disabled ? 'cursor-default' : 'active:scale-95'}`}
+              >
+                {vibe.comingSoon && (
+                  <span className="absolute top-2 right-2 bg-black/50 text-partyYellow text-[8px] font-black px-1.5 py-0.5 rounded-full border border-partyYellow/30 whitespace-nowrap">
+                    🔒 SOON
+                  </span>
+                )}
+                <span className="text-xl block">{vibe.emoji}</span>
+                <span className="font-extrabold text-sm block mt-1">{vibe.label}</span>
+                <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{vibe.blurb}</span>
+                {isSelected && (
+                  <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-partyPink/30 px-2 py-0.5 text-[9px] font-black text-partyPink">
+                    <CheckCircle2 className="w-2.5 h-2.5" /> SELECTED
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Two-up grid for Lounging Area & Mode Hub */}

@@ -30,6 +30,29 @@ service cloud.firestore {
       }
     }
 
+    // Permanent history, written only by the Admin SDK when a match ends.
+    //
+    // Closed to browsers in both directions. Reads are closed because a match
+    // row names everyone who played it, and there is no product reason for one
+    // player to enumerate another's history; anything the game wants to show
+    // should come through an API route that decides what to reveal. Writes are
+    // closed for the obvious reason — a client that could write here could
+    // invent wins, and once purchases hang off these totals, invent balances.
+    match /matches/{matchId} {
+      allow read, write: if false;
+    }
+
+    // Lifetime totals per Firebase Auth uid.
+    //
+    // Deliberately not "allow read: if request.auth.uid == playerId". That rule
+    // looks reasonable and would be a mistake here: it hands the browser a
+    // direct, un-mediated view of the document that entitlements will live in,
+    // and every future field on it becomes readable by default. Serve it
+    // through an API route that returns only what the screen needs.
+    match /players/{playerId} {
+      allow read, write: if false;
+    }
+
     // Anything not explicitly matched above is closed.
     match /{document=**} {
       allow read, write: if false;

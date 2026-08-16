@@ -9,6 +9,8 @@ import {
   TeamId,
   TurnResult,
 } from './types';
+import { RoomVibeId } from './roomVibes';
+import { getIdToken } from './firebase/auth';
 
 const ROOM_CACHE_PREFIX = 'voice_party_room_';
 const MY_PLAYER_ID_KEY = 'voice_party_my_player_id';
@@ -283,7 +285,14 @@ class RoomStoreManager {
   }
 
   public async createRoom(roomId: string, hostName: string, roomType: 'board_game' | 'team_battle' = 'board_game'): Promise<RoomState | null> {
-    const data = await this.post(roomId, { action: 'create', playerName: hostName, roomType });
+    const data = await this.post(roomId, {
+      action: 'create',
+      playerName: hostName,
+      roomType,
+      // Durable identity, so this match ends up in the host's permanent record.
+      // Null when auth is unavailable, which the server treats as anonymous.
+      idToken: await getIdToken(),
+    });
     if (data.playerId) this.setMyPlayerId(String(data.playerId), roomId);
     return (data.room as RoomState) ?? null;
   }
@@ -295,6 +304,7 @@ class RoomStoreManager {
       action: 'join',
       playerName,
       playerId: this.getMyPlayerId(roomId) ?? '',
+      idToken: await getIdToken(),
     });
     if (data.error) return { room: null, error: data.error };
     if (data.playerId) this.setMyPlayerId(String(data.playerId), roomId);
@@ -327,6 +337,10 @@ class RoomStoreManager {
 
   public updateMiniGames(roomId: string, miniGames: MiniGameId[]) {
     return this.post(roomId, { action: 'update_minigames', miniGames });
+  }
+
+  public setRoomVibe(roomId: string, roomVibe: RoomVibeId) {
+    return this.post(roomId, { action: 'update_room_vibe', roomVibe });
   }
 
   // ── Teams ─────────────────────────────────────────────────────────────────

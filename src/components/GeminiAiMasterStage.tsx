@@ -100,7 +100,7 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
       const res = await fetch('/api/ai-master', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: type, playerName: activePlayer.name, gameContext: customText }),
+        body: JSON.stringify({ action: type, playerName: activePlayer.name, gameContext: customText, roomVibe: room.roomVibe }),
       });
       const data = await res.json();
       if (data.text) {

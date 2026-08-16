@@ -58,7 +58,10 @@ import {
   writeRoom,
   writeSecrets,
 } from '@/lib/server/roomServer';
+import { archiveMatch } from '@/lib/server/matchArchive';
+import { verifyUid } from '@/lib/firebase/server';
 import { aiGameMaster } from '@/lib/aiGameMaster';
+import { DEFAULT_ROOM_VIBE, ROOM_VIBES } from '@/lib/roomVibes';
 
 export const dynamic = 'force-dynamic';
 
@@ -253,11 +256,12 @@ function advanceRoundOrOpenShop(room: RoomState): void {
     room.turnResult = null;
     // Team Battle plays one chosen game at a time, the same one for everybody,
     // so the series decides it. The board game rolls a fresh game per turn.
+    const preferredGames = ROOM_VIBES[room.roomVibe ?? DEFAULT_ROOM_VIBE].preferredGames;
     const game =
       room.roomType === 'team_battle'
         ? currentSeriesGame(room) ??
-          pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES, true, room.recentMiniGames)
-        : pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES, true, room.recentMiniGames);
+          pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES, true, room.recentMiniGames, preferredGames)
+        : pickMiniGame(room.enabledMiniGames ?? ALL_MINI_GAMES, true, room.recentMiniGames, preferredGames);
 
     // Only the board game's random picks feed the repeat rule. A Team Battle
     // series is a deliberate playlist — recording it here would make the board
@@ -489,6 +493,7 @@ const HOST_ONLY_ACTIONS = new Set([
   'update_settings',
   'set_theme',
   'update_minigames',
+  'update_room_vibe',
   'update_phase',
   'start_match',
   'end_match',
@@ -833,14 +838,17 @@ function startNextRound(room: RoomState): void {
 async function createRoom(
   roomId: string,
   hostName: string,
-  roomType: 'board_game' | 'team_battle' = 'board_game'
+  roomType: 'board_game' | 'team_battle' = 'board_game',
+  hostUid?: string | null
 ): Promise<{ room: RoomState; playerId: string; token: string }> {
   const host = makePlayer(hostName, 0, true);
+  if (hostUid) host.uid = hostUid;
   const room: RoomState = {
     roomId,
     hostId: host.id,
     phase: 'lobby',
     roomType,
+    roomVibe: DEFAULT_ROOM_VIBE,
     players: [host],
     activePlayerIndex: 0,
     // Hausa and Yoruba are parked until there is a recogniser that can hear
@@ -905,7 +913,12 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       return NextResponse.json({ room: existing });
     }
     try {
-      const created = await createRoom(roomId, body.playerName, body.roomType || 'board_game');
+      const created = await createRoom(
+        roomId,
+        body.playerName,
+        body.roomType || 'board_game',
+        await verifyUid(body.idToken)
+      );
       return NextResponse.json(created);
     } catch (error) {
       if (!(error instanceof RoomConflictError)) throw error;
@@ -950,7 +963,21 @@ export async function POST(request: Request, { params }: { params: { roomId: str
     }
 
     try {
-      return await applyAction(room, action, body);
+      const response = await applyAction(room, action, body);
+
+      // Matches are won deep inside synchronous helpers (a tile landing, a
+      // powerup shove), which cannot await a Firestore write. This is the one
+      // point every one of those paths passes through with the room already
+      // written and its final state in hand.
+      //
+      // After the response is built, so recording a match never delays the
+      // game-over screen, and guarded by archiveMatch's own idempotency rather
+      // than by anything this loop tracks.
+      if (room.phase === 'game_over' && !room.matchArchived) {
+        await archiveMatch(room, 'winner');
+      }
+
+      return response;
     } catch (error) {
       if (!(error instanceof RoomConflictError)) throw error;
       // Spectator detail is disposable — another frame is along in a moment, so
@@ -1000,9 +1027,17 @@ async function applyAction(
         claimedId && claimedToken && secrets.tokens[claimedId] === claimedToken
           ? room.players.find((p) => p.id === claimedId)
           : undefined;
+      // Verified, never taken on trust — a uid in a request body is just a
+      // string the browser chose. Null when auth is off or the token is stale,
+      // which costs the player their permanent record and nothing else.
+      const uid = await verifyUid(body.idToken);
+
       if (mine) {
         mine.lastSeen = Date.now();
         if (mine.connected === false) mine.connected = true;
+        // A reconnect is the second chance to attach identity: auth may have
+        // still been resolving when they first joined.
+        if (uid) mine.uid = uid;
         return NextResponse.json({
           room: await writeRoom(room),
           playerId: mine.id,
@@ -1022,6 +1057,7 @@ async function applyAction(
       }
 
       const player = makePlayer(displayName, room.players.length, false);
+      if (uid) player.uid = uid;
       if (room.roomType === 'team_battle') {
         // Drop them on the smaller crew so a late joiner does not lopside it.
         const red = room.players.filter((p) => p.teamId === 'red').length;
@@ -2191,6 +2227,16 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    case 'update_room_vibe': {
+      const vibe = body.roomVibe;
+      if (typeof vibe !== 'string' || !(vibe in ROOM_VIBES)) {
+        return NextResponse.json({ error: 'Unknown room vibe' }, { status: 400 });
+      }
+      room.roomVibe = vibe as keyof typeof ROOM_VIBES;
+      pushEvent(room, `${ROOM_VIBES[room.roomVibe].emoji} Room vibe set to ${ROOM_VIBES[room.roomVibe].label}`, 'system');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
     case 'update_minigames': {
       const games = Array.isArray(body.miniGames) ? (body.miniGames as MiniGameId[]) : null;
       const valid = games?.filter((g) => ALL_MINI_GAMES.includes(g)) ?? [];
@@ -2202,6 +2248,14 @@ async function applyAction(
     }
 
     case 'start_match': {
+      // Identifies this match in the permanent `matches` collection. Minted
+      // here rather than at archive time so every row is traceable back to the
+      // room and the moment it started, and so a match that ends twice cannot
+      // produce two rows.
+      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      room.matchStartedAt = Date.now();
+      room.matchArchived = false;
+
       room.roundNumber = 1;
       room.roundResults = [];
       room.rollOrder = [];
@@ -2247,6 +2301,12 @@ async function applyAction(
         return NextResponse.json({ error: 'Already in the lobby' }, { status: 409 });
       }
 
+      // Before the wipe below, not after — the reset clears scores, positions
+      // and the winner, which is most of what the record is made of. If this
+      // match already ended with a winner it was archived then, and
+      // archiveMatch's create() makes the second call a no-op.
+      await archiveMatch(room, room.winner ? 'winner' : 'ended_early');
+
       for (const player of room.players) {
         player.boardPosition = 0;
         player.score = 0;
@@ -2257,6 +2317,9 @@ async function applyAction(
       }
 
       room.phase = 'lobby';
+      room.matchId = null;
+      room.matchStartedAt = null;
+      room.matchArchived = false;
       room.winner = null;
       room.winningTeam = null;
       room.teamScores = room.roomType === 'team_battle' ? { red: 0, blue: 0 } : undefined;

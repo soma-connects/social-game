@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { resolve4 } from 'node:dns/promises';
 import { callerKey, consume } from '@/lib/server/rateLimit';
 
 /**
@@ -36,7 +37,57 @@ type IceResponse = {
   provider: 'static' | 'twilio' | 'cloudflare' | 'stun-only';
   /** Seconds the client may cache this for. Ephemeral credentials expire. */
   ttl: number;
+  /**
+   * TURN hostnames that do not resolve. Empty is the healthy case.
+   *
+   * Surfaced because hasRelay used to mean only "credentials are configured",
+   * which is not the same as "a relay will answer" — and the gap between those
+   * two hid a completely dead TURN host behind a green light.
+   */
+  unresolvedHosts?: string[];
 };
+
+/** Pulls the hostname out of a turn:/turns: URL, which URL() will not parse. */
+function turnHost(url: string): string | null {
+  const match = /^turns?:([^:?/]+)/i.exec(url.trim());
+  return match ? match[1] : null;
+}
+
+/**
+ * Checks that the configured TURN hostnames actually resolve.
+ *
+ * This exists because of a real outage: the configured host had been retired by
+ * its provider and had no A record at all, so every ICE candidate silently
+ * failed to gather while the endpoint reported hasRelay: true and looked
+ * healthy from every angle except a live call. A name lookup is the cheapest
+ * check that would have caught it, and DNS results are cached by the resolver,
+ * so it costs effectively nothing per request.
+ *
+ * Only reports; a name that resolves is not proof the relay accepts traffic.
+ */
+async function findUnresolvedHosts(servers: RTCIceServer[]): Promise<string[]> {
+  const hosts = new Set<string>();
+  for (const server of servers) {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    for (const url of urls) {
+      const host = turnHost(String(url));
+      if (host) hosts.add(host);
+    }
+  }
+
+  const bad: string[] = [];
+  await Promise.all(
+    [...hosts].map(async (host) => {
+      try {
+        const addresses = await resolve4(host);
+        if (addresses.length === 0) bad.push(host);
+      } catch {
+        bad.push(host);
+      }
+    })
+  );
+  return bad;
+}
 
 /** Twilio mints short-lived credentials from the account's long-lived token. */
 async function fromTwilio(): Promise<IceResponse | null> {
@@ -116,18 +167,27 @@ function fromStatic(): IceResponse | null {
   const rawUrls = urls.split(',').map((u) => u.trim()).filter(Boolean);
   const expandedUrls: string[] = [];
 
+  /**
+   * Only ever adds a TCP sibling for a URL that was actually configured.
+   *
+   * Mobile carriers routinely drop UDP, so a UDP-only relay leaves players on
+   * cellular data silently inaudible while everyone on wifi connects fine.
+   * Offering the same host and port over TCP is the standard escape hatch, and
+   * is safe to synthesise because coturn and every hosted provider listen for
+   * both on the ports they publish.
+   *
+   * What this deliberately does NOT do is invent extra hostnames or ports. An
+   * earlier version hardcoded a vendor's hostnames here as "mobile fallbacks",
+   * and when that vendor retired the host the dead name stayed buried in the
+   * code where no config change could dislodge it — every synthesised URL
+   * resolved to nothing, so no relay candidate could ever be gathered while the
+   * endpoint still cheerfully reported hasRelay: true. Extra ports and hosts
+   * belong in TURN_URLS, where they can be fixed without a deploy.
+   */
   rawUrls.forEach((u) => {
     expandedUrls.push(u);
-    // Add explicit TCP transport variant if not present
     if (u.startsWith('turn:') && !u.includes('transport=')) {
       expandedUrls.push(`${u}?transport=tcp`);
-    }
-    // If openrelay/metered is used, add comprehensive mobile fallback ports
-    if (u.includes('openrelay.metered.ca')) {
-      expandedUrls.push('turn:openrelay.metered.ca:80');
-      expandedUrls.push('turn:openrelay.metered.ca:80?transport=tcp');
-      expandedUrls.push('turn:openrelay.metered.ca:443?transport=tcp');
-      expandedUrls.push('turns:openrelay.metered.ca:443?transport=tcp');
     }
   });
 
@@ -158,7 +218,32 @@ export async function GET(request: Request) {
 
   try {
     const config = (await fromTwilio()) ?? (await fromCloudflare()) ?? fromStatic();
-    if (config) return NextResponse.json(config);
+    if (config) {
+      const unresolvedHosts = await findUnresolvedHosts(config.iceServers);
+
+      if (unresolvedHosts.length > 0) {
+        console.error(
+          `ICE: TURN host(s) do not resolve: ${unresolvedHosts.join(', ')}. ` +
+            'No relay candidate can be gathered, so players behind carrier-grade NAT will be ' +
+            'inaudible. Check TURN_URLS against the provider\'s current hostname.'
+        );
+      }
+
+      // A relay nobody can look up is not a relay. Reporting it as one is what
+      // let a dead host sit in production looking healthy.
+      const everyHostDead =
+        unresolvedHosts.length > 0 &&
+        config.iceServers
+          .flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]))
+          .filter((u) => turnHost(String(u)))
+          .every((u) => unresolvedHosts.includes(turnHost(String(u))!));
+
+      return NextResponse.json({
+        ...config,
+        hasRelay: config.hasRelay && !everyHostDead,
+        unresolvedHosts,
+      } satisfies IceResponse);
+    }
   } catch (error) {
     // A provider outage must not take voice down entirely — STUN still works
     // for the majority of players on ordinary home networks.

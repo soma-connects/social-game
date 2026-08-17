@@ -78,7 +78,27 @@ interface Peer {
   route?: 'direct' | 'relay';
   /** True once ICE gave up on this peer. */
   failed?: boolean;
+  /**
+   * When this side last sent an offer, so a connection that never completed can
+   * be retried instead of sitting half-open forever.
+   */
+  lastOfferAt?: number;
+  /** Consecutive polls this peer has been missing from the call roster. */
+  missedPresence: number;
 }
+
+/**
+ * Polls a peer may be absent from the call roster before being torn down.
+ *
+ * Presence is a 6s server-side window refreshed by each poll, so a single
+ * missed or slow request is normal and must not drop a working call. Five polls
+ * is comfortably longer than any hiccup and still clears a peer who really left
+ * within a few seconds.
+ */
+const PRESENCE_GRACE_POLLS = 5;
+
+/** How long to wait before re-sending an offer that produced no answer. */
+const OFFER_RETRY_MS = 4000;
 
 const SPEAKING_THRESHOLD = 12;
 
@@ -87,6 +107,8 @@ class VoiceChatManager {
   private myId: string | null = null;
 
   private peers = new Map<string, Peer>();
+  /** Everyone in the room. Bounds who may become a peer; does not select them. */
+  private roomMemberIds = new Set<string>();
   private localStream: MediaStream | null = null;
   private unsubscribeStream: (() => void) | null = null;
 
@@ -383,25 +405,83 @@ class VoiceChatManager {
   // ----------------------------------------------------------------- peers
 
   /** Opens connections to new players and drops ones who left. */
+  /**
+   * Records who is in the ROOM. Being in the room is not being on the call.
+   *
+   * This used to build a peer connection for every player in the room, which is
+   * where the call actually broke. Someone sitting in the lobby with the call
+   * closed got an offer they were never going to answer, and — because a peer
+   * object now existed for them — the reconnect below never fired either. Who
+   * is genuinely on the call comes from the server's presence list instead;
+   * this only bounds it, so a stale roster can never invent a peer.
+   */
   public syncPeers(peerIds: string[]): void {
+    this.roomMemberIds = new Set(peerIds);
+    if (this.myId || this.status !== 'off') this.emit();
+  }
+
+  /**
+   * Reconciles peer connections against the players actually on the call.
+   *
+   * Driven by the server's presence list, refreshed every poll. That makes join
+   * order irrelevant: whoever arrives second shows up in the other's next poll
+   * and the connection is built then, rather than depending on who happened to
+   * press the button first.
+   *
+   * The offer rule is unchanged — lower id offers, so both sides agree on who
+   * goes first without negotiating and there is no collision to recover from.
+   * What is new is that it can offer AGAIN. Previously an offer was only ever
+   * sent at the instant a peer object was created, so any offer that was missed
+   * — sent while the other side was not yet polling, or expired by the signal
+   * TTL — left both sides waiting on each other permanently: the offerer would
+   * not re-offer because the peer already existed, and the answerer would not
+   * offer at all because of the id rule. That deadlock is what produced a call
+   * where one person could be heard and the other could not.
+   */
+  private reconcilePeers(presentIds: string[]): void {
     if (!this.myId || this.status === 'off') return;
 
-    const wanted = new Set(peerIds.filter((id) => id !== this.myId));
+    const onCall = new Set(
+      presentIds.filter((id) => id !== this.myId && this.roomMemberIds.has(id))
+    );
 
+    // Drop peers who have left the call, but only after a grace period — a
+    // single slow poll must not tear down a working connection.
     this.peers.forEach((peer, id) => {
-      if (!wanted.has(id)) {
+      if (onCall.has(id)) {
+        peer.missedPresence = 0;
+        return;
+      }
+      peer.missedPresence += 1;
+      if (peer.missedPresence >= PRESENCE_GRACE_POLLS) {
         this.destroyPeer(peer);
         this.peers.delete(id);
       }
     });
 
-    wanted.forEach((id) => {
-      if (!this.peers.has(id)) {
-        const peer = this.createPeer(id);
-        // Deterministic initiator: the lower id offers. Both sides agree without
-        // negotiating who goes first, so there is no offer collision to recover from.
-        if (this.myId! < id) void this.makeOffer(peer);
-      }
+    const now = Date.now();
+    onCall.forEach((id) => {
+      let peer = this.peers.get(id);
+      if (!peer) peer = this.createPeer(id);
+
+      // Only the lower id offers; the other side waits and answers.
+      if (this.myId! >= id) return;
+
+      // Re-offer while the handshake has not completed. remoteDescriptionSet is
+      // the honest signal that the other side actually answered — connection
+      // state can still be 'new' long after a successful exchange.
+      const answered = peer.remoteDescriptionSet && !peer.failed;
+      if (answered) return;
+
+      // An explicit "never offered" check rather than treating a missing
+      // timestamp as 0. The subtraction would happen to work with a real clock,
+      // but only because Date.now() dwarfs the retry window — which is
+      // accidental, not a property worth depending on.
+      const neverOffered = peer.lastOfferAt === undefined;
+      if (!neverOffered && now - peer.lastOfferAt! < OFFER_RETRY_MS) return;
+
+      peer.lastOfferAt = now;
+      void this.makeOffer(peer, peer.failed === true);
     });
 
     this.emit();
@@ -434,6 +514,7 @@ class VoiceChatManager {
       speaking: false,
       pendingCandidates: [],
       remoteDescriptionSet: false,
+      missedPresence: 0,
     };
 
     /**
@@ -503,14 +584,10 @@ class VoiceChatManager {
 
       if (pc.connectionState === 'failed') {
         peer.failed = true;
-        // Attempt automatic ICE restart before declaring dead
-        try {
-          if (typeof (pc as any).restartIce === 'function') {
-            (pc as any).restartIce();
-          }
-        } catch {
-          /* ignore restart error */
-        }
+        // Marked, not repaired here. Recovery belongs to the reconcile pass on
+        // the next poll, which knows whether this side is the offerer and can
+        // re-offer with iceRestart. restartIce() on the answering side has
+        // nothing to trigger, so relying on it here left failures permanent.
         this.error = this.hasRelay
           ? 'A peer connection failed even through the relay. That player may be offline.'
           : 'No TURN relay is configured, so players on mobile networks cannot connect. See /api/ice.';
@@ -605,10 +682,17 @@ class VoiceChatManager {
     peer.analyser = null;
   }
 
-  private async makeOffer(peer: Peer): Promise<void> {
+  /**
+   * @param iceRestart re-gathers candidates. Needed when a connection failed:
+   *   a plain re-offer would reuse the same dead candidate pair. Only the
+   *   offerer can drive this, which is why the failed peer below no longer
+   *   relies on restartIce() alone — on the answering side that call has
+   *   nothing to trigger, since that side never creates offers.
+   */
+  private async makeOffer(peer: Peer, iceRestart = false): Promise<void> {
     if (!this.myId) return;
     try {
-      const offer = await peer.pc.createOffer();
+      const offer = await peer.pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
       await peer.pc.setLocalDescription(offer);
       await this.send({ kind: 'offer', from: this.myId, to: peer.id, sdp: offer });
     } catch {
@@ -647,6 +731,13 @@ class VoiceChatManager {
     for (const message of messages) {
       await this.handleSignal(message);
     }
+
+    // Signals first, so a peer who just answered is already marked as such and
+    // does not get a redundant offer. The server returns this on every poll and
+    // it was previously ignored entirely.
+    if (Array.isArray(data?.present)) {
+      this.reconcilePeers(data.present as string[]);
+    }
   }
 
   private async handleSignal(message: SignalMessage): Promise<void> {
@@ -678,6 +769,10 @@ class VoiceChatManager {
         try {
           await peer.pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
           peer.remoteDescriptionSet = true;
+          // The handshake completed, so this peer is no longer in the failed
+          // state that triggered the re-offer. Without this the retry above
+          // would keep firing every few seconds against a healthy connection.
+          peer.failed = false;
           await this.flushCandidates(peer);
         } catch {
           /* a stale answer for a connection we already replaced */

@@ -343,6 +343,32 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'update_room_vibe', roomVibe });
   }
 
+  // ── AI Master game ────────────────────────────────────────────────────────
+
+  public startAiMaster(roomId: string) {
+    return this.post(roomId, { action: 'ai_master_start' });
+  }
+
+  public aiMasterRespond(roomId: string, response: string) {
+    return this.post(roomId, { action: 'ai_master_respond', response });
+  }
+
+  public aiMasterVote(roomId: string, verdict: 'pass' | 'fail') {
+    return this.post(roomId, { action: 'ai_master_vote', verdict });
+  }
+
+  public aiMasterVerdict(roomId: string) {
+    return this.post(roomId, { action: 'ai_master_verdict' });
+  }
+
+  public aiMasterNextRound(roomId: string) {
+    return this.post(roomId, { action: 'ai_master_next_round' });
+  }
+
+  public aiMasterBribe(roomId: string, amount: number, ask: 'skip' | 'life' | 'redirect') {
+    return this.post(roomId, { action: 'ai_master_bribe', amount, ask });
+  }
+
   // ── Teams ─────────────────────────────────────────────────────────────────
 
   public setTeamMode(roomId: string, teamMode: boolean) {

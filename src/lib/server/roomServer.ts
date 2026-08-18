@@ -147,6 +147,13 @@ export type RoomSecrets = {
   triviaFunFact?: string;
   /** Which Truth or Bluff claim was the lie, until the reveal. */
   lieIndex?: number | null;
+  /**
+   * Mines waiting on the board, hidden until somebody stands on one.
+   *
+   * Kept here rather than on the room document precisely because the room is
+   * public: a mine everyone can see on the board is just a tile to walk around.
+   */
+  mines?: { nodeId: number; ownerId: string; ownerName: string }[];
 };
 
 const EMPTY_SECRETS: RoomSecrets = { tokens: {} };

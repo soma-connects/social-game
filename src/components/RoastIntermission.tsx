@@ -23,6 +23,7 @@ import {
 import { Player, RoomState, SocialReactionId } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
+import { MINIGAME_FAIL_THRESHOLD, STARTING_LIVES } from '@/lib/gameRules';
 import { VoiceClip } from '@/hooks/useVoiceRecorder';
 import AvatarIllustration from './AvatarIllustration';
 import VoiceReplay from './VoiceReplay';
@@ -241,6 +242,26 @@ export default function RoastIntermission({
             <p className="text-[11px] text-gray-400">Level {activePlayer.level ?? 1} Performer</p>
           </div>
         </div>
+
+        {/* Bombing the task costs a life, so say so here rather than leaving it
+            to a heart quietly going dark in the sidebar. */}
+        {(room.roomType ?? 'board_game') !== 'team_battle' &&
+          turnResult !== null &&
+          turnResult !== undefined &&
+          turnResult.performance <= MINIGAME_FAIL_THRESHOLD && (
+            <div className="rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-left">
+              <p className="text-sm font-black text-red-300">
+                {(activePlayer.lives ?? STARTING_LIVES) === STARTING_LIVES && activePlayer.boardPosition === 0
+                  ? '☠️ WIPED OUT — back to the launchpad with a fresh bar'
+                  : `💔 BOMBED IT — ${activePlayer.lives ?? STARTING_LIVES} ${
+                      (activePlayer.lives ?? STARTING_LIVES) === 1 ? 'life' : 'lives'
+                    } left`}
+              </p>
+              <p className="text-[11px] text-red-200/70 mt-0.5">
+                Lose them all and you restart from the beginning — the points stay, the road does not.
+              </p>
+            </div>
+          )}
 
         {/* Interactive Soundboard Pad */}
         <div className="space-y-2 pt-2 text-left">

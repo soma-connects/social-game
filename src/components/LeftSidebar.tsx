@@ -1,9 +1,9 @@
 'use client';
 
 import React from 'react';
-import { Mic, Users, Trophy, MapPin, UserMinus, WifiOff } from 'lucide-react';
+import { Mic, Users, Trophy, MapPin, UserMinus, WifiOff, Heart } from 'lucide-react';
 import { Player } from '@/lib/types';
-import { BOARD_LENGTH, MAX_PLAYERS, TEAMS, boardProgress, getTeam } from '@/lib/gameRules';
+import { BOARD_LENGTH, MAX_PLAYERS, STARTING_LIVES, TEAMS, boardProgress, getTeam } from '@/lib/gameRules';
 import AvatarIllustration from './AvatarIllustration';
 
 interface LeftSidebarProps {
@@ -15,7 +15,7 @@ interface LeftSidebarProps {
   /** Only the host gets the remove control. */
   canManage?: boolean;
   onKickPlayer?: (player: Player) => void;
-  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo';
+  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master';
 }
 
 export default function LeftSidebar({
@@ -115,6 +115,22 @@ export default function LeftSidebar({
                     <p className="text-[9px] text-gray-400 font-bold truncate">
                       LVL {player.level ?? 1} · VIBE {player.vibeScore ?? 0}
                     </p>
+
+                    {/* Lives. Team Battle is scored on the crew total, so the
+                        survival bar only means something in the board game. */}
+                    {roomType !== 'team_battle' && (
+                      <div className="flex items-center gap-0.5 mt-0.5" title={`${player.lives ?? STARTING_LIVES} of ${STARTING_LIVES} lives`}>
+                        {Array.from({ length: STARTING_LIVES }, (_, i) => {
+                          const filled = i < (player.lives ?? STARTING_LIVES);
+                          return (
+                            <Heart
+                              key={i}
+                              className={`w-2.5 h-2.5 ${filled ? 'text-red-400 fill-current' : 'text-gray-600'}`}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
                     {(player.badges ?? []).length > 0 && (
                       <p className="text-[9px] text-partyYellow font-black truncate">
                         {(player.badges ?? []).slice(-1)[0]}

@@ -385,15 +385,16 @@ class SpeechRecognitionService {
     this.recognition = recognition;
     this.wantsToListen = true;
 
-    // Hand the device to the recogniser on phones — but only when nothing else
-    // is using it.
+    // Hand the device to the recogniser on phones — when nothing else is using
+    // it, or when the player has explicitly asked for it.
     //
     // A live getUserMedia stream and a running recogniser cannot share a mobile
     // microphone, so suspending helps when the player is on their own. With a
     // voice call up it does the opposite: it drops them off the call for the
     // whole round and leaves the attempt recorder with a dead stream. Both
-    // happened in real play. Keeping the call is worth more than a mobile
-    // recogniser that may work anyway.
+    // happened in real play, which is why the call wins by default — but that
+    // leaves an Android player on a call unable to be heard by the game at all,
+    // so `setSpeechPriority` lets them make the trade deliberately.
     //
     // Synchronous, so the start() below stays inside the user gesture iOS needs.
     const suspendedMic = isMobileAudioPlatform() && micStream.canSuspendForSpeech();

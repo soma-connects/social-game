@@ -34,6 +34,7 @@ import AvatarIllustration from '@/components/AvatarIllustration';
 import VoiceCallBar from '@/components/VoiceCallBar';
 import AiGameMasterBanner from '@/components/AiGameMasterBanner';
 import GeminiAiMasterStage from '@/components/GeminiAiMasterStage';
+import AiMasterGame from '@/components/AiMasterGame';
 import SocialVoicePanel from '@/components/SocialVoicePanel';
 import SpectatorView from '@/components/SpectatorView';
 import RoastIntermission from '@/components/RoastIntermission';
@@ -324,7 +325,8 @@ export default function GameRoomPage() {
       }
       handleStartMatch();
     } else if (mode === 'ai_master') {
-      setShowGeminiMode(true);
+      audioSFX.playNollywoodBrass();
+      await roomStore.startAiMaster(roomId);
     } else if (mode === 'karaoke') {
       setComingSoonTitle('ðŸŽ¤ Karaoke & Pitch Arcade Mode');
     } else if (mode === 'hangout') {
@@ -678,6 +680,13 @@ export default function GameRoomPage() {
             </div>
           )}
 
+          {room.phase === 'ai_master_round' && (
+            <div className="space-y-6">
+              <AiMasterGame room={room} myPlayer={myPlayer} roomId={roomId} />
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+            </div>
+          )}
+
           {room.phase === 'powerup_shop' && (
             <div className="space-y-6">
               <PowerupShop
@@ -792,12 +801,31 @@ export default function GameRoomPage() {
                   </>
                 )}
 
-                <button
-                  onClick={() => router.push('/')}
-                  className="bg-partyYellow hover:bg-yellow-400 text-partyDark font-black text-base px-8 py-3.5 rounded-2xl transition-all"
-                >
-                  BACK TO HOME
-                </button>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                  {myPlayer.isHost ? (
+                    <button
+                      onClick={() => roomStore.endMatch(roomId)}
+                      className="w-full sm:w-auto bg-partyYellow hover:bg-yellow-400 text-partyDark font-black text-base px-8 py-3.5 rounded-2xl transition-all"
+                    >
+                      BACK TO LOBBY
+                    </button>
+                  ) : (
+                    <p className="text-xs text-gray-300 font-bold">
+                      Waiting for the host to take everyone back to the lobby…
+                    </p>
+                  )}
+
+                  <button
+                    onClick={() => router.push('/')}
+                    className={`w-full sm:w-auto font-black text-base px-8 py-3.5 rounded-2xl transition-all ${
+                      myPlayer.isHost
+                        ? 'glass-pill hover:bg-white/15 text-gray-200 border border-white/20'
+                        : 'bg-partyYellow hover:bg-yellow-400 text-partyDark'
+                    }`}
+                  >
+                    BACK TO HOME
+                  </button>
+                </div>
               </div>
             );
           })()}

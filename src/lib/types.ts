@@ -53,6 +53,19 @@ export type Player = {
   vibeScore?: number;
   badges?: string[];
   boardPosition: number;
+  /**
+   * Survival stat, separate from `score`. Bombing the task you were given costs
+   * one; running out sends you back to the launchpad with a fresh bar rather
+   * than knocking you out, so nobody is ever sat watching the rest play.
+   * Undefined reads as STARTING_LIVES, so old rooms need no migration.
+   */
+  lives?: number;
+  /**
+   * Knocked out of the current match. Only the AI Master game sets this — the
+   * board respawns instead, because a board match is long enough that sitting
+   * one out means sitting out the evening.
+   */
+  eliminated?: boolean;
   /** Set when a player is paused at a branching node with remaining dice steps */
   remainingSteps?: number;
   hasShield?: boolean;
@@ -102,7 +115,7 @@ export type EventLog = {
   type: 'buff' | 'debuff' | 'dare' | 'point' | 'system' | 'social';
 };
 
-export type PowerupType = 'boost' | 'rewind' | 'shield' | 'dare_gun' | 'freeze' | 'bomb';
+export type PowerupType = 'boost' | 'rewind' | 'shield' | 'dare_gun' | 'freeze' | 'bomb' | 'mine';
 
 export type PowerupItem = {
   id: PowerupType;
@@ -145,6 +158,7 @@ export type GamePhase =
   | 'asteroid_defense'
   | 'chess_match'
   | 'ludo_match'
+  | 'ai_master_round'
   | 'game_over';
 
 /** The qualifying mini-games that feed the main board game. */
@@ -186,6 +200,12 @@ export type DebateState = {
   phase: 'intro' | 'p1_speaking' | 'p2_speaking' | 'voting' | 'reveal';
   votes: Record<string, number>; // voterId -> 1 or 2
   revealedAt?: number;
+  /**
+   * Set when a trap tile started this debate. The loser of a sudden-death round
+   * takes a real setback, so the server has to know it was a trap rather than
+   * an ordinary scheduled debate.
+   */
+  source?: 'trap';
 };
 
 /** State for a Guess the Voice round. */
@@ -214,6 +234,53 @@ export type TriviaState = {
   winnerId: string | null;
   /** Set at the reveal so the UI can say what was actually heard. */
   lastAnswerText?: string;
+  revealedAt?: number;
+};
+
+/** What kind of task the AI Master set this round. */
+export type AiMasterCategory = 'truth' | 'dare' | 'bluff' | 'trivia' | 'story';
+
+/** A bribe offered to the AI Master, kept public so the room sees who tried. */
+export type AiMasterBribe = {
+  playerId: string;
+  playerName: string;
+  amount: number;
+  /** Skip the challenge, buy a life back, or push it onto somebody else. */
+  ask: 'skip' | 'life' | 'redirect';
+  /** Null while the host is still deciding. */
+  accepted: boolean | null;
+  hostLine?: string;
+};
+
+/**
+ * State for the AI Master game.
+ *
+ * One player is called out per round, answers by voice, and the rest of the
+ * room judges them. Unlike the board mini-games this is the whole match rather
+ * than a qualifying round, so the life bar and the elimination live here.
+ */
+export type AiMasterState = {
+  round: number;
+  targetId: string;
+  challenge: string;
+  category: AiMasterCategory;
+  phase: 'announcing' | 'responding' | 'voting' | 'verdict';
+  /** What the target said, as heard by the recogniser. */
+  response?: string;
+  /** voterId -> their verdict. Eliminated players still get a say. */
+  votes: Record<string, 'pass' | 'fail'>;
+  passed?: boolean | null;
+  /** The host's line for this beat — shown on screen and spoken aloud. */
+  hostLine?: string;
+  /**
+   * Who the host is currently soft on, and who it is out to get.
+   *
+   * A host that treats everyone identically is a rules engine. The bias is
+   * public and shifts over a session, so it reads as a bit rather than a bug.
+   */
+  favorId?: string | null;
+  grudgeId?: string | null;
+  bribes?: AiMasterBribe[];
   revealedAt?: number;
 };
 
@@ -375,7 +442,7 @@ export type RoomState = {
   } | null;
   winner: Player | null;
   /** The high-level mode the room is running in. */
-  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo';
+  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master';
   /** The social vibe the host picked, steering the AI Master's tone and mini-game mix. Undefined reads as classic_party. */
   roomVibe?: RoomVibeId;
   /** Set instead of a solo winner when the room is in team mode. */
@@ -447,6 +514,8 @@ export type RoomState = {
   chessState?: import('./chess/chessTypes').ChessRoomState | null;
   /** Ludo room state. */
   ludoState?: import('./ludo/ludoTypes').LudoRoomState | null;
+  /** AI Master game state. */
+  aiMasterState?: AiMasterState | null;
   /** Session memory — small structured events for Who Said It? and AI callbacks. */
   sessionMemory?: SessionMemoryEvent[];
 };

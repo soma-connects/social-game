@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { resolve4 } from 'node:dns/promises';
+import { connect } from 'node:net';
 import { callerKey, consume } from '@/lib/server/rateLimit';
 
 /**
@@ -45,12 +46,88 @@ type IceResponse = {
    * two hid a completely dead TURN host behind a green light.
    */
   unresolvedHosts?: string[];
+  /**
+   * TURN endpoints that resolve but refuse a connection.
+   *
+   * The layer below unresolvedHosts: a retired relay that kept its DNS record
+   * passes the name check and still cannot carry a single call.
+   */
+  unreachableHosts?: string[];
 };
 
 /** Pulls the hostname out of a turn:/turns: URL, which URL() will not parse. */
 function turnHost(url: string): string | null {
   const match = /^turns?:([^:?/]+)/i.exec(url.trim());
   return match ? match[1] : null;
+}
+
+/** Host and port together, since a relay can be alive on one port and dead on another. */
+function turnHostPort(url: string): { host: string; port: number } | null {
+  const match = /^turns?:([^:?/]+)(?::(\d+))?/i.exec(url.trim());
+  if (!match) return null;
+  return { host: match[1], port: Number(match[2] ?? 3478) };
+}
+
+/**
+ * Whether anything is actually listening on a relay's port.
+ *
+ * DNS resolution turned out not to be enough. A retired relay kept its A record
+ * and answered nothing, so the name check passed, hasRelay stayed true, and the
+ * whole room silently failed to connect while the endpoint looked healthy — the
+ * same failure the DNS check was added to catch, one layer down. A TCP connect
+ * is the cheapest thing that distinguishes "the name exists" from "a server is
+ * there", and TURN listens on TCP wherever it listens on UDP.
+ */
+const PROBE_TIMEOUT_MS = 2500;
+const PROBE_CACHE_MS = 2 * 60 * 1000;
+
+const reachability: Map<string, { ok: boolean; at: number }> = ((
+  globalThis as unknown as { __turnReachability?: Map<string, { ok: boolean; at: number }> }
+).__turnReachability ??= new Map());
+
+function probe(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ host, port });
+    const done = (ok: boolean) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(PROBE_TIMEOUT_MS);
+    socket.once('connect', () => done(true));
+    socket.once('timeout', () => done(false));
+    socket.once('error', () => done(false));
+  });
+}
+
+async function isReachable(host: string, port: number): Promise<boolean> {
+  const key = `${host}:${port}`;
+  const cached = reachability.get(key);
+  if (cached && Date.now() - cached.at < PROBE_CACHE_MS) return cached.ok;
+
+  const ok = await probe(host, port);
+  reachability.set(key, { ok, at: Date.now() });
+  return ok;
+}
+
+/** TURN endpoints that resolve but refuse connections. Empty is the healthy case. */
+async function findUnreachableHosts(servers: RTCIceServer[]): Promise<string[]> {
+  const targets = new Map<string, { host: string; port: number }>();
+  for (const server of servers) {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    for (const url of urls) {
+      const parsed = turnHostPort(String(url));
+      if (parsed) targets.set(`${parsed.host}:${parsed.port}`, parsed);
+    }
+  }
+
+  const dead: string[] = [];
+  await Promise.all(
+    [...targets.values()].map(async ({ host, port }) => {
+      if (!(await isReachable(host, port))) dead.push(`${host}:${port}`);
+    })
+  );
+  return dead;
 }
 
 /**
@@ -229,19 +306,41 @@ export async function GET(request: Request) {
         );
       }
 
-      // A relay nobody can look up is not a relay. Reporting it as one is what
-      // let a dead host sit in production looking healthy.
+      // Names that resolve still have to answer. Probing only the endpoints that
+      // got past DNS keeps this to one cheap connect per relay, cached.
+      const unreachableHosts = await findUnreachableHosts(config.iceServers);
+      if (unreachableHosts.length > 0) {
+        console.error(
+          `ICE: TURN endpoint(s) resolve but refuse connections: ${unreachableHosts.join(', ')}. ` +
+            'No relay candidate can be gathered, so players behind carrier-grade NAT will be ' +
+            'inaudible. The service is most likely retired — check the provider.'
+        );
+      }
+
+      // A relay nobody can reach is not a relay. Reporting it as one is what let
+      // a dead host sit in production behind a green light.
+      const turnUrls = config.iceServers
+        .flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]))
+        .map((u) => String(u))
+        .filter((u) => turnHost(u));
+
+      // Judged on reachability alone: a connect to a name that does not resolve
+      // fails too, so this already covers the DNS case. Keeping the name check
+      // as the sole authority would let a flaky resolver on one instance
+      // condemn a relay that is actually fine.
       const everyHostDead =
-        unresolvedHosts.length > 0 &&
-        config.iceServers
-          .flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]))
-          .filter((u) => turnHost(String(u)))
-          .every((u) => unresolvedHosts.includes(turnHost(String(u))!));
+        turnUrls.length > 0 &&
+        turnUrls.every((u) => {
+          const parsed = turnHostPort(u);
+          return parsed ? unreachableHosts.includes(`${parsed.host}:${parsed.port}`) : false;
+        });
 
       return NextResponse.json({
         ...config,
         hasRelay: config.hasRelay && !everyHostDead,
+        provider: everyHostDead ? 'stun-only' : config.provider,
         unresolvedHosts,
+        unreachableHosts,
       } satisfies IceResponse);
     }
   } catch (error) {

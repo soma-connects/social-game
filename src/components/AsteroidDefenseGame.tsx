@@ -6,6 +6,7 @@ import { Player, RoomState } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
 import { SpeechDiagnostics, speechEngine } from '@/lib/speechService';
+import { isMobileAudioPlatform, micStream } from '@/lib/micStream';
 import { measurePixelText } from '@/lib/pixelFont';
 import { BakedSprite, ROCK_PALETTES, makeAsteroidSprite, makeHeartSprite } from '@/lib/pixelSprites';
 import {
@@ -99,6 +100,7 @@ export default function AsteroidDefenseGame({
   const [bgmMuted, setBgmMuted] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
   const [speechDiag, setSpeechDiag] = useState<SpeechDiagnostics | null>(null);
+  const [speechPriority, setSpeechPriority] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sessionRef = useRef<{ stop: () => void } | null>(null);
@@ -127,6 +129,10 @@ export default function AsteroidDefenseGame({
     sessionRef.current = null;
     speechEngine.stopAudioAnalyser();
     audioRef.current?.pause();
+    // Never leave the player off the call once the round is over — the trade is
+    // only ever worth making while the game is actually listening.
+    micStream.setSpeechPriority(false);
+    void micStream.resume();
     (window as any).pauseStarfield = false;
   }, []);
 
@@ -537,6 +543,33 @@ export default function AsteroidDefenseGame({
 
   const toggleMic = () => setIsMicMuted(speechEngine.toggleMicMute());
 
+  /**
+   * Takes the microphone off the voice call so the game can hear this player.
+   *
+   * A phone will not let the call and the recogniser share the device, so this
+   * is a genuine trade rather than a setting: the room stops hearing them for
+   * the rest of the round. Restarting the session is what actually moves the
+   * device, since the handover is decided when listening begins.
+   */
+  const claimMicForGame = () => {
+    micStream.setSpeechPriority(true);
+    setSpeechPriority(true);
+
+    if (status !== 'playing') return;
+    sessionRef.current?.stop();
+    sessionRef.current = speechEngine.listenForSpeech({
+      targetWord: '',
+      language: 'en-US',
+      onResult: (res) => {
+        setTranscript(res.transcript);
+        handleSpeech(res.transcript);
+      },
+      onError: () => {
+        /* the recogniser restarts itself; a dropped phrase is not fatal */
+      },
+    });
+  };
+
   const toggleBgm = () => {
     if (!audioRef.current) return;
     const next = !bgmMuted;
@@ -612,8 +645,24 @@ export default function AsteroidDefenseGame({
                 ? `No speech model for ${speechDiag.locale} on this device.`
                 : speechDiag.lastError === 'network'
                 ? 'Speech recognition needs a network connection on this device.'
+                : !speechDiag.suspendedMic && micStream.isCallActive() && isMobileAudioPlatform()
+                ? 'Your phone can only give the microphone to one thing at a time, and the voice call has it.'
                 : 'The microphone opened but no speech came through. Check that another app is not holding it.'}
             </p>
+
+            {/* The one case the player can actually fix from here. Opt-in, because
+                taking the mic costs them the call for the rest of the round. */}
+            {!speechPriority && micStream.isCallActive() && isMobileAudioPlatform() && (
+              <button
+                onClick={claimMicForGame}
+                className="mt-2 w-full rounded-md border border-amber-400/60 bg-amber-400/15 px-3 py-2 text-[11px] font-black tracking-wide text-amber-100 active:scale-95"
+              >
+                LET THE GAME HEAR ME
+                <span className="mt-0.5 block text-[9px] font-bold text-amber-300/70">
+                  Leaves the voice call until this round ends
+                </span>
+              </button>
+            )}
             <p className="mt-1 font-mono text-[9px] text-amber-500/70">
               {speechDiag.locale} · restarts {speechDiag.restarts} · mic{' '}
               {speechDiag.suspendedMic ? 'handed over' : 'shared'} · err {speechDiag.lastError ?? 'none'}

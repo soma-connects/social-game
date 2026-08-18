@@ -78,14 +78,36 @@ class MicStreamManager {
    * other, and nothing got recorded.
    */
   private callActive = false;
+  /**
+   * Set when the player has explicitly chosen the recogniser over the call.
+   *
+   * On a phone the two cannot share the device, and defaulting to either one
+   * silently breaks the other — a call nobody can hear, or a mini-game that
+   * never hears you. Neither is a choice the app can make on the player's
+   * behalf, so this is only ever set by the player tapping for it.
+   */
+  private speechPriority = false;
 
   public setCallActive(active: boolean): void {
     this.callActive = active;
   }
 
+  public setSpeechPriority(priority: boolean): void {
+    this.speechPriority = priority;
+  }
+
+  public hasSpeechPriority(): boolean {
+    return this.speechPriority;
+  }
+
+  /** Whether the microphone is currently being shared with a live call. */
+  public isCallActive(): boolean {
+    return this.callActive;
+  }
+
   /** Whether it is safe to hand the device to the speech recogniser. */
   public canSuspendForSpeech(): boolean {
-    return !this.callActive;
+    return !this.callActive || this.speechPriority;
   }
 
   public isSupported(): boolean {

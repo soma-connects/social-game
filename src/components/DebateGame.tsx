@@ -310,10 +310,10 @@ export default function DebateGame({
     const handleContinue = async () => {
       if (isMyTurn) {
         if (room.roomType === 'board_game') {
-          // Trap Event completion
-          const coinsLost = winnerId === 2 ? 50 : 0; // If AI/player 2 wins, active player loses coins
+          // The setback for losing a sudden-death trap is applied server-side at
+          // debate_reveal, from the stored votes. This only closes the phase out.
           try {
-            await roomStore.send(roomId, { action: 'complete_trap', coinsLost });
+            await roomStore.send(roomId, { action: 'complete_trap', coinsLost: 0 });
           } catch (e) {}
         } else if (room.roomType === 'team_battle') {
           try {
@@ -332,7 +332,9 @@ export default function DebateGame({
         className="w-full max-w-4xl flex flex-col items-center gap-8 mx-auto"
       >
         <div className="flex flex-col items-center gap-2">
-            <h2 className="text-3xl font-black mb-2">{winnerId === 1 ? (player1?.name || 'Player 1') : (player2?.name || 'Player 2')} Wins!</h2>
+          <h2 className="text-3xl font-black mb-2">
+            {winnerId === null ? "It's a draw!" : `${winnerName} Wins!`}
+          </h2>
           <div className="text-4xl font-bold text-partyYellow my-4">{timeLeft}</div>
         </div>
 
@@ -343,11 +345,10 @@ export default function DebateGame({
               {player1?.name}
             </div>
           </div>
-          
+
           <div className="text-2xl font-black text-white mb-8">VS</div>
-          
+
           <div className="flex flex-col items-center">
-            <h3 className="font-bold">{player1?.name || 'Player 1'}</h3>
             <div className="text-4xl font-black text-partyCyan mb-2">{votes2}</div>
             <div className="p-4 bg-white/10 rounded-xl w-32 text-center border-t-4 border-partyCyan">
               {player2?.name}
@@ -356,7 +357,11 @@ export default function DebateGame({
         </div>
 
         <div className="text-3xl font-bold text-white mt-4 bg-white/10 p-6 rounded-2xl">
-          WINNER: <span className="text-blue-300 font-bold">{player2?.name || 'Player 2'}</span>!
+          {winnerId === null ? (
+            <>NO WINNER — <span className="text-blue-300 font-bold">the room was split</span></>
+          ) : (
+            <>WINNER: <span className="text-blue-300 font-bold">{winnerName}</span>!</>
+          )}
         </div>
 
         {isMyTurn && (

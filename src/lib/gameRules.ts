@@ -1,4 +1,4 @@
-import { BoardNode, GamePhase, MiniGameId, PowerupType, SocialReactionId, TileNodeType } from './types';
+import { BoardNode, GamePhase, MiniGameId, Player, PowerupType, SocialReactionId, TileNodeType } from './types';
 
 /**
  * Shared between the client, the board renderer and the server.
@@ -168,7 +168,59 @@ export const SHOP_ITEMS: ShopItem[] = [
     targetPrompt: 'Who loses their turn?',
   },
   { id: 'bomb', name: 'Point Bomb', icon: '💣', description: 'Blast 50 coins off whoever is leading', price: 150, target: 'leader' },
+  {
+    id: 'mine',
+    name: 'Buried Mine',
+    icon: '💥',
+    // Planted on the road ahead rather than on a chosen player: it costs a life
+    // from whoever walks into it, which may well turn out to be you.
+    description: 'Bury a hidden mine up the road — costs a life to whoever finds it',
+    price: 130,
+    target: 'self',
+  },
 ];
+
+/** How far ahead of the planter a Buried Mine is laid. */
+export const MINE_PLANT_DISTANCE = 4;
+
+/** How far a mine blast throws you back, on top of the life it takes. */
+export const MINE_SETBACK = 3;
+
+// ─── Lives ──────────────────────────────────────────────────────────────────
+//
+// Points are what you win on; lives are what you survive on. They deliberately
+// do not interact: a player can be top of the table and still one bad round
+// from the launchpad, which is what keeps a runaway leader watchable.
+
+export const STARTING_LIVES = 3;
+
+/**
+ * Performance at or below which a round counts as bombed.
+ *
+ * Lines up with the "Shaky round" tier in describePerformance, so the words the
+ * room reads and the life they just lost agree with each other.
+ */
+export const MINIGAME_FAIL_THRESHOLD = 0.2;
+
+/**
+ * Takes one life. What happens at zero is the caller's business.
+ *
+ * The two games disagree deliberately: the board is long, so running out sends
+ * you back to the launchpad with a fresh bar (`respawnToStart`), while the AI
+ * Master game is short enough that being knocked out is the point.
+ */
+export function loseLife(player: Player): { livesLeft: number; empty: boolean } {
+  const livesLeft = Math.max(0, (player.lives ?? STARTING_LIVES) - 1);
+  player.lives = livesLeft;
+  return { livesLeft, empty: livesLeft <= 0 };
+}
+
+/** Puts a wiped-out board player back on the launchpad with a full bar. */
+export function respawnToStart(player: Player): void {
+  player.lives = STARTING_LIVES;
+  player.boardPosition = 0;
+  delete player.remainingSteps;
+}
 
 /** Coins a Supply Drop tile pays out. */
 export const SUPPLY_DROP_COINS = 75;
@@ -488,7 +540,7 @@ export const BOARD_GRAPH: Record<number, BoardNode> = {
 // Anything that moves a player has to walk the `next` edges instead.
 
 /** Reverse adjacency, so a player can be pushed back along the road they came. */
-const PREV_NODES: Record<number, number[]> = (() => {
+export const PREV_NODES: Record<number, number[]> = (() => {
   const prev: Record<number, number[]> = {};
   for (const node of Object.values(BOARD_GRAPH)) {
     for (const nextId of node.next) (prev[nextId] ??= []).push(node.id);

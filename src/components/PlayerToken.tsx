@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { motion, useAnimation, AnimatePresence } from 'framer-motion';
 import { Player } from '@/lib/types';
-import { BOARD_GRAPH } from '@/lib/gameRules';
+import { BOARD_GRAPH, PREV_NODES } from '@/lib/gameRules';
 import AvatarIllustration from './AvatarIllustration';
 
 interface PlayerTokenProps {
@@ -11,16 +11,22 @@ interface PlayerTokenProps {
   spreadY: number;
 }
 
-function graphPath(from: number, to: number): number[] {
-  if (from === to) return [from];
-
+/**
+ * Walks the road between two nodes, following real edges in either direction.
+ *
+ * Node ids are identifiers, not distances — id 24 sits one step from the start
+ * while id 23 is the finish — so any path built from id arithmetic sends the
+ * token on a jumbled tour of unrelated corners of the map. Backward moves
+ * (rewind, asteroid pushback, duel loss) can only be walked along the reverse
+ * edges, which is why the forward search alone was never enough.
+ */
+function bfs(from: number, to: number, edges: (id: number) => number[]): number[] | null {
   const queue: number[][] = [[from]];
   const seen = new Set([from]);
 
   while (queue.length > 0) {
     const path = queue.shift()!;
-    const current = path[path.length - 1];
-    for (const next of BOARD_GRAPH[current]?.next ?? []) {
+    for (const next of edges(path[path.length - 1])) {
       if (seen.has(next)) continue;
       const candidate = [...path, next];
       if (next === to) return candidate;
@@ -28,11 +34,18 @@ function graphPath(from: number, to: number): number[] {
       queue.push(candidate);
     }
   }
+  return null;
+}
 
-  const start = Math.min(from, to);
-  const end = Math.max(from, to);
-  const fallback = Array.from({ length: end - start + 1 }, (_, i) => start + i);
-  return from <= to ? fallback : fallback.reverse();
+function graphPath(from: number, to: number): number[] {
+  if (from === to) return [from];
+
+  return (
+    bfs(from, to, (id) => BOARD_GRAPH[id]?.next ?? []) ??
+    bfs(from, to, (id) => PREV_NODES[id] ?? []) ??
+    // Disconnected in both directions — jump rather than invent a route.
+    [from, to]
+  );
 }
 
 export default function PlayerToken({ player, isActive, spreadX, spreadY }: PlayerTokenProps) {

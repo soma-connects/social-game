@@ -190,55 +190,6 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
         </button>
       </div>
 
-      {/* Room Vibe — tunes the AI Master's tone and game mix to who's actually in the room */}
-      <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-3 border border-white/5 shadow-2xl relative z-10">
-        <div>
-          <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-partyYellow" />
-            SET THE ROOM VIBE
-          </h3>
-          <p className="text-xs text-gray-400">
-            {myPlayer.isHost
-              ? 'Tell the AI Master who is in the room so it can read the mood right.'
-              : `Room vibe: ${ROOM_VIBES[roomVibe].label} — set by the host.`}
-          </p>
-        </div>
-
-        <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(180px,1fr))]">
-          {Object.values(ROOM_VIBES).map((vibe) => {
-            const isSelected = vibe.id === roomVibe;
-            const disabled = !myPlayer.isHost;
-            return (
-              <button
-                key={vibe.id}
-                type="button"
-                onClick={() => selectVibe(vibe.id)}
-                disabled={disabled}
-                className={`p-3.5 rounded-2xl border text-left transition-all relative ${
-                  isSelected
-                    ? 'bg-partyPink/20 border-partyPink text-white shadow-lg glow-yellow'
-                    : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/30'
-                } ${disabled ? 'cursor-default' : 'active:scale-95'}`}
-              >
-                {vibe.comingSoon && (
-                  <span className="absolute top-2 right-2 bg-black/50 text-partyYellow text-[8px] font-black px-1.5 py-0.5 rounded-full border border-partyYellow/30 whitespace-nowrap">
-                    🔒 SOON
-                  </span>
-                )}
-                <span className="text-xl block">{vibe.emoji}</span>
-                <span className="font-extrabold text-sm block mt-1">{vibe.label}</span>
-                <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{vibe.blurb}</span>
-                {isSelected && (
-                  <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-partyPink/30 px-2 py-0.5 text-[9px] font-black text-partyPink">
-                    <CheckCircle2 className="w-2.5 h-2.5" /> SELECTED
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Two-up grid for Lounging Area & Mode Hub */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 relative z-10">
         {/* Player Lounging Area */}
@@ -632,6 +583,57 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   </p>
                 </div>
               </button>
+
+              {/* The vibe only means anything to the AI Master, so it belongs
+                  behind that mode rather than sitting over the whole lobby. */}
+              {activeMode === 'ai_master' && (
+                <div className="rounded-2xl border border-partyYellow/30 bg-partyYellow/[0.06] p-3.5 space-y-3 animate-fadeIn">
+                  <div>
+                    <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-partyYellow" /> WHO IS IN THIS ROOM?
+                    </h4>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {myPlayer.isHost
+                        ? 'The AI Master reads this to pick its tone and its games.'
+                        : `${ROOM_VIBES[roomVibe].emoji} ${ROOM_VIBES[roomVibe].label} — set by the host.`}
+                    </p>
+                  </div>
+
+                  {myPlayer.isHost && (
+                    <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
+                      {Object.values(ROOM_VIBES).map((vibe) => {
+                        const isSelected = vibe.id === roomVibe;
+                        return (
+                          <button
+                            key={vibe.id}
+                            type="button"
+                            onClick={() => selectVibe(vibe.id)}
+                            className={`p-2.5 rounded-xl border text-left transition-all relative active:scale-95 ${
+                              isSelected
+                                ? 'bg-partyPink/20 border-partyPink text-white shadow-lg'
+                                : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/30'
+                            }`}
+                          >
+                            {vibe.comingSoon && (
+                              <span className="absolute top-1.5 right-1.5 bg-black/50 text-partyYellow text-[8px] font-black px-1.5 py-0.5 rounded-full border border-partyYellow/30">
+                                🔒 SOON
+                              </span>
+                            )}
+                            <span className="text-lg block">{vibe.emoji}</span>
+                            <span className="font-extrabold text-xs block mt-0.5">{vibe.label}</span>
+                            <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{vibe.blurb}</span>
+                            {isSelected && (
+                              <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-partyPink/30 px-2 py-0.5 text-[9px] font-black text-partyPink">
+                                <CheckCircle2 className="w-2.5 h-2.5" /> SELECTED
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
               {/* 5. Team Battle */}
               <button
                 onClick={() => {

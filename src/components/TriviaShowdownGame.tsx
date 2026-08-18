@@ -16,7 +16,9 @@ import { audioSFX } from '@/lib/audioFeedback';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { speechEngine, SpeechError, ListenSession, MicCapabilities } from '@/lib/speechService';
 import { roomStore } from '@/lib/roomStore';
+import { micStream } from '@/lib/micStream';
 import AvatarIllustration from './AvatarIllustration';
+import MicContentionNotice from './MicContentionNotice';
 
 interface TriviaShowdownGameProps {
   room: RoomState;
@@ -141,26 +143,38 @@ export default function TriviaShowdownGame({
     try {
       const accessError = await speechEngine.probeMicPermission();
       if (accessError) return;
-
-      sessionRef.current = speechEngine.listenForSpeech({
-        language: 'en-US',
-        // No target word: the client is not told the answer, so it cannot match
-        // against it. The player submits when they finish, or the timer does.
-        targetWord: '',
-        onResult: (res) => {
-          setTranscript(res.transcript);
-          if (res.isFinal && res.transcript.trim()) {
-            void handleEvaluate(res.transcript);
-          }
-        },
-        onError: (err) => {
-          console.error('Speech error:', err);
-        },
-      });
+      beginListening();
     } catch (err) {
       console.error('Speech recognition error:', err);
       setStatus('asking');
     }
+  };
+
+  /** The actual session start, unconditional — startListening's guard lives above it. */
+  const beginListening = () => {
+    sessionRef.current = speechEngine.listenForSpeech({
+      language: 'en-US',
+      // No target word: the client is not told the answer, so it cannot match
+      // against it. The player submits when they finish, or the timer does.
+      targetWord: '',
+      onResult: (res) => {
+        setTranscript(res.transcript);
+        if (res.isFinal && res.transcript.trim()) {
+          void handleEvaluate(res.transcript);
+        }
+      },
+      onError: (err) => {
+        console.error('Speech error:', err);
+      },
+    });
+  };
+
+  /** Restarts the listening session with the mic taken off the call. */
+  const restartWithMicPriority = () => {
+    if (status !== 'listening') return;
+    micStream.setSpeechPriority(true);
+    sessionRef.current?.stop();
+    beginListening();
   };
 
   const toggleMic = () => {
@@ -255,6 +269,8 @@ export default function TriviaShowdownGame({
               {isMicMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </button>
           </div>
+
+          <MicContentionNotice active={status === 'listening'} onClaimPriority={restartWithMicPriority} />
 
           {/* Fallback Text Input */}
           <div className="flex items-center gap-2 pt-2">

@@ -23,7 +23,9 @@ import {
   PHONETIC_FALLBACK_LANGUAGES,
 } from '@/lib/speechService';
 import { roomStore } from '@/lib/roomStore';
+import { micStream } from '@/lib/micStream';
 import AvatarIllustration from './AvatarIllustration';
+import MicContentionNotice from './MicContentionNotice';
 
 type ArenaStatus = 'idle' | 'listening' | 'matched' | 'failed';
 
@@ -207,6 +209,33 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     }, 1000);
   };
 
+  /**
+   * Restarts just the listening session with the mic taken off the call.
+   *
+   * Deliberately does not touch the timer, the SFX, or the analyser — those
+   * are already running fine, and a mid-round attempt losing its clock over
+   * a mic handover would be a worse bug than the one this fixes.
+   */
+  const restartWithMicPriority = () => {
+    if (!challenge || status !== 'listening') return;
+    micStream.setSpeechPriority(true);
+    sessionRef.current?.stop();
+    const target = challenge.type === 'math' ? challenge.word.split('=')[1].trim() : challenge.word;
+    sessionRef.current = speechEngine.listenForSpeech({
+      targetWord: target,
+      language: challenge.language,
+      onResult: (res: SpeechMatchResult) => {
+        setTranscript(res.transcript);
+        if (res.isMatch) finishRound('matched', res.confidence);
+      },
+      onError: (err) => {
+        setError(err);
+        teardown();
+        setStatus('idle');
+      },
+    });
+  };
+
   // Keep the room in the loop â€” spectators see the prompt and the transcript as
   // it lands, so they can react to the attempt rather than to a waiting screen.
   useEffect(() => {
@@ -366,6 +395,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
                 No sound reaching the mic yet â€” check the right input device is selected.
               </p>
             )}
+            <MicContentionNotice active={status === 'listening'} onClaimPriority={restartWithMicPriority} />
           </div>
         )}
 

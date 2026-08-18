@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Mic, MicOff, PhoneCall, PhoneOff, Loader2, AlertTriangle, Volume2 } from 'lucide-react';
 import { Player } from '@/lib/types';
 import { voiceChat, VoiceState } from '@/lib/voiceChat';
-import { micStream } from '@/lib/micStream';
 import AvatarIllustration from './AvatarIllustration';
 
 interface VoiceCallBarProps {
@@ -64,19 +63,11 @@ export default function VoiceCallBar({
   // and the reaction buttons carry the room for those few seconds. When the
   // roast opens, mics come back and people talk again.
   //
-  // Tracked separately from the mute button: if a player muted themselves we
-  // must not helpfully unmute them when the roast starts.
-  const autoMutedRef = useRef(false);
+  // Delegated to voiceChat rather than tracked here: this component can
+  // remount mid-call, and "the app muted this, not the player" has to survive
+  // that or an auto-mute can get stuck with nothing left able to clear it.
   useEffect(() => {
-    if (!voiceChat.isJoined()) return;
-
-    if (autoMute && !micStream.isMuted()) {
-      voiceChat.setMuted(true);
-      autoMutedRef.current = true;
-    } else if (!autoMute && autoMutedRef.current) {
-      voiceChat.setMuted(false);
-      autoMutedRef.current = false;
-    }
+    voiceChat.applyAutoMute(autoMute);
   }, [autoMute, state.status]);
 
   const handleJoin = async () => {
@@ -112,6 +103,20 @@ export default function VoiceCallBar({
   const connectedIds = new Set(
     state.peers.filter((p) => p.connection === 'connected').map((p) => p.playerId)
   );
+
+  // Connected, unmuted, and still not a single byte leaving this device for
+  // anyone. That combination cannot be explained by "still connecting" or
+  // "muted" — both of those already have their own banners — so once every
+  // connected peer has actually been measured, it is safe to say so plainly
+  // instead of leaving a player to guess why the room cannot hear them.
+  const connectedPeers = state.peers.filter((p) => p.connection === 'connected');
+  const measuredPeers = connectedPeers.filter((p) => p.sendingAudio !== undefined);
+  const notReachingAnyone =
+    isLive &&
+    !state.muted &&
+    connectedPeers.length > 0 &&
+    measuredPeers.length === connectedPeers.length &&
+    measuredPeers.every((p) => !p.sendingAudio);
 
   // Mid-attempt: one status line, not the full bar.
   if (compact) {
@@ -173,6 +178,19 @@ export default function VoiceCallBar({
         >
           <Volume2 className="w-4 h-4" /> TAP TO HEAR EVERYONE
         </button>
+      )}
+
+      {/* Connected and unmuted, but measured zero bytes actually leaving the
+          device for every peer — the exact "they can't hear me" report that
+          every other signal here reads as healthy. */}
+      {notReachingAnyone && (
+        <div className="w-full mb-1 rounded-xl bg-red-500/15 border border-red-400/50 text-red-100 text-xs font-bold px-3 py-2 flex items-start gap-2">
+          <MicOff className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>
+            Nobody is receiving your audio. Check the mic permission for this site, make sure no other
+            app has it, then leave and rejoin the call.
+          </span>
+        </div>
       )}
       <div className="flex items-center gap-3 min-w-0">
         <div

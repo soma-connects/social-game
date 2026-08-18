@@ -12,6 +12,9 @@ import { micStream, MicError } from './micStream';
 
 const SIGNAL_POLL_MS = 1000;
 
+/** How often to measure whether outbound audio is actually moving, per peer. */
+const OUTBOUND_CHECK_MS = 4000;
+
 /**
  * Last-resort ICE config.
  *
@@ -37,6 +40,8 @@ export interface PeerState {
   route?: 'direct' | 'relay';
   /** ICE could find no working path to this player. */
   failed?: boolean;
+  /** Undefined until first measured. False means connected but no bytes are moving out. */
+  sendingAudio?: boolean;
 }
 
 export interface VoiceState {
@@ -85,6 +90,19 @@ interface Peer {
   lastOfferAt?: number;
   /** Consecutive polls this peer has been missing from the call roster. */
   missedPresence: number;
+  /** outbound-rtp bytesSent as of the last stats check, to detect real growth. */
+  lastOutboundBytes?: number;
+  /**
+   * Whether bytes actually left this device for this peer since the last check.
+   *
+   * `connected` and `mute` both looked fine while a room reported total silence
+   * from one player, with nothing in the existing signals able to tell the two
+   * apart — a mesh where ICE, tracks and mute state all read healthy is not
+   * proof that a single byte of audio ever left the device. Undefined until the
+   * first check completes, so the UI can tell "not yet measured" from "measured
+   * and it is not moving".
+   */
+  sendingAudio?: boolean;
 }
 
 /**
@@ -113,6 +131,7 @@ class VoiceChatManager {
   private unsubscribeStream: (() => void) | null = null;
 
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private outboundCheckTimer: ReturnType<typeof setInterval> | null = null;
   private levelFrame: number | null = null;
   private audioCtx: AudioContext | null = null;
   private localAnalyser: AnalyserNode | null = null;
@@ -124,6 +143,16 @@ class VoiceChatManager {
   private remoteVolume = 1;
   /** True once the browser has refused to play a peer's audio. */
   private audioBlocked = false;
+  /**
+   * True while the app (not the player) is the reason the mic is muted.
+   *
+   * Lived as a useRef inside VoiceCallBar until it was moved here: a ref is
+   * scoped to one component instance, but the mute flag it was guarding lives
+   * on the shared micStream singleton. Any remount of that component forgot
+   * the app had muted anyone, and nothing was then able to unmute it again —
+   * the flag and the state it tracks have to share a lifetime.
+   */
+  private autoMuted = false;
 
   /** Relay configuration from /api/ice, cached until its credentials expire. */
   private iceServers: RTCIceServer[] = [];
@@ -159,6 +188,7 @@ class VoiceChatManager {
         silent: !peer.speaking,
         route: peer.route,
         failed: peer.failed,
+        sendingAudio: peer.sendingAudio,
       })),
     };
   }
@@ -170,6 +200,24 @@ class VoiceChatManager {
 
   public isJoined(): boolean {
     return this.status !== 'off';
+  }
+
+  /**
+   * Closes or restores this player's mic for a reason the app decided, not the
+   * player — e.g. everyone but the performer during an attempt.
+   *
+   * Never overrides a mute the player chose themselves: this only unmutes when
+   * `autoMuted` shows the app was the one holding it closed.
+   */
+  public applyAutoMute(shouldMute: boolean): void {
+    if (!this.isJoined()) return;
+    if (shouldMute && !micStream.isMuted()) {
+      micStream.setMuted(true);
+      this.autoMuted = true;
+    } else if (!shouldMute && this.autoMuted) {
+      micStream.setMuted(false);
+      this.autoMuted = false;
+    }
   }
 
   // ----------------------------------------------------------------- ICE
@@ -248,6 +296,47 @@ class VoiceChatManager {
     }
   }
 
+  /**
+   * Checks whether this device is actually transmitting audio to each peer.
+   *
+   * Every other signal in this file can read healthy while one player is
+   * completely silent to the room: ICE connects, the sender exists, the mute
+   * button says unmuted, and still nothing arrives on the other end. bytesSent
+   * on the outbound-rtp report is the one number that cannot lie about that —
+   * it only grows when media is actually leaving the device, muted or not.
+   * Comparing it between two polls turns "did they hear me" from a guess into
+   * a measurement, for every peer at once, reusing a getStats() call that was
+   * already being made for the route diagnostic.
+   */
+  private async checkOutboundAudio(): Promise<void> {
+    let changed = false;
+
+    await Promise.all(
+      [...this.peers.values()].map(async (peer) => {
+        if (peer.pc.connectionState !== 'connected') return;
+        try {
+          const stats = await peer.pc.getStats();
+          let bytesSent: number | null = null;
+          stats.forEach((report: any) => {
+            if (report.type === 'outbound-rtp' && (report.kind === 'audio' || report.mediaType === 'audio')) {
+              bytesSent = report.bytesSent ?? 0;
+            }
+          });
+          if (bytesSent === null) return;
+
+          const wasSending = peer.sendingAudio;
+          peer.sendingAudio = peer.lastOutboundBytes !== undefined && bytesSent > peer.lastOutboundBytes;
+          peer.lastOutboundBytes = bytesSent;
+          if (peer.sendingAudio !== wasSending) changed = true;
+        } catch {
+          /* diagnostics only */
+        }
+      })
+    );
+
+    if (changed) this.emit();
+  }
+
   // ------------------------------------------------------------- join/leave
 
   public async join(roomId: string, myPlayerId: string, peerIds: string[]): Promise<MicError | null> {
@@ -289,6 +378,8 @@ class VoiceChatManager {
 
     this.pollTimer = setInterval(() => void this.pollSignals(), SIGNAL_POLL_MS);
     void this.pollSignals();
+
+    this.outboundCheckTimer = setInterval(() => void this.checkOutboundAudio(), OUTBOUND_CHECK_MS);
 
     this.syncPeers(peerIds);
     this.status = 'live';
@@ -335,6 +426,14 @@ class VoiceChatManager {
     this.audioBlocked = false;
     micStream.setCallActive(false);
 
+    // An app-held mute must not outlive the call that justified it — otherwise
+    // the shared mic sits disabled for whatever uses it next, with nothing
+    // left that knows to undo it. A mute the player chose is left alone.
+    if (this.autoMuted) {
+      micStream.setMuted(false);
+      this.autoMuted = false;
+    }
+
     if (this.roomId && this.myId) {
       // Best effort — the peers also notice via connection state.
       void this.post({ action: 'leave', playerId: this.myId });
@@ -343,6 +442,10 @@ class VoiceChatManager {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+    if (this.outboundCheckTimer) {
+      clearInterval(this.outboundCheckTimer);
+      this.outboundCheckTimer = null;
     }
     if (this.levelFrame !== null) {
       cancelAnimationFrame(this.levelFrame);

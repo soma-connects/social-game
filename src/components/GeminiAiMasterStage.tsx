@@ -6,6 +6,8 @@ import { Player, RoomState } from '@/lib/types';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
+import { micStream } from '@/lib/micStream';
+import MicContentionNotice from './MicContentionNotice';
 
 interface GeminiAiMasterStageProps {
   room: RoomState;
@@ -41,7 +43,11 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
       setIsRecording(false);
       return;
     }
-    
+    await beginRecording();
+  };
+
+  /** The actual session start, unconditional — recordSpeech's toggle guard lives above it. */
+  const beginRecording = async () => {
     setIsRecording(true);
     setInputText(''); // clear previous text
     try {
@@ -50,7 +56,7 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
         setIsRecording(false);
         return;
       }
-      
+
       let session: any = null;
       session = speechEngine.listenForSpeech({
         targetWord: '',
@@ -70,7 +76,7 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
         },
         onError: () => setIsRecording(false)
       });
-      
+
       // Auto-stop recording after 15 seconds max
       setTimeout(() => {
         if (session) {
@@ -79,10 +85,17 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
           setIsRecording(false);
         }
       }, 15000);
-      
+
     } catch (error) {
       setIsRecording(false);
     }
+  };
+
+  /** Restarts recording with the mic taken off the call. */
+  const restartWithMicPriority = () => {
+    micStream.setSpeechPriority(true);
+    speechEngine.stopListening();
+    void beginRecording();
   };
 
   const handleGeneratePrompt = async (type: 'challenge' | 'debate' | 'custom', customText?: string) => {
@@ -214,6 +227,8 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
             <Flame className="w-3.5 h-3.5" /> SPICY DEBATE
           </button>
         </div>
+
+        <MicContentionNotice active={isRecording} onClaimPriority={restartWithMicPriority} />
 
         {/* Input Bar */}
         <form

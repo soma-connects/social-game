@@ -7,6 +7,8 @@ import { speechEngine } from '@/lib/speechService';
 import { roomStore } from '@/lib/roomStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, Send, Sparkles, CheckCircle2 } from 'lucide-react';
+import { micStream } from '@/lib/micStream';
+import MicContentionNotice from './MicContentionNotice';
 
 interface StoryBuilderGameProps {
   room: RoomState;
@@ -89,6 +91,11 @@ export default function StoryBuilderGame({
       setIsRecording(false);
       return;
     }
+    await beginRecording();
+  };
+
+  /** The actual session start, unconditional — recordSpeech's toggle guard lives above it. */
+  const beginRecording = async () => {
     setIsRecording(true);
     try {
       const accessError = await speechEngine.probeMicPermission();
@@ -122,6 +129,13 @@ export default function StoryBuilderGame({
       console.error(error);
       setIsRecording(false);
     }
+  };
+
+  /** Restarts recording with the mic taken off the call. */
+  const restartWithMicPriority = () => {
+    micStream.setSpeechPriority(true);
+    speechEngine.stopListening();
+    void beginRecording();
   };
 
   const handleSubmitSentence = async () => {
@@ -241,6 +255,7 @@ export default function StoryBuilderGame({
             >
               <Send className="w-5 h-5 inline mr-2" /> SUBMIT
             </button>
+            <MicContentionNotice active={isRecording} onClaimPriority={restartWithMicPriority} />
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center p-6 mt-4 border border-white/10 rounded-xl bg-white/5">

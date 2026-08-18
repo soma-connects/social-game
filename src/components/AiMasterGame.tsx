@@ -9,6 +9,8 @@ import { aiGameMaster } from '@/lib/aiGameMaster';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
 import { speechEngine } from '@/lib/speechService';
+import { micStream } from '@/lib/micStream';
+import MicContentionNotice from './MicContentionNotice';
 import AvatarIllustration from './AvatarIllustration';
 
 interface AiMasterGameProps {
@@ -86,7 +88,11 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
     }
     const accessError = await speechEngine.probeMicPermission();
     if (accessError) return;
+    beginListening();
+  };
 
+  /** The actual session start, unconditional — toggleMic's stop guard lives above it. */
+  const beginListening = () => {
     setListening(true);
     setTranscript('');
     sessionRef.current = speechEngine.listenForSpeech({
@@ -95,6 +101,13 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
       onResult: (res: any) => setTranscript(res.transcript ?? ''),
       onError: () => setListening(false),
     });
+  };
+
+  /** Restarts the mic with priority over the call. */
+  const restartWithMicPriority = () => {
+    micStream.setSpeechPriority(true);
+    sessionRef.current?.stop();
+    beginListening();
   };
 
   const submitAnswer = async () => {
@@ -246,6 +259,7 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
                     <Send className="w-4 h-4" /> DONE
                   </button>
                 </div>
+                <MicContentionNotice active={listening} onClaimPriority={restartWithMicPriority} />
               </>
             ) : (
               <p className="text-sm font-bold text-gray-300 text-center py-2">

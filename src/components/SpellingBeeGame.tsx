@@ -13,6 +13,8 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { ChallengeWord, Player, RoomState } from '@/lib/types';
+import { micStream } from '@/lib/micStream';
+import MicContentionNotice from './MicContentionNotice';
 import { LANGUAGE_DECKS } from '@/lib/gameContent';
 import { audioSFX } from '@/lib/audioFeedback';
 import { aiGameMaster } from '@/lib/aiGameMaster';
@@ -208,6 +210,45 @@ export default function SpellingBeeGame({ room, activePlayer, onCompleteTurn }: 
     }, 1000);
   };
 
+  /**
+   * Restarts just the listening session with the mic taken off the call.
+   *
+   * Leaves the timer, SFX and analyser alone, and keeps the accumulated
+   * transcript refs as they are — the player is mid-word, not starting over.
+   */
+  const restartWithMicPriority = () => {
+    if (!challenge || status !== 'listening') return;
+    micStream.setSpeechPriority(true);
+    sessionRef.current?.stop();
+    sessionRef.current = speechEngine.listenForSpeech({
+      targetWord: challenge.word,
+      language: 'en-US',
+      onResult: (res: SpeechMatchResult) => {
+        if (res.transcript.length < lastSessionTranscriptRef.current.length) {
+          fullTranscriptRef.current += ' ' + lastSessionTranscriptRef.current;
+        }
+        lastSessionTranscriptRef.current = res.transcript;
+
+        const combined = (fullTranscriptRef.current + ' ' + res.transcript).trim();
+        setTranscript(combined);
+
+        const t = combined.replace(/[^a-zA-Z]/g, '').toLowerCase();
+        const w = challenge.word.replace(/[^a-zA-Z]/g, '').toLowerCase();
+
+        if (t.includes(w)) {
+          finishRound('matched', 1.0);
+        } else if (res.isMatch) {
+          finishRound('matched', res.confidence);
+        }
+      },
+      onError: (err) => {
+        setError(err);
+        teardown();
+        setStatus('idle');
+      },
+    });
+  };
+
   useEffect(() => {
     if (!challenge) return;
     roomStore.pushLiveState(room.roomId, activePlayer.id, {
@@ -286,6 +327,8 @@ export default function SpellingBeeGame({ room, activePlayer, onCompleteTurn }: 
             style={{ width: `${timerPercentage}%` }}
           />
         </div>
+
+        <MicContentionNotice active={status === 'listening'} onClaimPriority={restartWithMicPriority} />
 
         {(error || sttUnavailable) && (
           <div className="p-4 rounded-2xl bg-amber-500/15 border border-amber-500/60 text-left flex items-start gap-3">

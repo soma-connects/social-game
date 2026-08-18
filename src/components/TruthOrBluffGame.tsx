@@ -8,6 +8,8 @@ import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, Send, Vote, Eye, Sparkles, Clock, CheckCircle2, XCircle } from 'lucide-react';
+import { micStream } from '@/lib/micStream';
+import MicContentionNotice from './MicContentionNotice';
 
 interface TruthOrBluffGameProps {
   room: RoomState;
@@ -38,6 +40,8 @@ export default function TruthOrBluffGame({
   const [claim2, setClaim2] = useState('');
   const [isRecording1, setIsRecording1] = useState(false);
   const [isRecording2, setIsRecording2] = useState(false);
+  /** Which claim is currently being recorded, so a mic-priority claim can restart it. */
+  const activeClaimRef = React.useRef<1 | 2 | null>(null);
   const [selectedLieIndex, setSelectedLieIndex] = useState<0 | 1 | null>(null);
   
   // Phase 3 state
@@ -99,10 +103,15 @@ export default function TruthOrBluffGame({
       else setIsRecording2(false);
       return;
     }
+    await beginRecording(claimNum);
+  };
 
+  /** The actual session start, unconditional — recordSpeech's toggle guard lives above it. */
+  const beginRecording = async (claimNum: 1 | 2) => {
     if (claimNum === 1) setIsRecording1(true);
     else setIsRecording2(true);
-    
+    activeClaimRef.current = claimNum;
+
     try {
       const accessError = await speechEngine.probeMicPermission();
       if (accessError) {
@@ -132,19 +141,28 @@ export default function TruthOrBluffGame({
           else setIsRecording2(false);
         }
       });
-      
+
       // Stop automatically after 10s
       setTimeout(() => {
         speechEngine.stopListening();
         if (claimNum === 1) setIsRecording1(false);
         else setIsRecording2(false);
       }, 10000);
-      
+
     } catch (error) {
       console.error('Speech recognition error', error);
       if (claimNum === 1) setIsRecording1(false);
       else setIsRecording2(false);
     }
+  };
+
+  /** Restarts the active claim's recording with the mic taken off the call. */
+  const restartWithMicPriority = () => {
+    micStream.setSpeechPriority(true);
+    const claimNum = activeClaimRef.current;
+    if (!claimNum) return;
+    speechEngine.stopListening();
+    void beginRecording(claimNum);
   };
 
   const handleSubmitClaims = async () => {
@@ -245,7 +263,9 @@ export default function TruthOrBluffGame({
         className="w-full max-w-2xl bg-black/20 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 flex flex-col gap-6 mx-auto"
       >
         <h3 className="text-2xl font-bold text-center text-white mb-2">Record Your Claims</h3>
-        
+
+        <MicContentionNotice active={isRecording1 || isRecording2} onClaimPriority={restartWithMicPriority} />
+
         {/* Claim 1 */}
         <div className="flex flex-col gap-2">
           <label className="text-partyCyan font-bold tracking-wider text-sm">CLAIM #1</label>

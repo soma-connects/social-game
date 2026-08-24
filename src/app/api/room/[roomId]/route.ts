@@ -90,7 +90,7 @@ function pickSocialBadge(round: SocialRound | null, performance: number): string
   return 'Voice Rookie';
 }
 
-function createRoom(roomId: string, hostName: string): { room: RoomState; playerId: string } {
+async function createRoom(roomId: string, hostName: string): Promise<{ room: RoomState; playerId: string }> {
   const host = makePlayer(hostName, 0, true);
   const room: RoomState = {
     roomId,
@@ -113,12 +113,12 @@ function createRoom(roomId: string, hostName: string): { room: RoomState; player
     socialRound: null,
   };
   pushEvent(room, `🎮 ${host.name} opened room ${roomId}`, 'system');
-  writeRoom(room);
+  await writeRoom(room);
   return { room, playerId: host.id };
 }
 
 export async function GET(_request: Request, { params }: { params: { roomId: string } }) {
-  const room = readRoom(params.roomId.toUpperCase());
+  const room = await readRoom(params.roomId.toUpperCase());
   if (!room) {
     return NextResponse.json({ error: 'Room not found' }, { status: 404 });
   }
@@ -138,16 +138,16 @@ export async function POST(request: Request, { params }: { params: { roomId: str
   const { action } = body;
 
   if (action === 'create') {
-    const existing = readRoom(roomId);
+    const existing = await readRoom(roomId);
     if (existing) {
       // Reopening an existing code should not wipe the players already in it.
       return NextResponse.json({ room: existing, playerId: existing.hostId });
     }
-    const created = createRoom(roomId, body.playerName);
+    const created = await createRoom(roomId, body.playerName);
     return NextResponse.json(created);
   }
 
-  const room = readRoom(roomId);
+  const room = await readRoom(roomId);
   if (!room) {
     // Every other action needs a room that already exists. Silently creating one
     // here is what used to make a guest the host of an empty room.
@@ -159,7 +159,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       const name = String(body.playerName ?? '').trim();
       const existing = room.players.find((p) => p.name.toLowerCase() === name.toLowerCase());
       if (existing) {
-        return NextResponse.json({ room: writeRoom(room), playerId: existing.id });
+        return NextResponse.json({ room: await writeRoom(room), playerId: existing.id });
       }
       if (room.players.length >= MAX_PLAYERS) {
         return NextResponse.json({ error: `Room is full (max ${MAX_PLAYERS} players)` }, { status: 409 });
@@ -167,7 +167,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       const player = makePlayer(name, room.players.length, false);
       room.players.push(player);
       pushEvent(room, `🎮 ${player.name} joined the room`, 'system');
-      return NextResponse.json({ room: writeRoom(room), playerId: player.id });
+      return NextResponse.json({ room: await writeRoom(room), playerId: player.id });
     }
 
     case 'add_trap': {
@@ -182,13 +182,13 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         used: false,
       });
       pushEvent(room, `⚡ ${body.authorName || 'Someone'} armed a trap word`, 'debuff');
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'mark_trap_used': {
       const trap = room.trapWords.find((t) => t.id === body.trapId);
       if (trap) trap.used = true;
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'update_settings': {
@@ -196,12 +196,12 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         room.selectedLanguages = body.languages;
       }
       if (typeof body.mathEnabled === 'boolean') room.mathEnabled = body.mathEnabled;
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'set_theme': {
       if (body.theme) room.theme = body.theme;
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'set_avatar': {
@@ -213,13 +213,13 @@ export async function POST(request: Request, { params }: { params: { roomId: str
 
       player.avatar = avatar;
       pushEvent(room, `${player.name} switched avatar to ${avatar.name}`, 'social');
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'update_phase': {
       if (!body.phase) return NextResponse.json({ error: 'Phase is required' }, { status: 400 });
       room.phase = body.phase as GamePhase;
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'add_social_reaction': {
@@ -264,7 +264,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         }
       }
 
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'add_judge_vote': {
@@ -294,7 +294,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         });
       }
       pushEvent(room, `${voter.name} judged ${target.name}: ${vote.toUpperCase()}`, vote === 'pass' ? 'buff' : 'debuff');
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     // Both mini-games finish through here. The score is banked as points AND
@@ -344,7 +344,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       // Open 15-second open-mic roast intermission so players can laugh & roast each other.
       room.phase = 'roast_intermission';
       return NextResponse.json({
-        room: writeRoom(room),
+        room: await writeRoom(room),
         result: room.turnResult,
         summary: describePerformance(performance),
       });
@@ -363,7 +363,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       }
 
       room.phase = 'powerup_shop';
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'buy_powerup': {
@@ -379,12 +379,12 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       active.score -= item.price;
       active.inventory.push(item.id);
       pushEvent(room, `🛒 ${active.name} bought ${item.name} (-${item.price} pts)`, 'buff');
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'finish_shopping': {
       room.phase = 'roadmap_turn';
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'roll_dice': {
@@ -418,7 +418,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         pushEvent(room, `🏆 ${active.name} won the roadmap!`, 'system');
       }
 
-      return NextResponse.json({ room: writeRoom(room), roll, outcome });
+      return NextResponse.json({ room: await writeRoom(room), roll, outcome });
     }
 
     case 'resolve_dare': {
@@ -433,7 +433,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         }
       }
       room.currentDare = null;
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'use_powerup': {
@@ -457,7 +457,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         pushEvent(room, `⚡ ${active.name} used ${powerupId}`, 'buff');
       }
 
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'update_minigames': {
@@ -467,7 +467,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         return NextResponse.json({ error: 'Enable at least one mini-game' }, { status: 400 });
       }
       room.enabledMiniGames = valid;
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     // Starting the match and ending a turn both hand the next player a freshly
@@ -490,7 +490,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       if (next) {
         pushEvent(room, `${game === 'pitch_bird' ? '🐦' : '🎙️'} ${next.name}'s turn — ${MINIGAME_LABELS[game]}`, 'system');
       }
-      return NextResponse.json({ room: writeRoom(room) });
+      return NextResponse.json({ room: await writeRoom(room) });
     }
 
     default:

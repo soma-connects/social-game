@@ -1,13 +1,15 @@
+import { Redis } from '@upstash/redis';
 import { EventLog, RoomState } from '../types';
 import { ROOM_TTL_MS } from '../gameRules';
 
-// Shared in-process state for the room API and the WebRTC signalling API.
+// Shared state for the room API and the WebRTC signalling API, held in Redis.
 //
-// IMPORTANT for the Cloud Run deployment: this only holds together while every
-// request lands on the same container. The service must run with
-// `--min-instances=1 --max-instances=1`, or players get split across instances
-// and see different rooms. Moving to Firestore or Redis is the fix if the game
-// ever needs more than one instance.
+// This used to be a plain in-process Map, which only worked because Cloud Run
+// was pinned to a single container (`--min-instances=1 --max-instances=1`).
+// Vercel gives no such guarantee — requests can land on any of several
+// ephemeral function instances — so every read/write has to go through a
+// store all instances share. Redis (Upstash) fills that role; the shape of
+// the data below is otherwise unchanged from the in-memory version.
 
 /** A WebRTC signalling message, relayed verbatim between two players. */
 export type SignalMessage =
@@ -19,49 +21,23 @@ export type SignalMessage =
 /** Undelivered signals are worthless once stale — an offer that old is dead anyway. */
 const SIGNAL_TTL_MS = 30 * 1000;
 const MAX_MAILBOX = 60;
+const ROOM_TTL_SEC = Math.ceil(ROOM_TTL_MS / 1000);
+const PRESENCE_TTL_SEC = Math.ceil(ROOM_TTL_MS / 1000);
 
-type StoredRoom = {
-  room: RoomState;
-  touchedAt: number;
-  /** playerId -> messages waiting to be collected by that player. */
-  mailboxes: Map<string, { message: SignalMessage; at: number }[]>;
-  /** playerId -> last time they polled, used to show who is actually on the call. */
-  voicePresence: Map<string, number>;
-};
+const redis = Redis.fromEnv();
 
-// Anchored to globalThis rather than a plain module-level const, for two reasons
-// that both bite in practice:
-//
-//   1. Next.js bundles each route segment separately, so /api/room/[roomId] and
-//      /api/room/[roomId]/signal each get their OWN instance of this module. A
-//      module-level Map means the signalling route cannot see any room.
-//   2. In dev, editing a file reloads the module and would wipe every open room.
-//
-// globalThis is per-process, so both routes share one store and it survives
-// hot reloads.
-const globalStore = globalThis as unknown as { __voicePartyRooms?: Map<string, StoredRoom> };
-const rooms: Map<string, StoredRoom> = (globalStore.__voicePartyRooms ??= new Map());
+const roomKey = (roomId: string) => `room:${roomId}`;
+const mailboxKey = (roomId: string, playerId: string) => `mailbox:${roomId}:${playerId}`;
+const presenceKey = (roomId: string) => `presence:${roomId}`;
 
-function sweep(): void {
-  const cutoff = Date.now() - ROOM_TTL_MS;
-  rooms.forEach((entry, id) => {
-    if (entry.touchedAt < cutoff) rooms.delete(id);
-  });
+export async function readRoom(roomId: string): Promise<RoomState | null> {
+  return (await redis.get<RoomState>(roomKey(roomId))) ?? null;
 }
 
-export function readRoom(roomId: string): RoomState | null {
-  sweep();
-  return rooms.get(roomId)?.room ?? null;
-}
-
-export function writeRoom(room: RoomState): RoomState {
-  const existing = rooms.get(room.roomId);
-  rooms.set(room.roomId, {
-    room,
-    touchedAt: Date.now(),
-    mailboxes: existing?.mailboxes ?? new Map(),
-    voicePresence: existing?.voicePresence ?? new Map(),
-  });
+export async function writeRoom(room: RoomState): Promise<RoomState> {
+  // TTL refreshes on every write, so an active room stays alive and an
+  // abandoned one is cleaned up by Redis instead of a manual sweep.
+  await redis.set(roomKey(room.roomId), room, { ex: ROOM_TTL_SEC });
   return room;
 }
 
@@ -77,42 +53,46 @@ export function pushEvent(room: RoomState, text: string, type: EventLog['type'])
 
 // --------------------------------------------------------------- signalling
 
-export function enqueueSignal(roomId: string, message: SignalMessage): boolean {
-  const entry = rooms.get(roomId);
-  if (!entry) return false;
+export async function enqueueSignal(roomId: string, message: SignalMessage): Promise<boolean> {
+  const exists = await redis.exists(roomKey(roomId));
+  if (!exists) return false;
 
-  const box = entry.mailboxes.get(message.to) ?? [];
-  box.push({ message, at: Date.now() });
+  const key = mailboxKey(roomId, message.to);
+  await redis.rpush(key, JSON.stringify({ message, at: Date.now() }));
   // Drop the oldest if a player stops collecting, so one dead tab cannot grow
   // the mailbox without bound.
-  entry.mailboxes.set(message.to, box.slice(-MAX_MAILBOX));
-  entry.touchedAt = Date.now();
+  await redis.ltrim(key, -MAX_MAILBOX, -1);
+  await redis.expire(key, Math.ceil(SIGNAL_TTL_MS / 1000));
   return true;
 }
 
 /** Drains and returns everything waiting for this player. */
-export function drainSignals(roomId: string, playerId: string): SignalMessage[] {
-  const entry = rooms.get(roomId);
-  if (!entry) return [];
-
-  entry.touchedAt = Date.now();
-  entry.voicePresence.set(playerId, Date.now());
-
-  const box = entry.mailboxes.get(playerId) ?? [];
-  entry.mailboxes.set(playerId, []);
+export async function drainSignals(roomId: string, playerId: string): Promise<SignalMessage[]> {
+  const key = mailboxKey(roomId, playerId);
+  const [items] = await Promise.all([
+    redis.lrange<{ message: SignalMessage; at: number }>(key, 0, -1),
+    redis.del(key),
+    redis.hset(presenceKey(roomId), { [playerId]: Date.now() }),
+    redis.expire(presenceKey(roomId), PRESENCE_TTL_SEC),
+  ]);
 
   const fresh = Date.now() - SIGNAL_TTL_MS;
-  return box.filter((item) => item.at >= fresh).map((item) => item.message);
+  return items
+    .map((item) => (typeof item === 'string' ? (JSON.parse(item) as { message: SignalMessage; at: number }) : item))
+    .filter((item) => item.at >= fresh)
+    .map((item) => item.message);
 }
 
 /** Players who have polled recently, i.e. who are actually on the call. */
-export function getVoicePresence(roomId: string, withinMs = 6000): string[] {
-  const entry = rooms.get(roomId);
-  if (!entry) return [];
+export async function getVoicePresence(roomId: string, withinMs = 6000): Promise<string[]> {
+  const entries = await redis.hgetall<Record<string, number>>(presenceKey(roomId));
+  if (!entries) return [];
   const cutoff = Date.now() - withinMs;
-  return [...entry.voicePresence.entries()].filter(([, at]) => at >= cutoff).map(([id]) => id);
+  return Object.entries(entries)
+    .filter(([, at]) => Number(at) >= cutoff)
+    .map(([id]) => id);
 }
 
-export function clearVoicePresence(roomId: string, playerId: string): void {
-  rooms.get(roomId)?.voicePresence.delete(playerId);
+export async function clearVoicePresence(roomId: string, playerId: string): Promise<void> {
+  await redis.hdel(presenceKey(roomId), playerId);
 }

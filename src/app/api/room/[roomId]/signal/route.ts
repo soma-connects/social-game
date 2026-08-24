@@ -38,7 +38,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
     return NextResponse.json({ error: 'Malformed request body' }, { status: 400 });
   }
 
-  const room = readRoom(roomId);
+  const room = await readRoom(roomId);
   if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
 
   const playerId = String(body.playerId ?? '');
@@ -57,7 +57,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         // A player may only send as themselves, and only to someone in the room.
         if (raw.from !== playerId) continue;
         if (!room.players.some((p) => p.id === raw.to)) continue;
-        if (enqueueSignal(roomId, raw)) sent++;
+        if (await enqueueSignal(roomId, raw)) sent++;
       }
 
       return NextResponse.json({ sent });
@@ -67,16 +67,16 @@ export async function POST(request: Request, { params }: { params: { roomId: str
     // both "anything for me?" and "I am still on the call".
     case 'poll': {
       return NextResponse.json({
-        messages: drainSignals(roomId, playerId),
-        present: getVoicePresence(roomId),
+        messages: await drainSignals(roomId, playerId),
+        present: await getVoicePresence(roomId),
       });
     }
 
     case 'leave': {
-      clearVoicePresence(roomId, playerId);
+      await clearVoicePresence(roomId, playerId);
       for (const peer of room.players) {
         if (peer.id !== playerId) {
-          enqueueSignal(roomId, { kind: 'bye', from: playerId, to: peer.id });
+          await enqueueSignal(roomId, { kind: 'bye', from: playerId, to: peer.id });
         }
       }
       return NextResponse.json({ ok: true });

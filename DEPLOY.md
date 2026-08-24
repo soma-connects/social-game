@@ -1,5 +1,46 @@
 # Deploying
 
+## Vercel (current)
+
+GCP billing got interrupted, so Vercel is the deployment target for now. The
+game's room/signalling state used to live in one process's memory, which only
+worked because Cloud Run was pinned to a single container — Vercel gives no
+such pinning, so that state was moved to Redis (`src/lib/server/roomServer.ts`,
+via `@upstash/redis`). Every server instance now reads/writes the same store,
+so this works correctly on Vercel's stateless functions (and, as a side
+effect, removes the old single-instance requirement from the Cloud Run path
+below too).
+
+Setup:
+
+1. Import the repo into a Vercel project (zero-config — it's a standard
+   Next.js app, `next build` / `next start`).
+2. Add a Redis database: **Storage → Marketplace → Upstash → Redis** in the
+   Vercel dashboard, and connect it to this project. That injects
+   `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` into the project's
+   environment automatically — `Redis.fromEnv()` picks them up with no extra
+   config.
+3. Deploy. No instance-count flags needed.
+
+For local dev, copy the same two env vars into `.env.local` (pull them from
+the Vercel project, or from Upstash's own dashboard if you created the
+database directly). Without them, `npm run dev` still boots and pages render,
+but any `/api/room/*` call will fail — the routes need a real Redis instance
+to talk to.
+
+## Cloud Run (on hold)
+
+Kept in case billing gets sorted out and GCP is worth returning to — the
+`Dockerfile`, `.gcloudignore` and the steps below still work. Set the same
+`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` env vars on the Cloud
+Run service (`--set-env-vars` or via Secret Manager); the old
+`--min-instances=1 --max-instances=1` pin is no longer required since state
+lives in Redis now, not in the container:
+
+```bash
+gcloud run deploy voice-party-roadmap-game --source . --region us-central1 --allow-unauthenticated
+```
+
 ## The turn loop
 
 The board is the main game; the voice rounds are the qualifying mini-games that
@@ -21,25 +62,14 @@ state, never from the client, so a PitchBird score cannot be graded on the voice
 scale.
 
 
-## Cloud Run must run as a single instance
+## Room state lives in Redis
 
-Rooms, the event feed and the WebRTC signalling mailboxes all live in the memory
-of one container. There is no database. If Cloud Run scales to two instances,
-players get load-balanced across them and end up in different copies of the same
-room — one player rolls the dice and nobody else sees it.
-
-Deploy with the instance count pinned:
-
-```bash
-gcloud run deploy voice-party-roadmap-game --source . --region us-central1 --allow-unauthenticated --min-instances=1 --max-instances=1
-```
-
-`--min-instances=1` also keeps the container warm, so open rooms survive between
-turns instead of being wiped by a scale-to-zero.
-
-Known limit: a container restart (a redeploy, or a crash) still drops every open
-room. Players see "ROOM … IS NOT OPEN" and start a new one. Moving room state to
-Firestore or Redis is the fix if that becomes a problem.
+Rooms, the event feed and the WebRTC signalling mailboxes are all stored in
+Redis (`src/lib/server/roomServer.ts`), keyed by room id with a 6-hour TTL
+that refreshes on every write. See the **Vercel** section above for the env
+vars this needs. A room only disappears if it goes untouched for 6 hours —
+a redeploy or a crashed instance no longer drops open rooms, since nothing
+important lives in the container/function itself anymore.
 
 ## Voice chat and TURN
 

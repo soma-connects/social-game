@@ -1,58 +1,68 @@
 # Deploying
 
-## Vercel (current)
+## Screen budget during a round
 
-GCP billing got interrupted, so Vercel is the deployment target for now. The
-game's room/signalling state used to live in one process's memory, which only
-worked because Cloud Run was pinned to a single container — Vercel gives no
-such pinning, so that state was moved to Redis (`src/lib/server/roomServer.ts`,
-via `@upstash/redis`). Every server instance now reads/writes the same store,
-so this works correctly on Vercel's stateless functions (and, as a side
-effect, removes the old single-instance requirement from the Cloud Run path
-below too).
+A phone screen is the constraint, not the desktop layout. During an attempt the
+main column must stay at roughly one screen, so anything not usable *in that
+moment* is collapsed:
 
-Setup:
+- `SocialVoicePanel` renders a one-line meter for the performer. Every control
+  in it is `disabled={isPerformer}` — showing the full panel put ~500px of dead
+  UI under the thing they are trying to do.
+- `VoiceCallBar` takes `compact` during an attempt. Nobody joins or leaves a
+  call mid-round.
+- The board is behind `BoardPeek`, collapsed by default outside `roadmap_turn`.
+  It is ~600px and nobody looks at the map while somebody is speaking.
 
-1. Import the repo into a Vercel project (zero-config — it's a standard
-   Next.js app, `next build` / `next start`).
-2. Add a Redis database: **Storage → Marketplace → Upstash → Redis** in the
-   Vercel dashboard, then **Connect to Project**. That injects `KV_REST_API_URL`
-   and `KV_REST_API_TOKEN` into the project's environment automatically —
-   `src/lib/server/roomServer.ts` reads those (or the plain
-   `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` names, if you created
-   the database directly on upstash.com instead) with no extra config.
-3. Deploy. No instance-count flags needed.
+Before adding anything to a live phase, measure it at 375px wide. The layout was
+1.9 screens before this pass.
 
-For local dev, copy the same two env vars into `.env.local` — see
-`.env.local.example` for both naming schemes. Without them, `npm run dev`
-still boots and pages render, but any `/api/room/*` call will fail — the
-routes need a real Redis instance to talk to.
+## Teams
 
-## Cloud Run (on hold)
+Optional, off by default. Everyone still performs solo — the energy comes from
+one person on the mic with the room watching, and splitting that in half would
+waste it. What teams change is who you perform *for*:
 
-Kept in case billing gets sorted out and GCP is worth returning to — the
-`Dockerfile`, `.gcloudignore` and the steps below still work. Set the same
-Redis env vars (see `.env.local.example`) on the Cloud Run service
-(`--set-env-vars` or via Secret Manager); the old
-`--min-instances=1 --max-instances=1` pin is no longer required since state
-lives in Redis now, not in the container:
+- Points feed a shared crew total; the finish line is won by a crew, with the
+  player who crossed it credited.
+- `alternateByTeam` weaves the roll order so the sides swap instead of one crew
+  rolling three times in a row.
+- **Judging crosses the divide** — teammates would wave each other through, so
+  only the opposing crew can pass/fail you. Reactions stay open to everyone;
+  cheering your own crew on is the point of having one.
+- Late joiners land on the smaller crew.
 
-```bash
-gcloud run deploy voice-party-roadmap-game --source . --region us-central1 --allow-unauthenticated
-```
+`MAX_PLAYERS` is 6. The voice call is a full mesh, so that is 15 peer
+connections — about the ceiling for mobile. Going higher needs an SFU, not a
+bigger constant.
+
+## Presence
+
+Every client heartbeats every 8s; the server drops a player after 25s of
+silence (`PRESENCE_TIMEOUT_MS`) and calls `unstickPhase`, which skips their
+mini-game turn, stops waiting for their shop confirmation, or removes them from
+the roll order. `pagehide` also fires a `sendBeacon` so a deliberate close is
+noticed immediately. Without this a closed tab is indistinguishable from a slow
+player and the round hangs forever. If the host drops, the badge is handed to
+the first remaining player.
 
 ## The turn loop
 
 The board is the main game; the voice rounds are the qualifying mini-games that
-feed it. Each turn runs:
+feed it. The loop is **round-based**, not per-player:
 
-1. **Mini-game** — Voice Arena or PitchBird, picked at random per turn from
-   whatever the host enabled in the lobby.
-2. **Points + movement** — the score is banked as points *and* converted into
-   board steps. The dice is a reveal of what was earned, not a random roll.
-3. **Buff shop** — points are the currency, so buying is a trade-off against
-   staying top of the table.
-4. **Board move** — tile effects, dares, powerups.
+1. **Mini-game, one player at a time** — every player takes a turn (Voice Arena
+   or PitchBird), each followed by a roast intermission. Results accumulate in
+   `roundResults`.
+2. **Buff shop, everyone together** — all players buy simultaneously and press
+   done; the board opens when the last one is ready (`shopReady`).
+3. **Board, best mini-game score rolls first** — `rollOrder` is sorted by that
+   round's performance, so winning the mini-game buys you first move as well as
+   the most steps.
+4. When the roll order is exhausted, `startNextRound` wipes round state and
+   returns to step 1.
+
+The dice is a reveal of what the mini-game earned, never a random roll.
 
 Score → steps lives in `performanceToSteps` in `src/lib/gameRules.ts`. The two
 mini-games score on different scales (`MINIGAME_MAX_SCORE`), so both are
@@ -62,14 +72,48 @@ state, never from the client, so a PitchBird score cannot be graded on the voice
 scale.
 
 
-## Room state lives in Redis
+## Room state lives in Firestore
 
-Rooms, the event feed and the WebRTC signalling mailboxes are all stored in
-Redis (`src/lib/server/roomServer.ts`), keyed by room id with a 6-hour TTL
-that refreshes on every write. See the **Vercel** section above for the env
-vars this needs. A room only disappears if it goes untouched for 6 hours —
-a redeploy or a crashed instance no longer drops open rooms, since nothing
-important lives in the container/function itself anymore.
+Rooms, the event feed and (cached in-process, per instance) the WebRTC
+signalling mailboxes are backed by Firestore (`src/lib/server/roomServer.ts`,
+via `adminDb` from `src/lib/firebase/server.ts`). `writeRoom` uses a
+transaction keyed on a `rev` counter, so two overlapping requests can't
+silently clobber each other — the loser gets a `RoomConflictError` and the
+route replays the action against fresh state. This is what makes the app safe
+to run across multiple stateless instances (Vercel serverless functions,
+or Cloud Run scaled past one container) — there's no in-memory single-instance
+requirement anymore.
+
+Private per-room data (trivia answers, player auth tokens, hidden mines) lives
+in a `rooms/{id}/private` subcollection that `firestore.rules` denies browsers
+any access to — see that file.
+
+### Required env vars
+
+Firebase Admin needs a service account (`NEXT_PUBLIC_FIREBASE_PROJECT_ID`,
+`FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` — see the credential handling
+in `src/lib/firebase/server.ts` for exact formatting pitfalls), plus the
+client-side `NEXT_PUBLIC_FIREBASE_*` config values for the Firebase Web SDK.
+Both sets must be present in whatever's deploying this — Vercel project
+settings, or `--set-env-vars` / Secret Manager on Cloud Run.
+
+### Vercel
+
+Zero-config Next.js import works as-is. Add the Firebase env vars above (plus
+`GEMINI_API_KEY` for the AI Game Master, and `CLOUDFLARE_TURN_API_TOKEN` /
+`CLOUDFLARE_TURN_KEY_ID` if TURN relay is enabled — see **Voice chat and
+TURN** below) under Project → Settings → Environment Variables, then deploy.
+
+### Cloud Run
+
+Still works if GCP is ever the target again — `Dockerfile` and
+`.gcloudignore` are kept up to date. The old `--min-instances=1
+--max-instances=1` pin is no longer required since state lives in Firestore,
+not the container:
+
+```bash
+gcloud run deploy voice-party-roadmap-game --source . --region us-central1 --allow-unauthenticated
+```
 
 ## Voice chat and TURN
 
@@ -90,6 +134,43 @@ const ICE_SERVERS: RTCIceServer[] = [
 
 TURN relays media, so it costs bandwidth. Managed options (Twilio, Metered,
 Cloudflare Calls) have free tiers that comfortably cover a party game.
+
+## Karaoke (solfège)
+
+`src/lib/solfege.ts` holds the theory and scoring; `SolfegeGame.tsx` runs the
+rounds. Uses no speech recognition at all — there is nothing to transcribe, only
+a frequency to measure — which is why it scores accurately where the Voice Arena
+cannot.
+
+Three rules that must not be broken:
+
+1. **Relative, never absolute.** The tonic is played, then an interval is asked
+   for. Naming an absolute pitch would require perfect pitch and fail everyone.
+2. **The tonic is picked from the player's measured range** (`getRange()`), so a
+   bass and a soprano are set the same task rather than one impossible one.
+3. **Octave errors are forgiven** — `centsError` folds the ratio into one octave.
+   Singing the right note an octave down is musically correct, and the detector
+   itself occasionally reports the wrong octave.
+
+**The target note is played, not just the tonic.** Playing only the key turned
+each round into an ear-training exam — work out where So sits above Do, then
+produce it. That is a musician's task. Hearing the note makes it imitation.
+
+**The instruction is the interface, not the meter.** A tuning needle is a
+musician's tool; the player needs "GO HIGHER" in words, large. The meter runs
+vertically (pitch is up and down, not left and right) over ±300 cents, and the
+displayed marker is smoothed separately from the scored samples — scoring wants
+the raw signal, the eye needs something that does not vibrate.
+
+Scored in cents (a semitone is 100), on sustain rather than instant hit: what
+counts is the share of the hold window spent on pitch, after a `GRACE_SECONDS`
+lead-in that is not graded because nobody lands on a note instantly. `playReferenceTone`
+deliberately ignores the SFX mute — it is the question being asked, not a sound
+effect, and muting party noise must not silently make the game impossible.
+
+**This is the karaoke engine.** A song is a pitch contour over time; a solfège
+round is that contour with one point. Adding real melodies means feeding these
+same functions a sequence of targets, not writing new scoring.
 
 ## PitchBird flight model
 

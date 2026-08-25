@@ -21,7 +21,7 @@ export default function HomePage() {
     setBusy(true);
     setError(null);
     const newCode = roomStore.generateRoomCode();
-    const room = await roomStore.createRoom(newCode, hostName.trim() || 'Chief Boss');
+    const room = await roomStore.createRoom(newCode, hostName.trim() || 'Chief Boss', 'board_game');
     setBusy(false);
 
     if (!room) {
@@ -52,9 +52,9 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden bg-partyDark">
-      {/* Ambient Arcade Neon Glow Blobs */}
-      <div className="absolute top-1/4 left-1/10 w-80 h-80 bg-purple-600/30 blur-3xl rounded-full pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/10 w-96 h-96 bg-partyPink/25 blur-3xl rounded-full pointer-events-none" />
+      {/* Ambient Outer Space Cosmic Blobs */}
+      <div className="absolute top-1/4 left-1/10 w-80 h-80 bg-cyan-500/20 blur-3xl rounded-full pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/10 w-96 h-96 bg-partyYellow/15 blur-3xl rounded-full pointer-events-none" />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/15 blur-3xl rounded-full pointer-events-none" />
 
       {/* Main Container */}
@@ -88,8 +88,8 @@ export default function HomePage() {
             </span>
           </h1>
 
-          <p className="text-gray-300 text-sm sm:text-base max-w-lg mx-auto">
-            High-speed voice challenges in <span className="text-partyYellow font-extrabold">Hausa, Igbo, Yoruba</span> & world languages! Win mini-games, drop traps & roll 3D dice to victory!
+          <p className="text-gray-300 text-sm sm:text-base max-w-lg mx-auto px-4 sm:px-0">
+            High-speed voice challenges in <span className="text-partyYellow font-extrabold">English</span> and other languages! Win mini-games, drop traps & roll 3D dice to victory!
           </p>
         </div>
 
@@ -104,7 +104,7 @@ export default function HomePage() {
         </div>
 
         {/* Home Glassmorphic Action Card (Tight Spacing to Title) */}
-        <div className="glass-card rounded-3xl p-6 sm:p-8 border border-white/20 space-y-6 text-left shadow-2xl relative overflow-hidden backdrop-blur-xl bg-slate-900/60 max-w-xl mx-auto">
+        <div className="glass-card rounded-3xl p-6 sm:p-8 border border-white/10 space-y-6 text-left shadow-2xl relative overflow-hidden max-w-xl mx-auto">
           {/* Ambient Inner Card Glow */}
           <div className="absolute -top-24 -right-24 w-48 h-48 bg-partyYellow/20 blur-2xl rounded-full pointer-events-none" />
 
@@ -121,11 +121,12 @@ export default function HomePage() {
             />
           </div>
 
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
             <button
               onClick={handleCreateRoom}
               disabled={busy}
-              className="w-full bg-gradient-to-r from-partyPink via-partyPurple to-terracotta text-white font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all transform hover:scale-[1.03] active:scale-95 disabled:opacity-50 disabled:hover:scale-100 shadow-2xl glow-pink"
+              className="w-full bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all transform hover:scale-[1.03] active:scale-95 disabled:opacity-50 disabled:hover:scale-100 shadow-2xl glow-yellow"
             >
               <Play className="w-5 h-5 fill-current" />
               <span>{busy ? 'WORKING…' : 'CREATE NEW ROOM'}</span>

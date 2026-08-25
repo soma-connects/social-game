@@ -1,3 +1,5 @@
+import type { RoomVibeId } from './roomVibes';
+
 export type MapTheme = 'forest' | 'village' | 'desert' | 'snow' | 'volcano' | 'space' | 'cyberpunk';
 
 export type AvatarExpression = 'normal' | 'talking' | 'surprised' | 'sweating' | 'laughing';
@@ -21,16 +23,53 @@ export type AvatarStyle = {
   unlockCost?: number;
 };
 
+export type TeamId = 'red' | 'blue';
+
 export type Player = {
   id: string;
+  /**
+   * Durable Firebase Auth uid, verified server-side at join.
+   *
+   * `id` above is per-room and dies with the room; this survives across rooms
+   * and sessions, and is what match history, progression and purchases hang
+   * off. Optional because the game stays fully playable when auth is
+   * unavailable — those players simply cannot be aggregated over time.
+   */
+  uid?: string;
   name: string;
   avatar: AvatarStyle;
   score: number;
+  /** Only set when the room is in team mode. */
+  teamId?: TeamId;
+  /**
+   * Epoch ms of this player's last heartbeat. A player who closes the tab stops
+   * updating it, which is the only way to tell them apart from someone thinking.
+   */
+  lastSeen?: number;
+  /** Set when they left on purpose, or were dropped for going quiet. */
+  connected?: boolean;
   /** Social progression, mostly earned from making the room react. */
   level?: number;
   vibeScore?: number;
   badges?: string[];
   boardPosition: number;
+  /**
+   * Survival stat, separate from `score`. Bombing the task you were given costs
+   * one; running out sends you back to the launchpad with a fresh bar rather
+   * than knocking you out, so nobody is ever sat watching the rest play.
+   * Undefined reads as STARTING_LIVES, so old rooms need no migration.
+   */
+  lives?: number;
+  /**
+   * Knocked out of the current match. Only the AI Master game sets this — the
+   * board respawns instead, because a board match is long enough that sitting
+   * one out means sitting out the evening.
+   */
+  eliminated?: boolean;
+  /** Set when a player is paused at a branching node with remaining dice steps */
+  remainingSteps?: number;
+  hasShield?: boolean;
+  skipNextTurn?: boolean;
   inventory: string[];
   isHost: boolean;
   isReady: boolean;
@@ -38,7 +77,7 @@ export type Player = {
   ping?: number;
 };
 
-export type LanguageCode = 'hausa' | 'igbo' | 'yoruba' | 'pidgin' | 'spanish' | 'french' | 'japanese' | 'korean';
+export type LanguageCode = 'hausa' | 'yoruba' | 'english' | 'spanish' | 'french' | 'japanese' | 'korean' | 'spelling_bee';
 
 export type ChallengeType = 'language' | 'math' | 'trap';
 
@@ -76,7 +115,7 @@ export type EventLog = {
   type: 'buff' | 'debuff' | 'dare' | 'point' | 'system' | 'social';
 };
 
-export type PowerupType = 'boost' | 'rewind' | 'shield' | 'dare_gun' | 'freeze' | 'bomb';
+export type PowerupType = 'boost' | 'rewind' | 'shield' | 'dare_gun' | 'freeze' | 'bomb' | 'mine';
 
 export type PowerupItem = {
   id: PowerupType;
@@ -86,12 +125,173 @@ export type PowerupItem = {
   count: number;
 };
 
-export type TileNodeType = 'normal' | 'buff' | 'debuff' | 'dare' | 'mystery' | 'bonus' | 'trap';
+export type TileNodeType = 'normal' | 'buff' | 'debuff' | 'dare' | 'mystery' | 'bonus' | 'trap' | 'duel' | 'empty';
 
-export type GamePhase = 'lobby' | 'qualifying_voice' | 'powerup_shop' | 'roadmap_turn' | 'peer_dare' | 'pitch_bird' | 'roast_intermission' | 'game_over';
+export type BoardNode = {
+  id: number;
+  type: TileNodeType;
+  next: number[];
+  x: number;
+  y: number;
+};
+
+export type GamePhase =
+  | 'lobby'
+  | 'qualifying_voice'
+  | 'powerup_shop'
+  | 'roadmap_turn'
+  | 'branch_choice'
+  | 'duel_challenge'
+  | 'peer_dare'
+  | 'pitch_bird'
+  | 'solfege'
+  | 'spelling_bee'
+  | 'truth_or_bluff'
+  | 'story_builder'
+  | 'debate'
+  | 'guess_the_voice'
+  | 'roast_intermission'
+  | 'team_battle_select'
+  | 'team_battle_intro'
+  | 'team_battle_recap'
+  | 'trivia_showdown'
+  | 'asteroid_defense'
+  | 'chess_match'
+  | 'ludo_match'
+  | 'ai_master_round'
+  | 'game_over';
 
 /** The qualifying mini-games that feed the main board game. */
-export type MiniGameId = 'voice_arena' | 'pitch_bird';
+export type MiniGameId = 'voice_arena' | 'pitch_bird' | 'solfege' | 'spelling_bee' | 'truth_or_bluff' | 'story_builder' | 'debate' | 'guess_the_voice' | 'trivia_showdown' | 'asteroid_defense';
+
+/** State for a Truth or Bluff round. */
+export type TruthBluffState = {
+  performerId: string;
+  prompt: string;
+  claims: string[];
+  /**
+   * Which claim was the lie. Absent until the reveal — the whole room
+   * subscribes to this document, so publishing it early hands everyone the
+   * answer. Held server-side in the room's private state until then.
+   */
+  lieIndex?: number | null;
+  votes: Record<string, number>;
+  phase: 'prompting' | 'speaking' | 'voting' | 'reveal';
+  revealedAt?: number;
+};
+
+/** State for a Story Builder round. */
+export type StoryBuilderState = {
+  prompt: string;
+  story: Array<{ playerId: string; sentence: string }>;
+  currentPlayerIndex: number;
+  phase: 'prompting' | 'speaking' | 'voting' | 'reveal';
+  votes: Record<string, string>; // voterId -> playerId they voted for funniest
+  revealedAt?: number;
+};
+
+/** State for a Debate round. */
+export type DebateState = {
+  player1Id: string;
+  player2Id: string;
+  topic: string;
+  side1: string;
+  side2: string;
+  phase: 'intro' | 'p1_speaking' | 'p2_speaking' | 'voting' | 'reveal';
+  votes: Record<string, number>; // voterId -> 1 or 2
+  revealedAt?: number;
+  /**
+   * Set when a trap tile started this debate. The loser of a sudden-death round
+   * takes a real setback, so the server has to know it was a trap rather than
+   * an ordinary scheduled debate.
+   */
+  source?: 'trap';
+};
+
+/** State for a Guess the Voice round. */
+export type GuessTheVoiceState = {
+  performerId: string;
+  prompt: string;
+  audioBlobUrl: string | null;
+  phase: 'prompting' | 'recording' | 'playback' | 'voting' | 'reveal';
+  votes: Record<string, string>; // voterId -> guessedPlayerId
+  revealedAt?: number;
+};
+
+/** State for a Trivia Showdown round. */
+export type TriviaState = {
+  question: string;
+  /**
+   * Answer and fun fact are withheld until the reveal, for the same reason as
+   * the Truth or Bluff lie: the room reads this document live, so shipping the
+   * answer alongside the question makes the round unwinnable to lose. Grading
+   * happens server-side via the `trivia_answer` action.
+   */
+  answer?: string;
+  funFact?: string;
+  buzzedPlayerId: string | null;
+  phase: 'asking' | 'answering' | 'reveal';
+  winnerId: string | null;
+  /** Set at the reveal so the UI can say what was actually heard. */
+  lastAnswerText?: string;
+  revealedAt?: number;
+};
+
+/** What kind of task the AI Master set this round. */
+export type AiMasterCategory = 'truth' | 'dare' | 'bluff' | 'trivia' | 'story';
+
+/** A bribe offered to the AI Master, kept public so the room sees who tried. */
+export type AiMasterBribe = {
+  playerId: string;
+  playerName: string;
+  amount: number;
+  /** Skip the challenge, buy a life back, or push it onto somebody else. */
+  ask: 'skip' | 'life' | 'redirect';
+  /** Null while the host is still deciding. */
+  accepted: boolean | null;
+  hostLine?: string;
+};
+
+/**
+ * State for the AI Master game.
+ *
+ * One player is called out per round, answers by voice, and the rest of the
+ * room judges them. Unlike the board mini-games this is the whole match rather
+ * than a qualifying round, so the life bar and the elimination live here.
+ */
+export type AiMasterState = {
+  round: number;
+  targetId: string;
+  challenge: string;
+  category: AiMasterCategory;
+  phase: 'announcing' | 'responding' | 'voting' | 'verdict';
+  /** What the target said, as heard by the recogniser. */
+  response?: string;
+  /** voterId -> their verdict. Eliminated players still get a say. */
+  votes: Record<string, 'pass' | 'fail'>;
+  passed?: boolean | null;
+  /** The host's line for this beat — shown on screen and spoken aloud. */
+  hostLine?: string;
+  /**
+   * Who the host is currently soft on, and who it is out to get.
+   *
+   * A host that treats everyone identically is a rules engine. The bias is
+   * public and shifts over a session, so it reads as a bit rather than a bug.
+   */
+  favorId?: string | null;
+  grudgeId?: string | null;
+  bribes?: AiMasterBribe[];
+  revealedAt?: number;
+};
+
+/** A small structured event for the Session Memory Service (powers Who Said It? later). */
+export type SessionMemoryEvent = {
+  playerId: string;
+  playerName: string;
+  category: 'truth_bluff' | 'fun_fact' | 'story' | 'debate' | 'icebreaker';
+  text: string;
+  timestamp: number;
+};
 
 /** What a finished mini-game earned the player this turn. */
 export type TurnResult = {
@@ -102,6 +302,87 @@ export type TurnResult = {
   performance: number;
   /** Board steps this buys — what the dice will land on. */
   steps: number;
+};
+
+/** One player's mini-game result within the current round. */
+export type RoundResult = TurnResult & {
+  playerId: string;
+  playerName: string;
+  /** Cleared once they have rolled, so a round cannot be rolled twice. */
+  rolled?: boolean;
+};
+
+/**
+ * A live glimpse of the performer's mini-game, pushed by whoever is playing so
+ * the rest of the room can follow along instead of staring at a "please wait".
+ *
+ * Deliberately tiny and declarative rather than a mirrored canvas: the room is
+ * driven by ~1.5s polling, so streaming frames would be a slideshow. What
+ * spectators actually need is what the performer is being asked to do and how
+ * it is going.
+ */
+export type LiveMiniGameState = {
+  playerId: string;
+  game: MiniGameId;
+  /** Set server-side, so a stale payload can be spotted and hidden. */
+  at?: number;
+  /** The challenge itself — the word, the note, the gate. */
+  prompt?: string;
+  /** Secondary line: phonetic, translation, instruction. */
+  detail?: string;
+  /** Running score during the attempt. */
+  score?: number;
+  /** 0..1 through the attempt, for a progress bar. */
+  progress?: number;
+  /** What is happening right now — transcript, "GO HIGHER", "CRASHED". */
+  status?: string;
+  /** Whether it is currently going well, for colour. */
+  good?: boolean;
+};
+
+/** Every dramatic thing the board can do to somebody. */
+export type BoardEventKind =
+  | 'wormhole'
+  | 'asteroid'
+  | 'shield_block'
+  | 'shield_gain'
+  | 'supply_drop'
+  | 'dare'
+  | 'duel'
+  | 'finish'
+  | 'boost'
+  | 'rewind'
+  | 'freeze'
+  | 'bomb'
+  | 'shield_up';
+
+/**
+ * The last thing that happened on the board, broadcast to the whole room.
+ *
+ * Tile effects used to live in the rolling player's local component state, so
+ * the wormhole that flung somebody across the map was invisible to everyone
+ * else — the five people watching saw a token teleport with no explanation.
+ * The board is the shared screen; what happens on it has to be shared state.
+ *
+ * Clients animate whenever `id` changes, which makes this naturally idempotent
+ * across the repeated snapshots a subscription delivers.
+ */
+export type BoardEvent = {
+  id: string;
+  kind: BoardEventKind;
+  playerId: string;
+  playerName: string;
+  /** Set when one player did something to another. */
+  targetPlayerId?: string;
+  targetPlayerName?: string;
+  banner: string;
+  message: string;
+  /** Board nodes, so the animation can fly a token along the right path. */
+  fromNode?: number;
+  toNode?: number;
+  /** Coins gained or lost, when the event moved somebody's score. */
+  coins?: number;
+  at: number;
 };
 
 export type SocialReactionId = 'laugh' | 'fire' | 'almost' | 'drama';
@@ -130,8 +411,22 @@ export type SocialRound = {
 
 export type RoomState = {
   roomId: string;
+  /**
+   * Bumped by the server on every write. Used to detect two requests mutating
+   * the room at once; clients should ignore it.
+   */
+  rev?: number;
   hostId: string;
   phase: GamePhase;
+  /**
+   * Identifies the current match for the permanent `matches` record. Minted
+   * when the room leaves the lobby and cleared when it returns, so it doubles
+   * as "a match is in progress".
+   */
+  matchId?: string | null;
+  matchStartedAt?: number | null;
+  /** Guards against writing the same match summary twice. */
+  matchArchived?: boolean;
   players: Player[];
   activePlayerIndex: number;
   selectedLanguages: LanguageCode[];
@@ -146,14 +441,81 @@ export type RoomState = {
     passed?: boolean;
   } | null;
   winner: Player | null;
+  /** The high-level mode the room is running in. */
+  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master';
+  /** The social vibe the host picked, steering the AI Master's tone and mini-game mix. Undefined reads as classic_party. */
+  roomVibe?: RoomVibeId;
+  /** Set instead of a solo winner when the room is in team mode. */
+  winningTeam?: TeamId | null;
+  /** Cumulative scores in Team Battle mode. */
+  teamScores?: Record<TeamId, number>;
+  /** State specific to Team Battle mode. */
+  teamBattleState?: {
+    selectedGames: MiniGameId[];
+    currentGameIndex: number;
+    currentRound: number;
+    seriesLength: number;
+  } | null;
   theme?: MapTheme;
   events?: EventLog[];
   /** Mini-games the host enabled for this match. */
   enabledMiniGames?: MiniGameId[];
   /** Which mini-game the active player is facing this turn. */
   currentMiniGame?: MiniGameId;
+  /**
+   * The last few mini-games picked, newest last.
+   *
+   * Feeds the repeat rule in pickMiniGame. Uniform random will cheerfully serve
+   * the same game four turns in a row, which a room reads as a broken shuffle
+   * rather than bad luck.
+   */
+  recentMiniGames?: MiniGameId[];
   /** Result of this turn's mini-game, cleared once the player has moved. */
   turnResult?: TurnResult | null;
   /** Laugh meter and peer judge votes for the active voice-related round. */
   socialRound?: SocialRound | null;
+  /** What the performer is doing right now, for spectators. */
+  liveState?: LiveMiniGameState | null;
+  /** The last thing the board did to somebody, for the whole room to watch. */
+  boardEvent?: BoardEvent | null;
+  /**
+   * Epoch ms by which the active player must roll.
+   *
+   * Presence pruning only catches players who left. Somebody who is still
+   * connected but has wandered off holds the dice indefinitely, and the other
+   * five have no way to move the game on.
+   */
+  rollDeadline?: number | null;
+
+  // ── Round-based loop ──────────────────────────────────────────────────────
+  // A round is: every player takes the mini-game one at a time, then everyone
+  // shops together, then everyone rolls — best mini-game score rolling first.
+  roundNumber?: number;
+  /** Mini-game results for the round in progress, one per player who has played. */
+  roundResults?: RoundResult[];
+  /** Player ids in roll order, best mini-game performance first. */
+  rollOrder?: string[];
+  /** How far through rollOrder the board phase has got. */
+  rollIndex?: number;
+  /** Players who have finished buying this round. */
+  shopReady?: string[];
+
+  /** Truth or Bluff round state (active during truth_or_bluff phase). */
+  truthBluffState?: TruthBluffState | null;
+  /** Story Builder state. */
+  storyBuilderState?: StoryBuilderState | null;
+  /** Debate state. */
+  debateState?: DebateState | null;
+  /** Trivia state. */
+  triviaState?: TriviaState | null;
+  /** Guess the Voice state. */
+  guessTheVoiceState?: GuessTheVoiceState | null;
+  /** Chess room state. */
+  chessState?: import('./chess/chessTypes').ChessRoomState | null;
+  /** Ludo room state. */
+  ludoState?: import('./ludo/ludoTypes').LudoRoomState | null;
+  /** AI Master game state. */
+  aiMasterState?: AiMasterState | null;
+  /** Session memory — small structured events for Who Said It? and AI callbacks. */
+  sessionMemory?: SessionMemoryEvent[];
 };

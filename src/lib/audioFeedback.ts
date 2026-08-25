@@ -27,6 +27,50 @@ class AudioFeedbackEngine {
     return this.isMuted;
   }
 
+  /**
+   * Plays a clean reference pitch for the karaoke rounds.
+   *
+   * Deliberately ignores the SFX mute: this is not a sound effect, it is the
+   * question being asked. Muting party noises must not silently turn a
+   * relative-pitch game into an impossible perfect-pitch one.
+   *
+   * Returns a stop handle so a held drone can be cut when the round ends.
+   */
+  public playReferenceTone(freq: number, seconds = 1.2): () => void {
+    const ctx = this.getContext();
+    if (!ctx || !Number.isFinite(freq) || freq <= 0) return () => {};
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    // Triangle carries a clearer sense of pitch than sine without the harsh
+    // upper harmonics of a saw, which smear the fundamental people sing back.
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, now);
+
+    // Soft attack and release — a hard edge makes the note hard to internalise.
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.06);
+    gain.gain.setValueAtTime(0.25, now + seconds - 0.15);
+    gain.gain.linearRampToValueAtTime(0, now + seconds);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + seconds + 0.05);
+
+    return () => {
+      try {
+        gain.gain.cancelScheduledValues(ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.08);
+        osc.stop(ctx.currentTime + 0.1);
+      } catch {
+        /* already stopped */
+      }
+    };
+  }
+
   // 1. Nollywood Dramatic Brass Stab
   public playNollywoodBrass() {
     if (this.isMuted) return;
@@ -320,6 +364,34 @@ class AudioFeedbackEngine {
     oscGain.connect(ctx.destination);
     osc.start(now);
     osc.stop(now + 0.35);
+  }
+
+  // 12. Pop FX
+  public playPop() {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(400, now);
+    osc.frequency.exponentialRampToValueAtTime(800, now + 0.05);
+
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.05);
+  }
+
+  public playTap() {
+    this.playPop();
   }
 }
 

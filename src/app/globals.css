@@ -3,54 +3,48 @@
 @tailwind utilities;
 
 :root {
-  --background: #0B0E1B;
+  --background: #0d1117;
   --foreground: #F8FAFC;
   --terracotta: #FF5722;
-  --emerald: #00E676;
-  --yellow: #FFD000;
-  --purple: #8A2BE2;
+  --emerald: #10B981;
+  --yellow: #FFD166;
+  --cyan: #58A6FF;
 }
 
 body {
   color: var(--foreground);
-  background: var(--background);
+  background: #0d1117;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   min-height: 100vh;
   overflow-x: hidden;
   position: relative;
 }
 
-/* Ankara & Adire Geometric Subtle Pattern Background */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.06;
-  background-image: radial-gradient(#FFD000 1px, transparent 1px), radial-gradient(#FF5722 1px, #0B0E1B 1px);
-  background-size: 40px 40px;
-  background-position: 0 0, 20px 20px;
+/* Starfield is now rendered via <StarfieldCanvas /> — no CSS pseudo-element needed. */
+
+@keyframes cosmicPulse {
+  0% { transform: scale(1); opacity: 0.2; }
+  100% { transform: scale(1.03); opacity: 0.3; }
 }
 
-/* Glassmorphism Cards */
+/* Transparent Glassmorphism Cards — lets the starfield show through */
 .glass-card {
-  background: rgba(22, 27, 51, 0.82);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
 }
 
 .glass-pill {
-  background: rgba(255, 255, 255, 0.09);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* Localized Color Glows */
+/* Localized Cosmic Color Glows */
 .glow-yellow {
-  box-shadow: 0 0 24px rgba(255, 208, 0, 0.5);
+  box-shadow: 0 0 24px rgba(255, 209, 102, 0.5);
 }
 
 .glow-terracotta {
@@ -58,23 +52,27 @@ body::before {
 }
 
 .glow-emerald {
-  box-shadow: 0 0 24px rgba(0, 230, 118, 0.5);
+  box-shadow: 0 0 24px rgba(16, 185, 129, 0.5);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 24px rgba(0, 240, 255, 0.5);
 }
 
 .glow-purple {
-  box-shadow: 0 0 24px rgba(138, 43, 226, 0.5);
+  box-shadow: 0 0 24px rgba(0, 240, 255, 0.5);
 }
 
 /* Audio Wave Ring Animation for Avatar Frames */
 @keyframes wavePulse {
   0% {
-    box-shadow: 0 0 0 0px rgba(0, 230, 118, 0.7);
+    box-shadow: 0 0 0 0px rgba(0, 240, 255, 0.7);
   }
   50% {
-    box-shadow: 0 0 0 14px rgba(0, 230, 118, 0);
+    box-shadow: 0 0 0 14px rgba(0, 240, 255, 0);
   }
   100% {
-    box-shadow: 0 0 0 0px rgba(0, 230, 118, 0);
+    box-shadow: 0 0 0 0px rgba(0, 240, 255, 0);
   }
 }
 
@@ -95,20 +93,20 @@ body::before {
   animation: panicShake 0.3s ease-in-out infinite;
 }
 
-/* Custom Scrollbar */
+/* Custom Cosmic Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(11, 14, 27, 0.9);
+  background: rgba(5, 8, 20, 0.95);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 208, 0, 0.5);
+  background: rgba(0, 240, 255, 0.4);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 208, 0, 0.9);
+  background: rgba(0, 240, 255, 0.8);
 }

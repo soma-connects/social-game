@@ -1,8 +1,8 @@
 'use client';
 
-// 15-Second Open-Mic Roast Intermission ("Roast Lounge").
+// 25-Second Open-Mic Roast Intermission ("Roast Lounge").
 //
-// After every mini-game turn, the room enters this 15-second intermission phase.
+// After every mini-game turn, the room enters this 25-second intermission phase.
 // All players' microphones stay active so everyone can laugh, roast, tease, or
 // hype up the performer's attempt over live audio. Spectators can blast party
 // SFX from the interactive soundboard and send floating reaction badges.
@@ -23,14 +23,22 @@ import {
 import { Player, RoomState, SocialReactionId } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
+import { MINIGAME_FAIL_THRESHOLD, STARTING_LIVES } from '@/lib/gameRules';
+import { VoiceClip } from '@/hooks/useVoiceRecorder';
 import AvatarIllustration from './AvatarIllustration';
+import VoiceReplay from './VoiceReplay';
 
 interface RoastIntermissionProps {
   room: RoomState;
   activePlayer: Player;
   myPlayer: Player;
+  /** The attempt this client just captured, for the room to hear again. */
+  replayClip: VoiceClip | null;
   onFinishRoast: () => void;
 }
+
+/** Long enough to actually replay the clip and then react to it. */
+const ROAST_SECONDS = 25;
 
 const SOUNDBOARD = [
   { id: 'horn', name: 'Danfo Horn', icon: '🎺', action: () => audioSFX.playStreetVendorBell() },
@@ -64,9 +72,10 @@ export default function RoastIntermission({
   room,
   activePlayer,
   myPlayer,
+  replayClip,
   onFinishRoast,
 }: RoastIntermissionProps) {
-  const [timeLeft, setTimeLeft] = useState<number>(15);
+  const [timeLeft, setTimeLeft] = useState<number>(ROAST_SECONDS);
   const [busyReaction, setBusyReaction] = useState<string | null>(null);
   const [floatingEmojis, setFloatingEmojis] = useState<{ id: number; emoji: string; x: number }[]>([]);
   /** Reaction ids already animated, so polling does not replay them each tick. */
@@ -79,18 +88,23 @@ export default function RoastIntermission({
   const reactions = socialRound?.reactions ?? [];
 
   // Keep the callback in a ref so the countdown effect has no changing
-  // dependency — otherwise a re-render mid-roast restarts the 15 seconds.
+  // dependency — otherwise a re-render mid-roast restarts the countdown.
   const finishRef = useRef(onFinishRoast);
   finishRef.current = onFinishRoast;
 
-  // 15-second countdown. Runs once per performer, not once per render.
+  // Countdown. Runs once per performer, not once per render.
+  //
+  // Everyone runs the same clock so the room sees the same numbers, but only
+  // the performer's client sends the "roast over" request — the server accepts
+  // a turn ending from the active player alone, so the other five would be
+  // rejected and each would surface an error.
   useEffect(() => {
-    setTimeLeft(15);
+    setTimeLeft(ROAST_SECONDS);
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          finishRef.current();
+          if (isPerformer) finishRef.current();
           return 0;
         }
         return prev - 1;
@@ -98,7 +112,7 @@ export default function RoastIntermission({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [activePlayer.id]);
+  }, [activePlayer.id, isPerformer]);
 
   const triggerSound = (action: () => void) => {
     action();
@@ -140,7 +154,7 @@ export default function RoastIntermission({
     setBusyReaction(null);
   };
 
-  const timerPct = Math.round((timeLeft / 15) * 100);
+  const timerPct = Math.round((timeLeft / ROAST_SECONDS) * 100);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6 relative overflow-hidden">
@@ -179,7 +193,19 @@ export default function RoastIntermission({
           </div>
         </div>
 
-        {/* 15-Second Progress Timer Bar */}
+        {/* The replay — the reason the roast is funny. Sits above everything
+            else so the room hears the attempt before reacting to it. */}
+        <VoiceReplay
+          clip={replayClip}
+          performerName={activePlayer.name}
+          emptyHint={
+            isPerformer
+              ? 'Your attempt was not captured — check the mic is on.'
+              : `Join the voice call to capture ${activePlayer.name}'s attempts.`
+          }
+        />
+
+        {/* Progress timer bar */}
         <div className="w-full bg-partyDark h-3 rounded-full overflow-hidden border border-white/10 p-0.5">
           <div
             className="h-full bg-gradient-to-r from-emerald-400 via-partyYellow to-terracotta rounded-full transition-all duration-1000"
@@ -216,6 +242,26 @@ export default function RoastIntermission({
             <p className="text-[11px] text-gray-400">Level {activePlayer.level ?? 1} Performer</p>
           </div>
         </div>
+
+        {/* Bombing the task costs a life, so say so here rather than leaving it
+            to a heart quietly going dark in the sidebar. */}
+        {(room.roomType ?? 'board_game') !== 'team_battle' &&
+          turnResult !== null &&
+          turnResult !== undefined &&
+          turnResult.performance <= MINIGAME_FAIL_THRESHOLD && (
+            <div className="rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-left">
+              <p className="text-sm font-black text-red-300">
+                {(activePlayer.lives ?? STARTING_LIVES) === STARTING_LIVES && activePlayer.boardPosition === 0
+                  ? '☠️ WIPED OUT — back to the launchpad with a fresh bar'
+                  : `💔 BOMBED IT — ${activePlayer.lives ?? STARTING_LIVES} ${
+                      (activePlayer.lives ?? STARTING_LIVES) === 1 ? 'life' : 'lives'
+                    } left`}
+              </p>
+              <p className="text-[11px] text-red-200/70 mt-0.5">
+                Lose them all and you restart from the beginning — the points stay, the road does not.
+              </p>
+            </div>
+          )}
 
         {/* Interactive Soundboard Pad */}
         <div className="space-y-2 pt-2 text-left">
@@ -262,15 +308,21 @@ export default function RoastIntermission({
           </div>
         )}
 
-        {/* Proceed / Skip Control */}
+        {/* Proceed / Skip Control — the performer's call, so only they see it. */}
         <div className="pt-3">
-          <button
-            onClick={onFinishRoast}
-            className="w-full bg-gradient-to-r from-emerald-500 via-partyYellow to-emerald-400 text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] shadow-2xl glow-emerald"
-          >
-            <span>PROCEED TO POWER-UP SHOP & ROADMAP BOARD</span>
-            <ArrowRight className="w-5 h-5" />
-          </button>
+          {isPerformer ? (
+            <button
+              onClick={onFinishRoast}
+              className="w-full bg-gradient-to-r from-emerald-500 via-partyYellow to-emerald-400 text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] shadow-2xl glow-emerald"
+            >
+              <span>PROCEED TO POWER-UP SHOP &amp; ROADMAP BOARD</span>
+              <ArrowRight className="w-5 h-5" />
+            </button>
+          ) : (
+            <p className="text-center text-xs font-bold text-gray-400 py-4">
+              Keep reacting — {activePlayer.name} moves the room on when the clock runs out.
+            </p>
+          )}
         </div>
       </div>
     </div>

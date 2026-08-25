@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -12,7 +12,7 @@ import {
   Gavel,
 } from 'lucide-react';
 import { ChallengeWord, Player, RoomState } from '@/lib/types';
-import { getRandomMathProblem, LANGUAGE_DECKS, PIDGIN_FEEDBACK } from '@/lib/gameContent';
+import { LANGUAGE_DECKS, PIDGIN_FEEDBACK } from '@/lib/gameContent';
 import { audioSFX } from '@/lib/audioFeedback';
 import {
   speechEngine,
@@ -23,7 +23,9 @@ import {
   PHONETIC_FALLBACK_LANGUAGES,
 } from '@/lib/speechService';
 import { roomStore } from '@/lib/roomStore';
+import { micStream } from '@/lib/micStream';
 import AvatarIllustration from './AvatarIllustration';
+import MicContentionNotice from './MicContentionNotice';
 
 type ArenaStatus = 'idle' | 'listening' | 'matched' | 'failed';
 
@@ -90,17 +92,15 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
       return;
     }
 
-    if (room.mathEnabled && Math.random() < 0.35) {
-      setChallenge(getRandomMathProblem());
-      return;
-    }
-
-    const availableLangs = room.selectedLanguages.length > 0 ? room.selectedLanguages : ['hausa', 'yoruba', 'igbo'];
+    // Only languages we actually have a deck for â€” a selection can still name
+    // one that has been parked (Hausa, Yoruba) or has no deck at all.
+    const playable = room.selectedLanguages.filter((lang) => LANGUAGE_DECKS[lang]?.length);
+    const availableLangs = playable.length > 0 ? playable : ['english'];
     const chosenLang = availableLangs[Math.floor(Math.random() * availableLangs.length)];
-    const deck = LANGUAGE_DECKS[chosenLang] || LANGUAGE_DECKS.hausa;
+    const deck = LANGUAGE_DECKS[chosenLang] ?? LANGUAGE_DECKS.english;
     setChallenge(deck[Math.floor(Math.random() * deck.length)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room.roomId, room.mathEnabled]);
+  }, [room.roomId]);
 
   // New turn: reset the arena completely.
   useEffect(() => {
@@ -159,7 +159,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
 
     // Ask for the microphone before starting the clock. A permission prompt that
     // eats four of the eight seconds is the same as losing the round.
-    const accessError = await speechEngine.requestMicAccess();
+    const accessError = await speechEngine.probeMicPermission();
     if (accessError) {
       setError(accessError);
       return;
@@ -208,6 +208,55 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
       audioSFX.playTimerTick(next <= 3);
     }, 1000);
   };
+
+  /**
+   * Restarts just the listening session with the mic taken off the call.
+   *
+   * Deliberately does not touch the timer, the SFX, or the analyser — those
+   * are already running fine, and a mid-round attempt losing its clock over
+   * a mic handover would be a worse bug than the one this fixes.
+   */
+  const restartWithMicPriority = () => {
+    if (!challenge || status !== 'listening') return;
+    micStream.setSpeechPriority(true);
+    sessionRef.current?.stop();
+    const target = challenge.type === 'math' ? challenge.word.split('=')[1].trim() : challenge.word;
+    sessionRef.current = speechEngine.listenForSpeech({
+      targetWord: target,
+      language: challenge.language,
+      onResult: (res: SpeechMatchResult) => {
+        setTranscript(res.transcript);
+        if (res.isMatch) finishRound('matched', res.confidence);
+      },
+      onError: (err) => {
+        setError(err);
+        teardown();
+        setStatus('idle');
+      },
+    });
+  };
+
+  // Keep the room in the loop â€” spectators see the prompt and the transcript as
+  // it lands, so they can react to the attempt rather than to a waiting screen.
+  useEffect(() => {
+    if (!challenge) return;
+    roomStore.pushLiveState(room.roomId, activePlayer.id, {
+      prompt: challenge.word,
+      detail: challenge.phonetic ?? challenge.translation,
+      progress: 1 - Math.max(0, timeLeft) / room.turnTimeLimit,
+      status:
+        status === 'matched'
+          ? 'GOT IT!'
+          : status === 'failed'
+          ? 'Missed it'
+          : transcript
+          ? `heard: "${transcript}"`
+          : status === 'listening'
+          ? 'listeningâ€¦'
+          : 'about to start',
+      good: status === 'matched' ? true : status === 'failed' ? false : undefined,
+    });
+  }, [challenge, transcript, status, timeLeft, room.roomId, room.turnTimeLimit, activePlayer.id]);
 
   const timerPercentage = Math.round((Math.max(0, timeLeft) / room.turnTimeLimit) * 100);
   const sttUnavailable = caps !== null && (!caps.hasSpeechRecognition || !caps.secureContext);
@@ -283,7 +332,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
                   ? error.message
                   : !caps?.secureContext
                     ? 'The microphone only works over HTTPS. Open the game on its https:// link.'
-                    : 'This browser has no speech recognition. Chrome, Edge and Safari support it — or use the judge button below to score the round manually.'}
+                    : 'This browser has no speech recognition. Chrome, Edge and Safari support it â€” or use the judge button below to score the round manually.'}
               </p>
             </div>
           </div>
@@ -298,7 +347,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
               </span>
               {challenge.type === 'trap' && (
                 <span className="bg-red-500 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full animate-pulse">
-                  ⚡ OPPONENT TRAP
+                  âš¡ OPPONENT TRAP
                 </span>
               )}
             </div>
@@ -309,7 +358,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
 
             {challenge.phonetic && (
               <p className="text-sm sm:text-base text-partyCyan font-mono">
-                🗣️ Phonetic: <span className="font-bold">{challenge.phonetic}</span>
+                ðŸ—£ï¸ Phonetic: <span className="font-bold">{challenge.phonetic}</span>
               </p>
             )}
 
@@ -331,7 +380,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
           <div className="space-y-2 pt-2">
             <div className="flex items-center justify-between text-xs text-emerald-400 font-bold px-1">
               <span className="flex items-center gap-1.5 animate-pulse">
-                <Mic className="w-4 h-4" /> LIVE MIC ACTIVE — SPEAK THE PROMPT CLEARLY!
+                <Mic className="w-4 h-4" /> LIVE MIC ACTIVE â€” SPEAK THE PROMPT CLEARLY!
               </span>
               <span>AUDIO WAVE: {micVolume}%</span>
             </div>
@@ -343,9 +392,10 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
             </div>
             {micVolume === 0 && (
               <p className="text-[11px] text-gray-400">
-                No sound reaching the mic yet — check the right input device is selected.
+                No sound reaching the mic yet â€” check the right input device is selected.
               </p>
             )}
+            <MicContentionNotice active={status === 'listening'} onClaimPriority={restartWithMicPriority} />
           </div>
         )}
 
@@ -442,3 +492,4 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     </div>
   );
 }
+

@@ -41,12 +41,74 @@ function classify(err: unknown): MicErrorCode {
   return 'unknown';
 }
 
+/**
+ * Phones hand the microphone to one consumer at a time.
+ *
+ * Desktop Chrome lets a getUserMedia stream and the Web Speech recogniser run
+ * off the same device simultaneously. Android does not: whichever asked second
+ * gets silence. Since the recogniser opens its own capture internally and
+ * cannot be handed our MediaStream, the only way for both to work on a phone is
+ * to put ours down while the recogniser is listening.
+ *
+ * Detected from the user agent rather than screen size — this is about the
+ * platform's audio stack, not the size of the window.
+ */
+export function isMobileAudioPlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 class MicStreamManager {
   private stream: MediaStream | null = null;
   private pending: Promise<MediaStream> | null = null;
   private refCount = 0;
   private muted = false;
   private listeners = new Set<(muted: boolean) => void>();
+  /** Notified whenever the underlying track is swapped or dropped. */
+  private streamListeners = new Set<(stream: MediaStream | null) => void>();
+  /** True while the device is deliberately handed to the speech recogniser. */
+  private suspended = false;
+  /**
+   * True while a live voice call is using the microphone.
+   *
+   * Handing the device to the speech recogniser is only safe when nobody else
+   * needs it. With a call up, suspending takes this player off the air for the
+   * length of the round and starves the attempt recorder at the same time —
+   * which is exactly what happened in real play: the room could not hear each
+   * other, and nothing got recorded.
+   */
+  private callActive = false;
+  /**
+   * Set when the player has explicitly chosen the recogniser over the call.
+   *
+   * On a phone the two cannot share the device, and defaulting to either one
+   * silently breaks the other — a call nobody can hear, or a mini-game that
+   * never hears you. Neither is a choice the app can make on the player's
+   * behalf, so this is only ever set by the player tapping for it.
+   */
+  private speechPriority = false;
+
+  public setCallActive(active: boolean): void {
+    this.callActive = active;
+  }
+
+  public setSpeechPriority(priority: boolean): void {
+    this.speechPriority = priority;
+  }
+
+  public hasSpeechPriority(): boolean {
+    return this.speechPriority;
+  }
+
+  /** Whether the microphone is currently being shared with a live call. */
+  public isCallActive(): boolean {
+    return this.callActive;
+  }
+
+  /** Whether it is safe to hand the device to the speech recogniser. */
+  public canSuspendForSpeech(): boolean {
+    return !this.callActive || this.speechPriority;
+  }
 
   public isSupported(): boolean {
     return (
@@ -55,6 +117,9 @@ class MicStreamManager {
   }
 
   public getStream(): MediaStream | null {
+    if (this.stream && this.stream.getAudioTracks().every((t) => t.readyState === 'ended')) {
+      return null;
+    }
     return this.stream;
   }
 
@@ -70,6 +135,67 @@ class MicStreamManager {
   }
 
   /**
+   * Subscribes to the stream itself being replaced or dropped.
+   *
+   * The voice call needs this: when the device is suspended for the recogniser
+   * its peer connections must detach the sender's track, and re-attach the new
+   * one afterwards. Without it the call would keep a dead track and every peer
+   * would hear silence for the rest of the session.
+   */
+  public onStreamChange(cb: (stream: MediaStream | null) => void): () => void {
+    this.streamListeners.add(cb);
+    return () => {
+      this.streamListeners.delete(cb);
+    };
+  }
+
+  private notifyStream(stream: MediaStream | null): void {
+    this.streamListeners.forEach((cb) => cb(stream));
+  }
+
+  public isSuspended(): boolean {
+    return this.suspended;
+  }
+
+  /**
+   * Puts the microphone down so the speech recogniser can have it, keeping the
+   * ref count intact so `resume` knows to pick it back up.
+   *
+   * Synchronous on purpose. iOS only allows speech recognition to start inside
+   * a user gesture, and awaiting anything here would push the subsequent
+   * `recognition.start()` out of that gesture and get it rejected.
+   */
+  public suspend(): void {
+    if (this.suspended) return;
+    this.suspended = true;
+    // Release the track so mobile OS hands the hardware mic to speech recognition
+    this.stream?.getTracks().forEach((track) => track.stop());
+    this.stream = null;
+    this.notifyStream(null);
+  }
+
+  /** Picks the microphone back up after the recogniser is done with it. */
+  public async resume(): Promise<void> {
+    if (!this.suspended) return;
+    this.suspended = false;
+    if (this.refCount === 0) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      this.attachTrackListeners(stream);
+      this.stream = stream;
+      this.applyMute();
+      this.notifyStream(stream);
+    } catch {
+      // The device did not come back. The call stays silent rather than broken,
+      // and the next acquire will try again.
+      this.stream = null;
+    }
+  }
+
+  /**
    * Hands back the shared stream, prompting for permission on first use.
    * Every successful acquire must be paired with a release.
    */
@@ -79,6 +205,10 @@ class MicStreamManager {
     if (!navigator.mediaDevices?.getUserMedia) {
       return { stream: null, error: micError('unsupported-browser') };
     }
+
+    // A caller asking for the mic outranks a suspension: whatever wanted it for
+    // speech has either finished or is about to be told the device moved.
+    this.suspended = false;
 
     if (this.stream && this.stream.getAudioTracks().some((t) => t.readyState === 'live')) {
       this.refCount++;
@@ -95,14 +225,48 @@ class MicStreamManager {
     try {
       const stream = await this.pending;
       this.pending = null;
+      this.attachTrackListeners(stream);
       this.stream = stream;
       this.applyMute();
       this.refCount++;
+      this.notifyStream(stream);
       return { stream, error: null };
     } catch (err) {
       this.pending = null;
       this.stream = null;
       return { stream: null, error: micError(classify(err)) };
+    }
+  }
+
+  private attachTrackListeners(stream: MediaStream): void {
+    stream.getAudioTracks().forEach((track) => {
+      track.onended = () => {
+        // Track was killed by mobile OS or external interruption
+        if (this.callActive || this.refCount > 0) {
+          void this.recoverDeadTrack();
+        }
+      };
+      track.onmute = () => {
+        // On iOS Safari, track may mute temporarily on backgrounding
+      };
+      track.onunmute = () => {
+        this.applyMute();
+      };
+    });
+  }
+
+  private async recoverDeadTrack(): Promise<void> {
+    if (this.suspended) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      this.attachTrackListeners(stream);
+      this.stream = stream;
+      this.applyMute();
+      this.notifyStream(stream);
+    } catch {
+      /* could not auto-recover */
     }
   }
 
@@ -114,8 +278,10 @@ class MicStreamManager {
   /** Drops the device regardless of ref count. For leaving the game entirely. */
   public stop(): void {
     this.refCount = 0;
+    this.suspended = false;
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;
+    this.notifyStream(null);
   }
 
   public setMuted(muted: boolean): boolean {

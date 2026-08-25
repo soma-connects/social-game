@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { ArrowRight, Check, Coins, ShoppingCart } from 'lucide-react';
-import { Player, TurnResult } from '@/lib/types';
+import { Player, RoundResult } from '@/lib/types';
 import { MINIGAME_LABELS, SHOP_ITEMS, describePerformance } from '@/lib/gameRules';
 import { roomStore } from '@/lib/roomStore';
 import { audioSFX } from '@/lib/audioFeedback';
@@ -10,8 +10,13 @@ import AvatarIllustration from './AvatarIllustration';
 
 interface PowerupShopProps {
   roomId: string;
-  activePlayer: Player;
-  turnResult: TurnResult | null;
+  /** The shopper — every player buys for themselves, at the same time. */
+  myPlayer: Player;
+  /** This player's own mini-game result from the round just played. */
+  myResult: RoundResult | null;
+  /** Names still choosing, so nobody wonders what the hold-up is. */
+  waitingOn: string[];
+  ready: boolean;
   onDone: () => void;
 }
 
@@ -22,15 +27,22 @@ interface PowerupShopProps {
  * Points are the score as well as the currency, so buying is a genuine
  * trade-off rather than free progression.
  */
-export default function PowerupShop({ roomId, activePlayer, turnResult, onDone }: PowerupShopProps) {
+export default function PowerupShop({
+  roomId,
+  myPlayer,
+  myResult,
+  waitingOn,
+  ready,
+  onDone,
+}: PowerupShopProps) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleBuy = async (itemId: string, price: number) => {
-    if (activePlayer.score < price) return;
+    if (myPlayer.score < price) return;
     setBusy(itemId);
     setError(null);
-    const res = await roomStore.buyPowerup(roomId, itemId);
+    const res = await roomStore.buyPowerup(roomId, myPlayer.id, itemId);
     setBusy(null);
     if (res.error) {
       setError(res.error);
@@ -39,7 +51,9 @@ export default function PowerupShop({ roomId, activePlayer, turnResult, onDone }
     audioSFX.playPowerUpZap();
   };
 
-  const steps = turnResult?.steps ?? 1;
+  const activePlayer = myPlayer;
+  const turnResult = myResult;
+  const steps = myResult?.steps ?? 1;
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
@@ -60,7 +74,7 @@ export default function PowerupShop({ roomId, activePlayer, turnResult, onDone }
 
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl bg-partyDark/80 border border-white/10 p-4 text-center">
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">POINTS BANKED</p>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">COINS BANKED</p>
             <p className="text-3xl font-black text-partyYellow flex items-center justify-center gap-1.5">
               <Coins className="w-5 h-5" /> {activePlayer.score}
             </p>
@@ -133,14 +147,27 @@ export default function PowerupShop({ roomId, activePlayer, turnResult, onDone }
           <p className="text-xs text-red-300 bg-red-500/15 border border-red-500/40 rounded-xl px-3 py-2">{error}</p>
         )}
 
-        <button
-          onClick={onDone}
-          className="w-full bg-emerald-500 hover:bg-emerald-400 text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl glow-emerald"
-        >
-          <Check className="w-5 h-5" />
-          <span>DONE — MOVE {steps} NODE{steps === 1 ? '' : 'S'}</span>
-          <ArrowRight className="w-5 h-5" />
-        </button>
+        {ready ? (
+          <div className="w-full bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 font-black text-sm py-4 rounded-2xl text-center space-y-1">
+            <p className="flex items-center justify-center gap-2">
+              <Check className="w-5 h-5" /> READY — WAITING FOR THE OTHERS
+            </p>
+            {waitingOn.length > 0 && (
+              <p className="text-[11px] font-bold text-emerald-200/80">
+                Still shopping: {waitingOn.join(', ')}
+              </p>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={onDone}
+            className="w-full bg-emerald-500 hover:bg-emerald-400 text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl glow-emerald"
+          >
+            <Check className="w-5 h-5" />
+            <span>DONE — MOVE {steps} NODE{steps === 1 ? '' : 'S'}</span>
+            <ArrowRight className="w-5 h-5" />
+          </button>
+        )}
       </div>
     </div>
   );

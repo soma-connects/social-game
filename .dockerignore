@@ -1,5 +1,21 @@
 .next
 node_modules
 .git
-.env*.local
 PROJECT_GOALS.md
+
+# Never copy env files into the image.
+#
+# The old list only excluded `.env*.local`, which does not match
+# `.env.production` — so the live GEMINI_API_KEY was being baked into every
+# image layer. Anyone who could pull the image had the key, and deleting the
+# file later would not remove it from the earlier layers.
+#
+# The public Firebase web config comes in as build args instead (see Dockerfile);
+# the Gemini key is supplied at runtime by the platform.
+.env
+.env.*
+!.env.example
+
+# Local scratch
+.firebase
+*.md

@@ -21,6 +21,24 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+# Every env file, not just the .local ones. .env.production holds a live
+# GEMINI_API_KEY and the Firebase config, and the old patterns did not match it
+# — it was one `git add .` away from being published.
+.env.*
+!.env.example
+
+# firebase
+# Deploy cache. It is ~700MB of packed function bundles and is rebuilt on every
+# deploy; committing it would be larger than the entire rest of the repo.
+/.firebase/
+
+# Service account keys. A leaked one is full read/write on the whole project,
+# and unlike a password it does not expire — assume any key that reaches a
+# remote is compromised for good.
+*serviceAccountKey*.json
+*-adminsdk-*.json
+gcp-key.json
+key.json
 
 # vercel
 .vercel
@@ -28,3 +46,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Source/reference art. Nothing under src/ references these, and they are large
+# originals rather than assets the app serves — keeping them out of the repo
+# stops several MB of unused PNGs shipping with every clone and deploy.
+# Delete this line if they are meant to be tracked.
+/public/designs

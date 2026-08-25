@@ -131,33 +131,28 @@ export const PRESET_TRAPS: PresetTrap[] = [
   { id: 't6', label: 'Danfo Driver', word: 'Owa o, danfo driver enter bus stop', category: 'Slang' },
 ];
 
+/**
+ * Only the decks the recogniser can actually score.
+ *
+ * Chrome has no speech models for ha-NG / ig-NG / yo-NG, so everything here is
+ * transcribed as Nigerian English and fuzzy-matched. Igbo and Pidgin survive
+ * that treatment well enough to be fair; Hausa and Yoruba did not, so they are
+ * parked rather than shipped as rounds nobody can win. Their tone marks and
+ * vowel set come back as noise through an English model.
+ */
 export const LANGUAGE_DECKS: Record<string, ChallengeWord[]> = {
-  hausa: [
-    { id: 'h1', word: 'Sannu da zuwa', phonetic: 'Sahn-noo dah zoo-wah', translation: 'Welcome', language: 'hausa', type: 'language', difficulty: 'easy' },
-    { id: 'h2', word: 'Ina kwana', phonetic: 'Ee-nah kwah-nah', translation: 'Good morning', language: 'hausa', type: 'language', difficulty: 'easy' },
-    { id: 'h3', word: 'Nagode sosai', phonetic: 'Nah-goh-deh soh-sigh', translation: 'Thank you very much', language: 'hausa', type: 'language', difficulty: 'medium' },
-    { id: 'h4', word: 'Ina sonka', phonetic: 'Ee-nah sohn-kah', translation: 'I love you', language: 'hausa', type: 'language', difficulty: 'easy' },
-    { id: 'h5', word: 'Yaya sunanka', phonetic: 'Yah-yah soo-nahn-kah', translation: 'What is your name?', language: 'hausa', type: 'language', difficulty: 'medium' },
+  english: [
+    { id: 'e1', word: 'She sells seashells by the seashore', phonetic: 'SH IY S EH L Z S IY SH EH L Z', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e2', word: 'How much wood would a woodchuck chuck', phonetic: 'H AW M AH CH W UH D W UH D', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e3', word: 'Peter Piper picked a peck of pickled peppers', phonetic: 'P IY T ER P AY P ER P IH K T', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e4', word: 'I saw a kitten eating chicken in the kitchen', phonetic: 'AY S AO AH K IH T AH N IY T IH NG', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
   ],
-  igbo: [
-    { id: 'i1', word: 'Kedu ka idi', phonetic: 'Keh-doo kah ee-dee', translation: 'How are you?', language: 'igbo', type: 'language', difficulty: 'easy' },
-    { id: 'i2', word: 'Daalu', phonetic: 'Dah-ah-loo', translation: 'Thank you', language: 'igbo', type: 'language', difficulty: 'easy' },
-    { id: 'i3', word: 'Ututu oma', phonetic: 'Oo-too-too oh-mah', translation: 'Good morning', language: 'igbo', type: 'language', difficulty: 'easy' },
-    { id: 'i4', word: 'Nnoo', phonetic: 'N-noh-oh', translation: 'Welcome', language: 'igbo', type: 'language', difficulty: 'easy' },
-    { id: 'i5', word: 'Afame bu Chidi', phonetic: 'Ah-fah-meh boo Chee-dee', translation: 'My name is Chidi', language: 'igbo', type: 'language', difficulty: 'medium' },
-  ],
-  yoruba: [
-    { id: 'y1', word: 'E kaaro', phonetic: 'Eh kah-ah-roh', translation: 'Good morning', language: 'yoruba', type: 'language', difficulty: 'easy' },
-    { id: 'y2', word: 'E se gan', phonetic: 'Eh sheh gahn', translation: 'Thank you very much', language: 'yoruba', type: 'language', difficulty: 'easy' },
-    { id: 'y3', word: 'Bawo ni', phonetic: 'Bah-woh nee', translation: 'How are you?', language: 'yoruba', type: 'language', difficulty: 'easy' },
-    { id: 'y4', word: 'Orukọ mi ni Paul', phonetic: 'Oh-roo-kaw mee nee Paul', translation: 'My name is Paul', language: 'yoruba', type: 'language', difficulty: 'medium' },
-    { id: 'y5', word: 'Ẹ ku aalẹ', phonetic: 'Eh koo ah-ah-leh', translation: 'Good evening', language: 'yoruba', type: 'language', difficulty: 'easy' },
-  ],
-  pidgin: [
-    { id: 'p1', word: 'How you dey', phonetic: 'How goo dey', translation: 'How are you doing?', language: 'pidgin', type: 'language', difficulty: 'easy' },
-    { id: 'p2', word: 'No wahala', phonetic: 'No wah-hah-lah', translation: 'No problem', language: 'pidgin', type: 'language', difficulty: 'easy' },
-    { id: 'p3', word: 'I dey kampe', phonetic: 'Ee dey kahm-peh', translation: 'I am doing great', language: 'pidgin', type: 'language', difficulty: 'easy' },
-    { id: 'p4', word: 'Oya na make we go', phonetic: 'Oh-yah nah mah-keh weh go', translation: 'Alright let us go', language: 'pidgin', type: 'language', difficulty: 'easy' },
+  spelling_bee: [
+    { id: 's1', word: 'ACCOMMODATE', phonetic: 'A C C O M M O D A T E', translation: 'To provide lodging or sufficient space for', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 's2', word: 'EMBARRASS', phonetic: 'E M B A R R A S S', translation: 'To cause someone to feel awkward or ashamed', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 's3', word: 'FLUORESCENT', phonetic: 'F L U O R E S C E N T', translation: 'Vividly colorful', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 's4', word: 'QUESTIONNAIRE', phonetic: 'Q U E S T I O N N A I R E', translation: 'A set of printed or written questions with a choice of answers', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 's5', word: 'RHYTHM', phonetic: 'R H Y T H M', translation: 'A strong, regular, repeated pattern of movement or sound', language: 'english', type: 'language', difficulty: 'medium' },
   ],
 };
 
@@ -219,3 +214,23 @@ export const NOLLYWOOD_DARES = [
 ];
 
 export const DARES = NOLLYWOOD_DARES;
+
+/**
+ * Duel tile topics.
+ *
+ * Deliberately silly and unwinnable — a duel is decided by who argues it more
+ * entertainingly, and a topic anyone could actually be right about turns the
+ * room's vote into a fact check instead of a performance.
+ */
+export const DUEL_TOPICS = [
+  'Jollof rice is objectively the best rice dish on earth',
+  'Socks belong on before trousers, always',
+  'A hot dog is a sandwich',
+  'Cereal is technically cold soup',
+  'Sleeping with one leg out of the duvet is the only correct way',
+  'Voice notes over three minutes should be illegal',
+  'Pineapple absolutely belongs on pizza',
+  'Everyone secretly rehearses arguments in the shower',
+  'Cutlery in the sink is worse than cutlery on the counter',
+  'The aisle seat is the superior seat',
+];

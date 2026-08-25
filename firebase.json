@@ -1,0 +1,14 @@
+{
+    "firestore":  {
+                      "database":  "default",
+                      "rules":  "firestore.rules"
+                  },
+    "hosting":  {
+                    "ignore":  [
+                                   "firebase.json",
+                                   "**/.*",
+                                   "**/node_modules/**"
+                               ],
+                    "source":  "."
+                }
+}

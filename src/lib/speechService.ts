@@ -10,7 +10,7 @@
 // Nothing here fakes a result. If the mic is blocked, or the browser has no
 // speech recognition, callers get an error and the UI has to say so.
 
-import { micStream } from './micStream';
+import { isMobileAudioPlatform, micStream } from './micStream';
 
 export type STTStatus = 'idle' | 'listening' | 'processing' | 'matched' | 'failed' | 'error';
 
@@ -96,6 +96,19 @@ const LOCALE_MAP: Record<string, string> = {
   chinese: 'zh-CN',
 };
 
+/**
+ * Pause before restarting a recogniser that just ended.
+ *
+ * Android has not released the previous instance when `onend` fires, so an
+ * immediate `start()` throws InvalidStateError. A short gap is the difference
+ * between a mic that keeps listening for the whole round and one that quietly
+ * dies after the first word.
+ */
+const RESTART_DELAY_MS = 250;
+
+/** Guard against a recogniser that ends instantly, forever, in a tight loop. */
+const MAX_RESTARTS = 60;
+
 /** Languages we ask the browser for phonetically rather than natively. */
 export const PHONETIC_FALLBACK_LANGUAGES = new Set(['hausa', 'igbo', 'yoruba', 'pidgin']);
 
@@ -132,7 +145,44 @@ function mapGetUserMediaError(err: unknown): SpeechErrorCode {
   return 'unknown';
 }
 
+/**
+ * What the recogniser has actually been doing.
+ *
+ * Speech failures on a phone are invisible from the outside — the mic looks
+ * live, nothing happens, and there is no way to tell a missing language model
+ * from a device the recogniser never got hold of. This records enough to tell
+ * those apart from a device we cannot plug a debugger into.
+ */
+export interface SpeechDiagnostics {
+  supported: boolean;
+  /** The BCP-47 tag actually handed to the recogniser. */
+  locale: string;
+  /** Whether the shared mic was put down for this session (the mobile path). */
+  suspendedMic: boolean;
+  /** Results received since the session started, interim included. */
+  results: number;
+  /** Times the recogniser ended and had to be restarted. */
+  restarts: number;
+  /** Raw error string from the last onerror, before it was mapped. */
+  lastError: string | null;
+  startedAt: number | null;
+}
+
 class SpeechRecognitionService {
+  private diagnostics: SpeechDiagnostics = {
+    supported: false,
+    locale: '',
+    suspendedMic: false,
+    results: 0,
+    restarts: 0,
+    lastError: null,
+    startedAt: null,
+  };
+
+  public getDiagnostics(): SpeechDiagnostics {
+    return { ...this.diagnostics, supported: this.getCapabilities().hasSpeechRecognition };
+  }
+
   private micStream: MediaStream | null = null;
   /** Whether we currently hold a reference on the shared mic stream. */
   private holdsMicRef = false;
@@ -186,6 +236,30 @@ class SpeechRecognitionService {
 
     this.micStream = stream;
     this.holdsMicRef = true;
+    return null;
+  }
+
+  /**
+   * Confirms microphone permission without holding on to the device.
+   *
+   * For a speech-recognition round this is what you want instead of
+   * `requestMicAccess`: it surfaces a blocked or missing mic up front, then
+   * puts the device straight back down so the recogniser — which opens its own
+   * capture and cannot be handed our stream — can have it. Holding the stream
+   * here is what made these rounds work on a laptop and hear nothing on a phone.
+   */
+  public async probeMicPermission(): Promise<SpeechError | null> {
+    const error = await this.requestMicAccess();
+    if (error) return error;
+
+    // Only let go of the device when nothing else needs it. Releasing while a
+    // call is live can drop the refcount to zero and stop the tracks, taking
+    // the player off the air.
+    if (isMobileAudioPlatform() && this.holdsMicRef && micStream.canSuspendForSpeech()) {
+      micStream.release();
+      this.holdsMicRef = false;
+      this.micStream = null;
+    }
     return null;
   }
 
@@ -311,15 +385,45 @@ class SpeechRecognitionService {
     this.recognition = recognition;
     this.wantsToListen = true;
 
+    // Hand the device to the recogniser on phones — when nothing else is using
+    // it, or when the player has explicitly asked for it.
+    //
+    // A live getUserMedia stream and a running recogniser cannot share a mobile
+    // microphone, so suspending helps when the player is on their own. With a
+    // voice call up it does the opposite: it drops them off the call for the
+    // whole round and leaves the attempt recorder with a dead stream. Both
+    // happened in real play, which is why the call wins by default — but that
+    // leaves an Android player on a call unable to be heard by the game at all,
+    // so `setSpeechPriority` lets them make the trade deliberately.
+    //
+    // Synchronous, so the start() below stays inside the user gesture iOS needs.
+    const suspendedMic = isMobileAudioPlatform() && micStream.canSuspendForSpeech();
+    if (suspendedMic) micStream.suspend();
+
+    this.diagnostics = {
+      supported: true,
+      locale: recognition.lang,
+      suspendedMic,
+      results: 0,
+      restarts: 0,
+      lastError: null,
+      startedAt: Date.now(),
+    };
+
     let settled = false;
+    let restarts = 0;
+    let restartTimer: number | null = null;
     const finish = (fn?: () => void) => {
       if (settled) return;
       settled = true;
       this.wantsToListen = false;
+      if (restartTimer !== null) window.clearTimeout(restartTimer);
+      if (suspendedMic) void micStream.resume();
       fn?.();
     };
 
     recognition.onresult = (event: any) => {
+      this.diagnostics.results++;
       let transcript = '';
       let isFinal = false;
       // Check every alternative; the top pick often misses non-English words.
@@ -347,6 +451,7 @@ class SpeechRecognitionService {
     };
 
     recognition.onerror = (event: any) => {
+      this.diagnostics.lastError = String(event?.error ?? 'unknown');
       const code = mapRecognitionError(event?.error);
       // Chrome fires no-speech on every silent gap; onend restarts us, so it is
       // only worth reporting once the round has actually given up.
@@ -358,19 +463,35 @@ class SpeechRecognitionService {
     };
 
     recognition.onend = () => {
-      // Chrome ends the session after a few seconds of silence. Restart while the
-      // round is still running, otherwise the mic dies halfway through the timer.
-      if (this.wantsToListen && !settled && !this.isMuted && this.recognition === recognition) {
-        try {
-          recognition.start();
-          return;
-        } catch {
-          // fall through to ending the session
-        }
+      // Chrome ends the session after a few seconds of silence, and Android ends
+      // it after every single utterance regardless of `continuous`. Restart
+      // while the round is still running, otherwise the mic dies halfway
+      // through the timer.
+      const shouldRestart =
+        this.wantsToListen && !settled && !this.isMuted && this.recognition === recognition;
+
+      if (shouldRestart && restarts < MAX_RESTARTS) {
+        restarts++;
+        this.diagnostics.restarts = restarts;
+        // Never restart synchronously. Android has not released the previous
+        // instance by the time onend fires, so an immediate start() throws
+        // InvalidStateError and the round silently loses its microphone.
+        restartTimer = window.setTimeout(() => {
+          if (!this.wantsToListen || settled || this.recognition !== recognition) return;
+          try {
+            recognition.start();
+          } catch {
+            finish(onEnd);
+          }
+        }, RESTART_DELAY_MS);
+        return;
       }
+
       finish(onEnd);
     };
 
+    // Starting is deferred by a beat only when the mic had to be suspended, to
+    // give the platform a moment to actually release the device.
     try {
       recognition.start();
     } catch {
@@ -378,7 +499,12 @@ class SpeechRecognitionService {
       finish(() => onError(makeError('unknown')));
     }
 
-    return { stop: () => finish(() => this.stopListening()) };
+    return {
+      stop: () => {
+        if (restartTimer !== null) window.clearTimeout(restartTimer);
+        finish(() => this.stopListening());
+      },
+    };
   }
 
   public stopListening(): void {
@@ -397,7 +523,15 @@ class SpeechRecognitionService {
   }
 
   public getLocale(lang: string): string {
-    return LOCALE_MAP[lang?.toLowerCase()] ?? 'en-NG';
+    if (!lang) return 'en-NG';
+    // An explicit BCP-47 tag is honoured as given. This used to fall through to
+    // the map, miss, and silently return en-NG — so a mini-game asking for
+    // 'en-US' was recognised as Nigerian English. Desktop Chrome has a cloud
+    // model for en-NG and coped; Android often has no such model on device and
+    // simply returned nothing, which is why it looked like the mic was dead on
+    // phones but fine on laptops.
+    if (lang.includes('-')) return lang;
+    return LOCALE_MAP[lang.toLowerCase()] ?? 'en-NG';
   }
 
   public evaluateMatch(transcript: string, target: string): { isMatch: boolean; score: number } {

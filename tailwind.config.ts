@@ -11,16 +11,16 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
-        partyYellow: "#FFD000",
-        partyPink: "#FF2A85",
+        partyYellow: "#FFD166",
+        partyPink: "#FF4757",
         partyCyan: "#00F0FF",
-        partyPurple: "#8A2BE2",
-        partyGreen: "#00FF66",
-        partyDark: "#0D0F1D",
-        partyCard: "#161B33",
-        // Used all over the gradients and borders but was never defined here, so
-        // every `*-terracotta` class silently rendered as nothing.
+        partyPurple: "#00F0FF", // Replaced AI generic purple with Cosmic Cyan
+        partyGreen: "#10B981",
+        partyDark: "#050814",
+        partyCard: "#0B132B",
         terracotta: "#FF5722",
+        cosmicVoid: "#050814",
+        cosmicCard: "#0B132B",
       },
       scale: {
         '102': '1.02',
@@ -34,7 +34,6 @@ const config: Config = {
         // Reaction emoji rising off the laugh meter. Needs a real keyframe:
         // `animate-bounce` plus a static `bottom` just bounces in place.
         'floatUp': 'floatUp 2s ease-out forwards',
-        'popIn': 'popIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
       },
       keyframes: {
         shake: {
@@ -50,10 +49,6 @@ const config: Config = {
           '0%':   { opacity: '0', transform: 'translateY(0) scale(0.6) rotate(-8deg)' },
           '15%':  { opacity: '1', transform: 'translateY(-20px) scale(1.25) rotate(4deg)' },
           '100%': { opacity: '0', transform: 'translateY(-190px) scale(0.9) rotate(-6deg)' },
-        },
-        popIn: {
-          '0%':   { opacity: '0', transform: 'scale(0.7)' },
-          '100%': { opacity: '1', transform: 'scale(1)' },
         },
       }
     },

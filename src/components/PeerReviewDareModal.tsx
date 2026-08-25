@@ -3,17 +3,31 @@
 import React, { useState } from 'react';
 import { Mic, CheckCircle2, XCircle, ShieldAlert } from 'lucide-react';
 import { Player } from '@/lib/types';
-import { DARES } from '@/lib/gameContent';
 import { audioSFX } from '@/lib/audioFeedback';
 
 interface PeerReviewDareModalProps {
+  /**
+   * The dare itself, from room state.
+   *
+   * This used to be picked locally with `DARES[Math.random()]`, which meant
+   * every browser in the room rolled its own — the performer was reading one
+   * dare while the people judging them were looking at a different one.
+   */
+  dareText: string;
   targetPlayer: Player;
   challengerPlayer: Player;
+  /** The person performing does not get to mark their own attempt. */
+  canJudge: boolean;
   onResolveDare: (passed: boolean) => void;
 }
 
-export default function PeerReviewDareModal({ targetPlayer, challengerPlayer, onResolveDare }: PeerReviewDareModalProps) {
-  const [dareText] = useState(() => DARES[Math.floor(Math.random() * DARES.length)]);
+export default function PeerReviewDareModal({
+  dareText,
+  targetPlayer,
+  challengerPlayer,
+  canJudge,
+  onResolveDare,
+}: PeerReviewDareModalProps) {
   const [isPerforming, setIsPerforming] = useState(false);
 
   const handleJudgement = (passed: boolean) => {
@@ -65,26 +79,36 @@ export default function PeerReviewDareModal({ targetPlayer, challengerPlayer, on
           )}
         </div>
 
-        {/* Opponent Judge Buttons */}
+        {/* Judging. The performer sees the verdict, not the buttons — marking
+            your own dare was the obvious way to farm 100 coins a turn. */}
         <div className="space-y-2 pt-2">
-          <span className="text-xs font-bold text-gray-400 block">OPPONENTS: JUDGE ATTEMPT NOW</span>
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => handleJudgement(true)}
-              className="bg-partyGreen hover:bg-emerald-400 text-partyDark font-black text-base py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg"
-            >
-              <CheckCircle2 className="w-5 h-5" />
-              <span>PASS (+100 PTS)</span>
-            </button>
+          {canJudge ? (
+            <>
+              <span className="text-xs font-bold text-gray-400 block">OPPONENTS: JUDGE ATTEMPT NOW</span>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => handleJudgement(true)}
+                  className="bg-partyGreen hover:bg-emerald-400 text-partyDark font-black text-base py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg"
+                >
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span>PASS (+100 PTS)</span>
+                </button>
 
-            <button
-              onClick={() => handleJudgement(false)}
-              className="bg-red-500 hover:bg-red-600 text-white font-black text-base py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg"
-            >
-              <XCircle className="w-5 h-5" />
-              <span>FAIL (WHAALA!)</span>
-            </button>
-          </div>
+                <button
+                  onClick={() => handleJudgement(false)}
+                  className="bg-red-500 hover:bg-red-600 text-white font-black text-base py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg"
+                >
+                  <XCircle className="w-5 h-5" />
+                  <span>FAIL (WHAALA!)</span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs font-bold text-gray-400 text-center py-3 flex items-center justify-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-partyYellow" />
+              The crew is judging your attempt…
+            </p>
+          )}
         </div>
       </div>
     </div>

@@ -14,8 +14,9 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Player } from '@/lib/types';
-import { usePitchDetection } from '@/hooks/usePitchDetection';
+import { usePitchDetection, CALIBRATION_MS } from '@/hooks/usePitchDetection';
 import { audioSFX } from '@/lib/audioFeedback';
+import { roomStore } from '@/lib/roomStore';
 import { Mic, MicOff, Volume2 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -52,12 +53,15 @@ const GATE_WIDTH = 50;
 // Gate difficulty is set by the safe-zone half-width at spawn time (see the
 // gate-spawning block), not by a raw gap size — the window has to be expressed
 // in terms of the player's reachable band to stay flyable.
-const INITIAL_SPEED = 2.5;      // px/frame scroll speed
-const MAX_SPEED = 5.5;
-const SPEED_RAMP = 0.003;       // speed increase per frame
+// Pacing is set against how fast a voice can actually move the bird: a full
+// traverse of the playable band takes ~0.8s, so gates need to arrive slowly
+// enough to sing your way between two of them without rushing.
+const INITIAL_SPEED = 4.0;      // px/frame scroll speed
+const MAX_SPEED = 8.0;
+const SPEED_RAMP = 0.004;      // speed increase per frame
 
-const GATE_SPAWN_INTERVAL_START = 180; // frames (~3s at 60fps)
-const GATE_SPAWN_INTERVAL_MIN = 90;    // frames (~1.5s)
+const GATE_SPAWN_INTERVAL_START = 240; // frames (~4s at 60fps)
+const GATE_SPAWN_INTERVAL_MIN = 150;   // frames (~2.5s)
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -115,10 +119,12 @@ function makeCityLayers(): CityLayer[] {
 
 interface PitchBirdCanvasProps {
   player: Player;
+  /** Needed so spectators can be shown what is happening. */
+  roomId: string;
   onComplete: (score: number) => void;
 }
 
-export default function PitchBirdCanvas({ player, onComplete }: PitchBirdCanvasProps) {
+export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBirdCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const {
@@ -134,7 +140,7 @@ export default function PitchBirdCanvas({ player, onComplete }: PitchBirdCanvasP
   const [gameState, setGameState] = useState<GameState>('calibrating');
   const [finalScore, setFinalScore] = useState(0);
   const [micError, setMicError] = useState(false);
-  const [calCountdown, setCalCountdown] = useState(3);
+  const [calCountdown, setCalCountdown] = useState(Math.round(CALIBRATION_MS / 1000));
 
   // Game state refs (mutated in the animation loop, not React state)
   const stateRef = useRef({
@@ -147,7 +153,7 @@ export default function PitchBirdCanvas({ player, onComplete }: PitchBirdCanvasP
     floatingTexts: [] as FloatingText[],
     frameCount: 0,
     scrollSpeed: INITIAL_SPEED,
-    nextGateIn: 120,
+    nextGateIn: 210,
     spawnedGateCount: 0,
     cityLayers: makeCityLayers(),
     flashAlpha: 0,
@@ -250,7 +256,8 @@ export default function PitchBirdCanvas({ player, onComplete }: PitchBirdCanvasP
     s.floatingTexts = [];
     s.frameCount = 0;
     s.scrollSpeed = INITIAL_SPEED;
-    s.nextGateIn = 120;
+    // First gate spawns quickly (~1.2s) so player doesn't wait in empty air.
+    s.nextGateIn = 75;
     s.spawnedGateCount = 0;
     s.cityLayers = makeCityLayers();
 
@@ -264,17 +271,21 @@ export default function PitchBirdCanvas({ player, onComplete }: PitchBirdCanvasP
       const currentLift = liftRef.current;
       const currentVolume = volumeRef.current;
 
-      // ── Pitch → position ─────────────────────────────────────────
-      // lift 0 (lowest note) sits at the bottom of the band, 1 (highest) at the
-      // top. The spring gives the motion weight without taking control away:
-      // wherever you hold your voice, the bird settles there.
-      const lowY = CANVAS_H - BOTTOM_MARGIN - PLAYER_RADIUS;
-      const highY = TOP_MARGIN + PLAYER_RADIUS;
-      const targetY = lowY - currentLift * (lowY - highY);
+      // ── Pitch & Volume → Responsive Flight Physics ─────────────
+      if (currentLift > 0.01) {
+        const lowY = CANVAS_H - BOTTOM_MARGIN - PLAYER_RADIUS;
+        const highY = TOP_MARGIN + PLAYER_RADIUS;
+        // Pitch/Volume drives target height with instant 0.12 spring factor
+        const targetY = lowY - currentLift * (lowY - highY);
+        s.vy += (targetY - s.playerY) * 0.12;
+        s.vy *= 0.82;
+      } else {
+        // Gravity pulls bird down instantly when voice stops
+        s.vy += 0.55;
+        s.vy *= 0.88;
+      }
 
-      s.vy += (targetY - s.playerY) * SPRING;
-      s.vy *= DAMPING;
-      s.vy = Math.max(-MAX_VY, Math.min(MAX_VY, s.vy));
+      s.vy = Math.max(-8, Math.min(8, s.vy));
       s.playerY += s.vy;
 
       // Clamp to canvas bounds
@@ -313,18 +324,33 @@ export default function PitchBirdCanvas({ player, onComplete }: PitchBirdCanvasP
         if (s.overheatCooldown <= 0) s.overheating = false;
       }
 
+      // Let the room watch: distance and score, throttled in roomStore.
+      if (roomId) {
+        roomStore.pushLiveState(roomId, player.id, {
+          prompt: `${Math.floor(s.distance / 10)}m`,
+          detail: 'flying on pitch',
+          score: s.score,
+          status: s.overheating ? 'straining!' : 'in the air',
+          good: true,
+        });
+      }
+
       // ── Gate spawning ────────────────────────────────────────────
       s.nextGateIn--;
       if (s.nextGateIn <= 0) {
         s.spawnedGateCount++;
 
+        // The opener is deliberately the middle gate. The bird floats at
+        // mid-height when nobody is singing, so a 'high' first gate asked the
+        // player to already be at the top of their range before they had worked
+        // out what the game wanted — an unwinnable start.
         let gateType: GateType;
         if (s.spawnedGateCount === 1) {
-          gateType = 'high';   // 1st: fly high — raise your voice
+          gateType = 'steady'; // 1st: right where the bird already is
         } else if (s.spawnedGateCount === 2) {
-          gateType = 'low';    // 2nd: dive low — lower your voice
+          gateType = 'high';   // 2nd: fly high — raise your voice
         } else if (s.spawnedGateCount === 3) {
-          gateType = 'steady'; // 3rd: Middle gap -> hold steady hum
+          gateType = 'low';    // 3rd: dive low — lower your voice
         } else {
           gateType = ['high', 'low', 'steady'][Math.floor(Math.random() * 3)] as GateType;
         }
@@ -339,27 +365,36 @@ export default function PitchBirdCanvas({ player, onComplete }: PitchBirdCanvasP
         const bandTop = TOP_MARGIN + PLAYER_RADIUS;
         const bandBottom = CANVAS_H - BOTTOM_MARGIN - PLAYER_RADIUS;
 
-        // The window shrinks as the run goes on. The floor accounts for the
-        // spring's ~12px overshoot plus the lag in the pitch signal.
-        const safeHalf = Math.max(45, 100 - s.frameCount * 0.02);
+        // The window shrinks as the run goes on, but stays generous: this is a
+        // party mini-game feeding a board game, not a precision test. The floor
+        // covers the spring's ~12px overshoot, the lag through the median
+        // filter, and the fact that a voice simply is not a joystick.
+        const safeHalf = Math.max(80, 130 - s.frameCount * 0.008);
 
         // Each type parks the window in a different third of the vocal range,
         // far enough from the edges that the target stays reachable.
-        let centreY: number;
-        if (gateType === 'high') {
-          centreY = bandTop + 55 + (Math.random() - 0.5) * 30;
-        } else if (gateType === 'low') {
-          centreY = bandBottom - 55 + (Math.random() - 0.5) * 30;
-        } else {
-          centreY = (bandTop + bandBottom) / 2 + (Math.random() - 0.5) * 40;
-        }
+        // Calculate clear, guaranteed-passable maneuvering gaps for each gate type.
+        // CANVAS_H = 500. A gap of 180px-240px leaves generous space for the avatar (radius 22px).
+        let gapTop: number;
+        let gapBottom: number;
 
-        // Walls sit one player-radius outside the safe window. A wall pushed
-        // past the canvas edge simply means there is no pillar on that side.
-        let gapTop = centreY - safeHalf - PLAYER_RADIUS;
-        let gapBottom = centreY + safeHalf + PLAYER_RADIUS;
-        if (gapTop < 0) gapTop = 0;
-        if (gapBottom > CANVAS_H) gapBottom = CANVAS_H;
+        if (gateType === 'high') {
+          // RAISE VOICE ⬆️: Single bottom pillar standing up from gapTop to CANVAS_H.
+          // Open sky passage above: 0 to gapTop (190px–240px open air!).
+          gapTop = 210 + (Math.random() - 0.5) * 40;
+          gapBottom = CANVAS_H;
+        } else if (gateType === 'low') {
+          // LOWER VOICE ⬇️: Single top pillar hanging down from 0 to gapTop.
+          // Open ground passage below: gapTop to CANVAS_H (200px–240px open passage!).
+          gapTop = 280 + (Math.random() - 0.5) * 40;
+          gapBottom = CANVAS_H;
+        } else {
+          // HOLD STEADY 🎵: Double pillar (top 0..gapTop, bottom gapBottom..CANVAS_H).
+          // Open middle passage: gapTop to gapBottom (190px generous opening!).
+          const center = 250 + (Math.random() - 0.5) * 40;
+          gapTop = center - 95;
+          gapBottom = center + 95;
+        }
 
         s.gates.push({
           x: CANVAS_W + GATE_WIDTH,
@@ -372,7 +407,7 @@ export default function PitchBirdCanvas({ player, onComplete }: PitchBirdCanvasP
 
         const spawnInterval = Math.max(
           GATE_SPAWN_INTERVAL_MIN,
-          GATE_SPAWN_INTERVAL_START - s.frameCount * 0.3
+          GATE_SPAWN_INTERVAL_START - s.frameCount * 0.12
         );
         s.nextGateIn = spawnInterval;
       }
@@ -832,9 +867,12 @@ export default function PitchBirdCanvas({ player, onComplete }: PitchBirdCanvasP
               <div className="text-6xl animate-bounce">🎤</div>
               <h3 className="text-2xl font-black text-white">CALIBRATING YOUR VOICE</h3>
               <p className="text-sm text-gray-300 max-w-xs mx-auto">
-                Say <span className="text-partyYellow font-bold">&quot;AHHH&quot;</span> in a{' '}
-                <span className="text-blue-400 font-bold">LOW</span> pitch, then a{' '}
-                <span className="text-red-400 font-bold">HIGH</span> pitch!
+                Slide <span className="text-partyYellow font-bold">&quot;AHHH&quot;</span> from your{' '}
+                <span className="text-blue-400 font-bold">DEEPEST</span> voice up to your{' '}
+                <span className="text-red-400 font-bold">HIGHEST</span> squeak.
+              </p>
+              <p className="text-[11px] text-gray-400 max-w-xs mx-auto">
+                Go for the full range — one flat note here makes the bird twitchy.
               </p>
               <div className="text-5xl font-black text-partyYellow animate-pulse">
                 {calCountdown > 0 ? calCountdown : '🚀'}

@@ -67,6 +67,37 @@ export default function SocialVoicePanel({ room, activePlayer, myPlayer }: Socia
     ? 'The room is teasing the performer — it still earns crowd energy.'
     : 'The room is watching closely. Drop a line that makes them laugh.';
 
+  // The performer cannot react to themselves — every control below is disabled
+  // for them. Rendering the full panel anyway put ~500px of dead UI under the
+  // thing they are actually trying to do. They get a one-line live meter instead.
+  if (isPerformer) {
+    return (
+      <div className="glass-card rounded-2xl px-4 py-2.5 border border-partyCyan/25 bg-slate-900/70 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <Laugh className="w-4 h-4 text-partyYellow shrink-0" />
+          <span className="text-[11px] font-bold text-gray-300 truncate">
+            {reactions.length > 0
+              ? `${reactions.length} reaction${reactions.length === 1 ? '' : 's'} from the room`
+              : 'The room is watching…'}
+          </span>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="hidden xs:flex items-center gap-1.5 text-[11px]">
+            {REACTIONS.map(({ id, Icon }) =>
+              reactionCounts[id] > 0 ? (
+                <span key={id} className="flex items-center gap-0.5 text-partyCyan font-black">
+                  <Icon className="w-3 h-3" />
+                  {reactionCounts[id]}
+                </span>
+              ) : null
+            )}
+          </div>
+          <span className="text-lg font-black text-partyYellow">+{socialBonus}</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="glass-card rounded-3xl p-4 sm:p-5 border border-partyCyan/30 bg-slate-900/70 space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -75,9 +106,7 @@ export default function SocialVoicePanel({ room, activePlayer, myPlayer }: Socia
             <Laugh className="w-4 h-4 text-partyYellow" /> CROWD JUDGE MODE
           </h3>
           <p className="text-[11px] text-gray-400">
-            {isPerformer
-              ? 'Your spoken round earns both technical points and room vibes.'
-              : `React to ${activePlayer.name}'s voice moment with laugh, fire, almost or drama.`}
+            React to {activePlayer.name}&apos;s voice moment with laugh, fire, almost or drama.
           </p>
         </div>
         <div className="text-right shrink-0">

@@ -24,7 +24,13 @@ const MAX_MAILBOX = 60;
 const ROOM_TTL_SEC = Math.ceil(ROOM_TTL_MS / 1000);
 const PRESENCE_TTL_SEC = Math.ceil(ROOM_TTL_MS / 1000);
 
-const redis = Redis.fromEnv();
+// Vercel's Upstash Marketplace integration injects `KV_REST_API_URL` /
+// `KV_REST_API_TOKEN` (legacy Vercel KV naming), not the plain
+// `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` that a database
+// created directly on upstash.com uses. Accept either so both setups work.
+const redisUrl = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL ?? '';
+const redisToken = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN ?? '';
+const redis = new Redis({ url: redisUrl, token: redisToken });
 
 const roomKey = (roomId: string) => `room:${roomId}`;
 const mailboxKey = (roomId: string, playerId: string) => `mailbox:${roomId}:${playerId}`;

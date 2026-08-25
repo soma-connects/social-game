@@ -16,24 +16,24 @@ Setup:
 1. Import the repo into a Vercel project (zero-config — it's a standard
    Next.js app, `next build` / `next start`).
 2. Add a Redis database: **Storage → Marketplace → Upstash → Redis** in the
-   Vercel dashboard, and connect it to this project. That injects
-   `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` into the project's
-   environment automatically — `Redis.fromEnv()` picks them up with no extra
-   config.
+   Vercel dashboard, then **Connect to Project**. That injects `KV_REST_API_URL`
+   and `KV_REST_API_TOKEN` into the project's environment automatically —
+   `src/lib/server/roomServer.ts` reads those (or the plain
+   `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` names, if you created
+   the database directly on upstash.com instead) with no extra config.
 3. Deploy. No instance-count flags needed.
 
-For local dev, copy the same two env vars into `.env.local` (pull them from
-the Vercel project, or from Upstash's own dashboard if you created the
-database directly). Without them, `npm run dev` still boots and pages render,
-but any `/api/room/*` call will fail — the routes need a real Redis instance
-to talk to.
+For local dev, copy the same two env vars into `.env.local` — see
+`.env.local.example` for both naming schemes. Without them, `npm run dev`
+still boots and pages render, but any `/api/room/*` call will fail — the
+routes need a real Redis instance to talk to.
 
 ## Cloud Run (on hold)
 
 Kept in case billing gets sorted out and GCP is worth returning to — the
 `Dockerfile`, `.gcloudignore` and the steps below still work. Set the same
-`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` env vars on the Cloud
-Run service (`--set-env-vars` or via Secret Manager); the old
+Redis env vars (see `.env.local.example`) on the Cloud Run service
+(`--set-env-vars` or via Secret Manager); the old
 `--min-instances=1 --max-instances=1` pin is no longer required since state
 lives in Redis now, not in the container:
 

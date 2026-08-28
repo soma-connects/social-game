@@ -114,13 +114,15 @@ export default function AsteroidDefenseGame({
    * Rocks are baked up front rather than at spawn.
    *
    * Generating a sprite costs a few hundred microseconds of pixel work, and
-   * doing it inside the loop dropped a frame every time a rock appeared â€” which
+   * doing it inside the loop dropped a frame every time a rock appeared — which
    * is exactly the stutter that reads as the game being laggy. Twenty variants
    * across four palettes is more than enough that repeats go unnoticed.
    */
   const rockPool = useRef<{ sprite: BakedSprite; radius: number }[]>([]);
   const backdropRef = useRef<Backdrop | null>(null);
   const [ready, setReady] = useState(false);
+  /** True once the microphone permission has been settled up front. */
+  const micProbed = useRef(false);
 
   const stopEverything = useCallback(() => {
     game.current.active = false;
@@ -137,7 +139,7 @@ export default function AsteroidDefenseGame({
   }, []);
 
   useEffect(() => {
-    // The page-wide starfield is pure decoration and this screen has its own â€”
+    // The page-wide starfield is pure decoration and this screen has its own —
     // no reason to pay for both while a game loop is running.
     (window as any).pauseStarfield = true;
     game.current.heart = makeHeartSprite(PALETTE.danger);
@@ -169,6 +171,26 @@ export default function AsteroidDefenseGame({
       else setReady(true);
     };
     handle = requestAnimationFrame(pump);
+
+    /**
+     * Settle the microphone permission now, not on the START tap.
+     *
+     * Speech recognition may only be started from inside a user gesture, and a
+     * gesture does not survive an await long enough to show a permission
+     * prompt. Asking here means the await in startGame is a cache hit, so
+     * `recognition.start()` still lands inside the tap that triggered it —
+     * which is the difference between the game hearing you on a phone and the
+     * recogniser being silently refused.
+     */
+    void speechEngine.probeMicPermission().then((error) => {
+      if (cancelled) return;
+      micProbed.current = !error;
+      if (error) {
+        setMicError(
+          typeof error === 'string' ? error : 'Microphone access is needed to fire the laser.'
+        );
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -214,7 +236,7 @@ export default function AsteroidDefenseGame({
     return () => cancelAnimationFrame(handle);
   }, [ready, status]);
 
-  // â”€â”€ spawning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── spawning ──────────────────────────────────────────────────────────────
 
   const spawnAsteroid = () => {
     const s = game.current;
@@ -227,7 +249,7 @@ export default function AsteroidDefenseGame({
 
     const word = available[Math.floor(Math.random() * available.length)];
 
-    // Taken from the pre-baked pool â€” see rockPool. Falls back to baking one
+    // Taken from the pre-baked pool — see rockPool. Falls back to baking one
     // only if the pool somehow has not finished, which the intro gate prevents.
     const pool = rockPool.current;
     const picked = pool.length > 0
@@ -297,7 +319,7 @@ export default function AsteroidDefenseGame({
     audioSFX.playChoiSuccess();
   };
 
-  // â”€â”€ voice â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── voice ─────────────────────────────────────────────────────────────────
 
   const handleSpeech = (text: string) => {
     const s = game.current;
@@ -309,8 +331,8 @@ export default function AsteroidDefenseGame({
     const now = Date.now();
     // The recogniser streams the same interim phrase over and over, so every
     // word in it is considered but each may only fire once per second. Keying
-    // the debounce on the word â€” rather than on "the last word changed", which
-    // is what this used to do â€” means saying the same word twice in a row
+    // the debounce on the word — rather than on "the last word changed", which
+    // is what this used to do — means saying the same word twice in a row
     // works, and so does calling two targets in one breath.
     for (const word of spoken) {
       if (now - (s.firedAt.get(word) ?? 0) < 1000) continue;
@@ -323,7 +345,7 @@ export default function AsteroidDefenseGame({
     }
   };
 
-  // â”€â”€ the loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── the loop ──────────────────────────────────────────────────────────────
 
   const finish = useCallback(() => {
     const earned = Math.min(MAX_POINTS, game.current.score);
@@ -459,7 +481,7 @@ export default function AsteroidDefenseGame({
     if (s.frames % 45 === 0) {
       roomStore.pushLiveState(room.roomId, activePlayer.id, {
         score: s.score,
-        status: `Wave ${s.wave} â€” ${s.lives} shield${s.lives === 1 ? '' : 's'} left`,
+        status: `Wave ${s.wave} — ${s.lives} shield${s.lives === 1 ? '' : 's'} left`,
         prompt: threat?.word,
         good: s.lives > 1,
       });
@@ -470,17 +492,23 @@ export default function AsteroidDefenseGame({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.roomId, activePlayer.id, finish]);
 
-  // â”€â”€ start â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── start ─────────────────────────────────────────────────────────────────
 
   const startGame = async () => {
-    const accessError = await speechEngine.probeMicPermission();
-    if (accessError) {
-      setMicError(
-        typeof accessError === 'string'
-          ? accessError
-          : 'Microphone access is needed to fire the laser.'
-      );
-      return;
+    // Only await when the permission is still unknown. Awaiting on every start
+    // pushes the recogniser out of the tap that triggered it, and iOS refuses
+    // to begin listening outside a user gesture.
+    if (!micProbed.current) {
+      const accessError = await speechEngine.probeMicPermission();
+      if (accessError) {
+        setMicError(
+          typeof accessError === 'string'
+            ? accessError
+            : 'Microphone access is needed to fire the laser.'
+        );
+        return;
+      }
+      micProbed.current = true;
     }
     setMicError(null);
     setStatus('playing');
@@ -499,7 +527,7 @@ export default function AsteroidDefenseGame({
     if (audioRef.current) {
       audioRef.current.volume = 0.25;
       audioRef.current.play().catch(() => {
-        /* autoplay refused â€” the game plays perfectly well without music */
+        /* autoplay refused — the game plays perfectly well without music */
       });
     }
 
@@ -577,7 +605,7 @@ export default function AsteroidDefenseGame({
     setBgmMuted(next);
   };
 
-  // â”€â”€ chrome â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── chrome ────────────────────────────────────────────────────────────────
 
   return (
     <div className="rounded-3xl border border-cyan-500/30 bg-[#080b12] p-3 sm:p-5 space-y-3 shadow-2xl">
@@ -585,7 +613,7 @@ export default function AsteroidDefenseGame({
 
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <span className="text-2xl leading-none">â˜„ï¸</span>
+          <span className="text-2xl leading-none">☄️</span>
           <div className="min-w-0">
             <h2 className="text-base sm:text-lg font-black tracking-[0.2em] text-cyan-300">
               ASTEROID DEFENSE
@@ -620,7 +648,7 @@ export default function AsteroidDefenseGame({
         )}
       </div>
 
-      {/* The screen. Fixed 16:9 so the pixel grid is never stretched â€” the old
+      {/* The screen. Fixed 16:9 so the pixel grid is never stretched — the old
           version drew at 600x400 into a wider box, squashing every rock. */}
       <div className="relative w-full aspect-video rounded-xl overflow-hidden border-2 border-cyan-900/60 bg-[#080b12]">
         <canvas
@@ -688,7 +716,7 @@ export default function AsteroidDefenseGame({
               </p>
               <p className="text-[11px] sm:text-sm text-gray-400 leading-relaxed">
                 Every rock carries a word. Say it out loud and the station fires.
-                They fall faster each wave â€” and anything that drops past the
+                They fall faster each wave — and anything that drops past the
                 <span className="text-cyan-400"> scan line</span> is out of the
                 turret&apos;s reach.
               </p>
@@ -697,12 +725,46 @@ export default function AsteroidDefenseGame({
                   {micError}
                 </p>
               )}
+
+              {/* The trade, offered before the round instead of after it.
+                  A phone hands the microphone to one thing at a time, and the
+                  voice call keeps it by default — so on a call this game hears
+                  nothing at all. That was only recoverable from a panel that
+                  appears after seven seconds of failure, by which point most of
+                  the first wave is already through. The condition is knowable
+                  up front, so it is asked up front. */}
+              {!speechPriority && micStream.isCallActive() && isMobileAudioPlatform() && (
+                <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-left">
+                  <p className="text-[11px] font-black tracking-wider text-amber-200">
+                    THE VOICE CALL HAS YOUR MIC
+                  </p>
+                  <p className="mt-0.5 text-[10px] leading-relaxed text-amber-300/80">
+                    Your phone can only give the microphone to one thing at a time, so the
+                    game will not hear you until you hand it over.
+                  </p>
+                  <button
+                    onClick={claimMicForGame}
+                    className="mt-2 w-full rounded-md border border-amber-400/60 bg-amber-400/20 px-3 py-2 text-[11px] font-black tracking-wide text-amber-100 active:scale-95"
+                  >
+                    LET THE GAME HEAR ME
+                    <span className="mt-0.5 block text-[9px] font-bold text-amber-300/70">
+                      Leaves the voice call until this round ends
+                    </span>
+                  </button>
+                </div>
+              )}
+              {speechPriority && (
+                <p className="text-[10px] font-bold text-emerald-300/90">
+                  Microphone handed to the game — the room cannot hear you this round.
+                </p>
+              )}
+
               <button
                 onClick={startGame}
                 disabled={!ready}
                 className="px-8 py-3 bg-cyan-500 hover:bg-cyan-400 disabled:bg-cyan-900 disabled:text-cyan-500 text-[#080b12] rounded-lg font-black tracking-[0.2em] text-sm shadow-lg shadow-cyan-500/30 transition active:scale-95 disabled:active:scale-100"
               >
-                {ready ? 'START DEFENSE' : 'CALIBRATINGâ€¦'}
+                {ready ? 'START DEFENSE' : 'CALIBRATING…'}
               </button>
             </div>
           </div>
@@ -715,10 +777,10 @@ export default function AsteroidDefenseGame({
                 STATION BREACHED
               </h3>
               <p className="text-sm text-gray-300">
-                Final score <span className="text-yellow-400 font-black">{hud.score}</span> Â· reached
+                Final score <span className="text-yellow-400 font-black">{hud.score}</span> · reached
                 wave <span className="text-cyan-300 font-black">{hud.wave}</span>
               </p>
-              <p className="text-[11px] text-gray-500">Returning to the boardâ€¦</p>
+              <p className="text-[11px] text-gray-500">Returning to the board…</p>
             </div>
           </div>
         )}
@@ -728,7 +790,7 @@ export default function AsteroidDefenseGame({
         <div className="flex items-center gap-2 text-[11px] font-mono">
           <span className="text-gray-500 shrink-0">HEARD</span>
           <span className="flex-1 truncate rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-cyan-300">
-            {transcript || 'â€¦'}
+            {transcript || '…'}
           </span>
         </div>
       )}

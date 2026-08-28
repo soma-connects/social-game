@@ -13,6 +13,8 @@ import {
 
 interface LudoBoardProps {
   tokens: Record<LudoColor, LudoToken[]>;
+  /** The colours actually in play. Empty corners are painted down, not hidden. */
+  seatOrder: LudoColor[];
   activeColor: LudoColor;
   diceValue: number | null;
   hasRolled: boolean;
@@ -79,12 +81,21 @@ const START_ARROW: Record<LudoColor, string> = {
 
 export default function LudoBoard({
   tokens,
+  seatOrder,
   activeColor,
   diceValue,
   hasRolled,
   isMyTurn,
   onTokenClick,
 }: LudoBoardProps) {
+  // A two- or three-player game leaves real corners of the board empty. They
+  // stay drawn — a Ludo board with a hole in it stops looking like a Ludo
+  // board — but they are washed out, so nobody waits for a turn that is never
+  // coming to the blue house.
+  const seated = new Set(seatOrder);
+  const unusedStyle = (color: LudoColor): React.CSSProperties =>
+    seated.has(color) ? {} : { filter: 'grayscale(0.85) brightness(0.55)' };
+
   const getTokenCoords = (t: LudoToken): { col: number; row: number } => {
     if (t.position === -1) return YARD_GRID_COORDS[t.color][t.id];
     if (t.position === 999) return FINISH_CELL[t.color];
@@ -103,8 +114,8 @@ export default function LudoBoard({
   // hidden behind whichever happens to render last.
   const occupancy = new Map<string, number>();
   const seatOf = new Map<string, number>();
-  for (const colour of ['red', 'green', 'yellow', 'blue'] as LudoColor[]) {
-    for (const token of tokens[colour]) {
+  for (const colour of seatOrder) {
+    for (const token of tokens[colour] ?? []) {
       if (token.position === -1) continue;
       const { col, row } = getTokenCoords(token);
       const key = `${Math.floor(col)}:${Math.floor(row)}`;
@@ -151,6 +162,7 @@ export default function LudoBoard({
                     gridRowStart: q.row + 1,
                     gridRowEnd: q.row + 7,
                     backgroundColor: paint.solid,
+                    ...unusedStyle(colour),
                   }}
                 />
                 {/* White inner yard, sized so the four slots below land dead
@@ -162,6 +174,7 @@ export default function LudoBoard({
                     gridRowStart: q.row + 2,
                     gridRowEnd: q.row + 6,
                     backgroundColor: YARD_FILL,
+                    ...unusedStyle(colour),
                   }}
                   className="rounded-lg"
                 />
@@ -177,7 +190,11 @@ export default function LudoBoard({
                   >
                     <div
                       className="w-[86%] h-[86%] rounded-full"
-                      style={{ backgroundColor: paint.light, border: `2px solid ${paint.deep}` }}
+                      style={{
+                        backgroundColor: paint.light,
+                        border: `2px solid ${paint.deep}`,
+                        ...unusedStyle(colour),
+                      }}
                     />
                   </div>
                 ))}
@@ -196,6 +213,7 @@ export default function LudoBoard({
                   ...cellStyle(coord.col, coord.row),
                   backgroundColor: owner ? PAINT[owner].solid : ROAD,
                   border: `1px solid ${GRID_LINE}`,
+                  ...(owner ? unusedStyle(owner) : {}),
                 }}
                 className="flex items-center justify-center"
               >
@@ -221,6 +239,7 @@ export default function LudoBoard({
                   ...cellStyle(coord.col, coord.row),
                   backgroundColor: PAINT[colour].solid,
                   border: `1px solid ${GRID_LINE}`,
+                  ...unusedStyle(colour),
                 }}
               />
             ))
@@ -238,26 +257,26 @@ export default function LudoBoard({
                 bottom, red from the left — matching HOME_COL_GRID_COORDS. */}
             <div
               className="absolute inset-0"
-              style={{ backgroundColor: PAINT.green.solid, clipPath: 'polygon(0 0, 100% 0, 50% 50%)' }}
+              style={{ ...unusedStyle('green'), backgroundColor: PAINT.green.solid, clipPath: 'polygon(0 0, 100% 0, 50% 50%)' }}
             />
             <div
               className="absolute inset-0"
-              style={{ backgroundColor: PAINT.yellow.solid, clipPath: 'polygon(100% 0, 100% 100%, 50% 50%)' }}
+              style={{ ...unusedStyle('yellow'), backgroundColor: PAINT.yellow.solid, clipPath: 'polygon(100% 0, 100% 100%, 50% 50%)' }}
             />
             <div
               className="absolute inset-0"
-              style={{ backgroundColor: PAINT.blue.solid, clipPath: 'polygon(0 100%, 100% 100%, 50% 50%)' }}
+              style={{ ...unusedStyle('blue'), backgroundColor: PAINT.blue.solid, clipPath: 'polygon(0 100%, 100% 100%, 50% 50%)' }}
             />
             <div
               className="absolute inset-0"
-              style={{ backgroundColor: PAINT.red.solid, clipPath: 'polygon(0 0, 0 100%, 50% 50%)' }}
+              style={{ ...unusedStyle('red'), backgroundColor: PAINT.red.solid, clipPath: 'polygon(0 0, 0 100%, 50% 50%)' }}
             />
             <div className="absolute inset-0 border" style={{ borderColor: GRID_LINE }} />
           </div>
 
           {/* ── tokens ──────────────────────────────────────────────────── */}
-          {(['red', 'green', 'yellow', 'blue'] as LudoColor[]).flatMap((colour) =>
-            tokens[colour].map((token) => {
+          {seatOrder.flatMap((colour) =>
+            (tokens[colour] ?? []).map((token) => {
               const coords = getTokenCoords(token);
               const canMove =
                 isMyTurn && colour === activeColor && hasRolled && diceValue

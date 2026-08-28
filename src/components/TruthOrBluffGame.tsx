@@ -59,7 +59,7 @@ export default function TruthOrBluffGame({
     if (isMyTurn && localPhase === 'prompting' && !promptText) {
       const prompt = aiGameMaster.getRandomChallenge('truth_bluff');
       setPromptText(prompt.text);
-      aiGameMaster.speak("Truth or Bluff! Tell us two things â€” one true, one false!");
+      aiGameMaster.speak("Truth or Bluff! Tell us two things — one true, one false!");
     }
   }, [isMyTurn, localPhase, promptText]);
 
@@ -200,7 +200,7 @@ export default function TruthOrBluffGame({
     >
       <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-partyYellow to-partyPink mb-6 uppercase tracking-wider flex items-center gap-3">
         <Sparkles className="w-8 h-8 text-partyYellow" />
-        ðŸŽ­ TRUTH OR BLUFF
+        🎭 TRUTH OR BLUFF
         <Sparkles className="w-8 h-8 text-partyPink" />
       </h2>
       
@@ -371,7 +371,7 @@ export default function TruthOrBluffGame({
         className="w-full max-w-4xl flex flex-col items-center gap-8 mx-auto"
       >
         <div className="flex flex-col items-center gap-2">
-          <h2 className="text-3xl font-black text-white text-center">Which one is the LIE? ðŸ¤”</h2>
+          <h2 className="text-3xl font-black text-white text-center">Which one is the LIE? 🤔</h2>
           
           <div className="relative w-24 h-24 flex items-center justify-center mt-4">
             <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
@@ -414,7 +414,7 @@ export default function TruthOrBluffGame({
               <div className={`w-16 h-16 shrink-0 rounded-full flex items-center justify-center text-3xl font-black ${
                 hasVoted && votes[myPlayer.id] === idx ? 'bg-partyYellow text-black' : 'bg-white/10 text-white'
               }`}>
-                {idx === 0 ? 'ðŸ…°ï¸' : 'ðŸ…±ï¸'}
+                {idx === 0 ? '🅰️' : '🅱️'}
               </div>
               <p className="text-xl font-medium text-white/90">{claim}</p>
             </motion.button>

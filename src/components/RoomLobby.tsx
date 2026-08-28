@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -36,6 +36,10 @@ const MINI_GAMES: { id: MiniGameId; name: string; icon: string; blurb: string }[
   { id: 'asteroid_defense', name: 'Asteroid Defense', icon: '☄️', blurb: 'Shoot down asteroids by calling out their words!' },
 ];
 import { audioSFX } from '@/lib/audioFeedback';
+import { LudoSetup } from '@/lib/ludo/ludoTypes';
+import LudoSetupPanel, { defaultLudoSetup } from './ludo/LudoSetupPanel';
+import { ChessSetup } from '@/lib/chess/chessTypes';
+import ChessSetupPanel, { defaultChessSetup } from './chess/ChessSetupPanel';
 import AvatarIllustration from './AvatarIllustration';
 import BackgroundMusic from './BackgroundMusic';
 
@@ -43,7 +47,11 @@ interface RoomLobbyProps {
   room: RoomState;
   myPlayer: Player;
   onStartGame: () => void;
-  onSelectMode?: (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo') => void;
+  onSelectMode?: (
+    mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo',
+    /** Per-mode line-up chosen in the panels below, when the mode has one. */
+    options?: { ludo?: LudoSetup; chess?: ChessSetup }
+  ) => void;
 }
 
 const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
@@ -62,6 +70,34 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [activeMode, setActiveMode] = useState<'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo'>('board');
   const [showCustomDecks, setShowCustomDecks] = useState(false);
+
+  // Ludo table. Defaults to "everyone here, computers for the rest", and keeps
+  // following the room as people arrive until the host overrules it — a table
+  // set for two that silently stayed set for two after four people joined
+  // would be worse than no default at all.
+  const [ludoSetup, setLudoSetup] = useState<LudoSetup>(() => defaultLudoSetup(room.players.length));
+  const ludoTouched = useRef(false);
+  useEffect(() => {
+    if (ludoTouched.current) return;
+    setLudoSetup((current) => defaultLudoSetup(room.players.length, current.seatCount, current.botSkill));
+  }, [room.players.length]);
+  const changeLudoSetup = (next: LudoSetup) => {
+    ludoTouched.current = true;
+    setLudoSetup(next);
+  };
+
+  // Chess table, on the same "follow the room until the host overrules it"
+  // rule as Ludo above.
+  const [chessSetup, setChessSetup] = useState<ChessSetup>(() => defaultChessSetup(room.players.length));
+  const chessTouched = useRef(false);
+  useEffect(() => {
+    if (chessTouched.current) return;
+    setChessSetup((current) => ({ ...current, mode: defaultChessSetup(room.players.length).mode }));
+  }, [room.players.length]);
+  const changeChessSetup = (next: ChessSetup) => {
+    chessTouched.current = true;
+    setChessSetup(next);
+  };
   const [isShuffling, setIsShuffling] = useState(false);
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
@@ -689,7 +725,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                     )}
                   </h4>
                   <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    1v1 Duels, 2v2 Team Consultation with secret strategy voice, or Solo vs AI Bot!
+                    Solo vs the computer, 1v1 duels, or 2v2 where partners consult on every move.
                   </p>
                 </div>
               </button>
@@ -719,11 +755,40 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                     )}
                   </h4>
                   <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    Classic 4-player Ludo with animated dice, background party music, and bot fill!
+                    2, 3 or 4 seats. Fill the empty chairs with computer players at three strengths.
                   </p>
                 </div>
               </button>
             </div>
+
+            {/* Ludo needs its table set before it starts — how many seats, and
+                which of them the computer takes. Shown only when Ludo is the
+                selected mode, so it never crowds the other games. */}
+            {activeMode === 'ludo' && (
+              <div className="pt-3">
+                <LudoSetupPanel
+                  value={ludoSetup}
+                  onChange={changeLudoSetup}
+                  humans={room.players}
+                  editable={myPlayer.isHost}
+                />
+              </div>
+            )}
+
+            {/* Chess picks its format, clock, side and computer strength here.
+                All four used to be guessed from the player count, so a room of
+                two could never play the computer and nobody could choose to
+                play Black. */}
+            {activeMode === 'chess' && (
+              <div className="pt-3">
+                <ChessSetupPanel
+                  value={chessSetup}
+                  onChange={changeChessSetup}
+                  humans={room.players}
+                  editable={myPlayer.isHost}
+                />
+              </div>
+            )}
           </div>
 
           {/* Toggle Button for Custom Deck Settings (HIDDEN BY DEFAULT) */}
@@ -732,7 +797,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 room into team mode so the crew roster appears above and people
                 can arrange sides, the second actually starts the series. */}
             <button
-              onClick={() => (onSelectMode ? onSelectMode(activeMode) : onStartGame())}
+              onClick={() => (onSelectMode ? onSelectMode(activeMode, { ludo: ludoSetup, chess: chessSetup }) : onStartGame())}
               className="w-full bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-sm sm:text-base py-3 sm:py-3.5 px-6 sm:px-8 rounded-2xl flex items-center justify-center gap-2 sm:gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-yellow"
             >
               <Play className="w-5 h-5 fill-current" />

@@ -280,7 +280,7 @@ export default function StoryBuilderGame({
         className="w-full max-w-4xl flex flex-col items-center gap-8 mx-auto"
       >
         <div className="flex flex-col items-center gap-2">
-          <h2 className="text-3xl font-black text-white text-center">Who was the funniest? ðŸ˜‚</h2>
+          <h2 className="text-3xl font-black text-white text-center">Who was the funniest? 😂</h2>
           <div className="text-4xl font-bold text-partyYellow my-4">{timeLeft}</div>
         </div>
 

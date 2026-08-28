@@ -48,7 +48,7 @@ export default function GuessTheVoiceGame({
     if (isPerformer && localPhase === 'prompting' && state?.prompt) {
       aiGameMaster.speak("You are the secret voice! Get ready to read the prompt...");
     } else if (!isPerformer && localPhase === 'prompting') {
-      aiGameMaster.speak("Someone's voice is disguised â€” get ready to guess who it is!");
+      aiGameMaster.speak("Someone's voice is disguised — get ready to guess who it is!");
     }
   }, [isPerformer, localPhase, state?.prompt]);
 
@@ -137,7 +137,7 @@ export default function GuessTheVoiceGame({
       
       <div className="text-center mb-6">
         <h2 className="text-2xl sm:text-3xl font-black italic uppercase tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 mb-2 drop-shadow-md">
-          Guess the Voice ðŸ•µï¸
+          Guess the Voice 🕵️
         </h2>
         <p className="text-white/60 text-sm">
           {localPhase === 'prompting' && "Get ready..."}
@@ -248,7 +248,7 @@ export default function GuessTheVoiceGame({
             {localPhase === 'voting' && isPerformer && (
               <div className="p-6 bg-white/5 rounded-2xl border border-white/10 text-center">
                 <Eye className="w-8 h-8 text-white/40 mx-auto mb-3" />
-                <div className="text-4xl">{myPlayer?.avatar?.emoji || 'ðŸ‘¤'}</div><p className="text-white/60">Watch them try to guess your voice!</p>
+                <div className="text-4xl">{myPlayer?.avatar?.emoji || '👤'}</div><p className="text-white/60">Watch them try to guess your voice!</p>
               </div>
             )}
           </motion.div>
@@ -261,7 +261,7 @@ export default function GuessTheVoiceGame({
             
             <div className="inline-flex flex-col items-center justify-center p-6 bg-gradient-to-b from-purple-500/20 to-transparent border border-purple-500/30 rounded-3xl">
               <div className="w-20 h-20 bg-purple-600 rounded-full flex items-center justify-center mb-4 text-3xl shadow-[0_0_40px_rgba(147,51,234,0.5)]">
-                {room.players.find(p => p.id === state.performerId)?.avatar?.emoji || 'ðŸ‘¤'}
+                {room.players.find(p => p.id === state.performerId)?.avatar?.emoji || '👤'}
               </div>
               <h2 className="text-3xl font-black">{room.players.find(p => p.id === state.performerId)?.name}</h2>
             </div>
@@ -277,7 +277,7 @@ export default function GuessTheVoiceGame({
                     <div key={voterId} className="flex justify-between items-center border-b border-white/5 pb-1">
                       <span className="text-white/70">{voter}</span>
                       <span className={correct ? 'text-emerald-400 font-bold' : 'text-red-400'}>
-                        {guessed} {correct ? 'âœ…' : 'âŒ'}
+                        {guessed} {correct ? '✅' : '❌'}
                       </span>
                     </div>
                   );

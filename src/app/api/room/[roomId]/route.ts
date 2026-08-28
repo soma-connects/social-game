@@ -11,13 +11,29 @@ import {
   TeamId,
 } from '@/lib/types';
 import { Chess } from 'chess.js';
-import { ChessRoomState, ChessTimeControl, BotDifficulty, ChessPieceColor } from '@/lib/chess/chessTypes';
-import { LudoRoomState, LudoColor, LudoPlayer, LudoToken } from '@/lib/ludo/ludoTypes';
+import {
+  ChessGameMode,
+  ChessPlayerSlot,
+  ChessRoomState,
+  ChessTimeControl,
+  BotDifficulty,
+  ChessPieceColor,
+} from '@/lib/chess/chessTypes';
+import { pickBotDriverId } from '@/lib/botDriver';
+import {
+  LudoBotSkill,
+  LudoRoomState,
+  LudoColor,
+  LudoPlayer,
+  LudoToken,
+} from '@/lib/ludo/ludoTypes';
 import {
   canMoveLudoToken,
   getLudoNextPosition,
   chooseBestLudoMove,
-  LUDO_COLOR_ORDER,
+  isLudoColorFinished,
+  nextLudoColor,
+  seatingFor,
   SAFE_POSITIONS,
 } from '@/lib/ludo/ludoRules';
 import { AVATARS, DARES, DUEL_TOPICS } from '@/lib/gameContent';
@@ -497,6 +513,12 @@ const UNAUTHENTICATED_ACTIONS = new Set(['create', 'join']);
 
 /** Actions only the host may send. */
 const HOST_ONLY_ACTIONS = new Set([
+  // Starting a board wipes whatever is on it, so it is the host's call.
+  // Without this any player could restart a match somebody was winning.
+  'chess_start_match',
+  'chess_rematch',
+  'ludo_start_match',
+  'ludo_rematch',
   'update_settings',
   'set_theme',
   'update_minigames',
@@ -1146,6 +1168,319 @@ export async function GET(_request: Request, { params }: { params: { roomId: str
   // and health-check surface now. Presence pruning rides on the heartbeat.
   if (prunePresence(room)) await writeRoom(room);
   return NextResponse.json(room);
+}
+
+// ─── Chess line-up ──────────────────────────────────────────────────────────
+
+const CHESS_BOT_LABELS: Record<BotDifficulty, string> = {
+  cadet: 'Cadet',
+  navigator: 'Navigator',
+  commander: 'Commander',
+  overlord: 'Overlord',
+};
+
+function coerceChessDifficulty(value: unknown): BotDifficulty {
+  return value === 'cadet' || value === 'commander' || value === 'overlord' ? value : 'navigator';
+}
+
+/** Base time and increment for each control, in milliseconds. */
+function chessClockFor(control: ChessTimeControl): { baseTimeMs: number; incMs: number } {
+  switch (control) {
+    case 'bullet_1m':
+      return { baseTimeMs: 60_000, incMs: 0 };
+    case 'blitz_3m':
+      return { baseTimeMs: 180_000, incMs: 2_000 };
+    case 'rapid_10m':
+      return { baseTimeMs: 600_000, incMs: 5_000 };
+    case 'casual':
+      // A day, which is the same as "no clock" for a party game but keeps every
+      // code path working on real numbers.
+      return { baseTimeMs: 86_400_000, incMs: 0 };
+    case 'blitz_5m':
+    default:
+      return { baseTimeMs: 300_000, incMs: 3_000 };
+  }
+}
+
+function chessBotSlot(color: ChessPieceColor, teamSlot: 1 | 2, skill: BotDifficulty): ChessPlayerSlot {
+  return {
+    playerId: `bot_${color}_${teamSlot}`,
+    name: `Deep Star ${CHESS_BOT_LABELS[skill]}`,
+    avatar: '/avatars/robot_face.jpg',
+    color,
+    teamSlot,
+    isAi: true,
+    botSkill: skill,
+  };
+}
+
+function chessHumanSlot(player: Player, color: ChessPieceColor, teamSlot: 1 | 2): ChessPlayerSlot {
+  return {
+    playerId: player.id,
+    name: player.name,
+    avatar: player.avatar?.faceUrl,
+    color,
+    teamSlot,
+    isAi: false,
+  };
+}
+
+/**
+ * Seats a match, filling anything left over with the computer.
+ *
+ * Every empty chair used to become a placeholder nobody controlled — starting
+ * a 1v1 alone produced an opponent called "Opponent" with a made-up id, and
+ * Black could never move again. An empty chair is a computer now, which is the
+ * only answer that leaves a playable game.
+ */
+function seatChessMatch(
+  room: RoomState,
+  mode: ChessGameMode,
+  humanColor: ChessPieceColor,
+  skill: BotDifficulty
+): { whitePlayers: ChessPlayerSlot[]; blackPlayers: ChessPlayerSlot[]; spectators: string[] } {
+  const other: ChessPieceColor = humanColor === 'w' ? 'b' : 'w';
+  const queue = [...room.players];
+  const white: ChessPlayerSlot[] = [];
+  const black: ChessPlayerSlot[] = [];
+  const push = (color: ChessPieceColor, slot: ChessPlayerSlot) =>
+    (color === 'w' ? white : black).push(slot);
+
+  if (mode === 'vs_ai') {
+    const human = queue.shift();
+    if (human) push(humanColor, chessHumanSlot(human, humanColor, 1));
+    else push(humanColor, chessBotSlot(humanColor, 1, skill));
+    push(other, chessBotSlot(other, 1, skill));
+  } else if (mode === '1v1') {
+    const seats: ChessPieceColor[] = [humanColor, other];
+    seats.forEach((color) => {
+      const human = queue.shift();
+      push(color, human ? chessHumanSlot(human, color, 1) : chessBotSlot(color, 1, skill));
+    });
+  } else {
+    // 2v2. People are dealt one side at a time so a three-player room ends up
+    // 2-v-1-plus-computer rather than 2-v-0 with a whole side on autopilot.
+    const seats: { color: ChessPieceColor; teamSlot: 1 | 2 }[] = [
+      { color: humanColor, teamSlot: 1 },
+      { color: other, teamSlot: 1 },
+      { color: humanColor, teamSlot: 2 },
+      { color: other, teamSlot: 2 },
+    ];
+    seats.forEach(({ color, teamSlot }) => {
+      const human = queue.shift();
+      push(color, human ? chessHumanSlot(human, color, teamSlot) : chessBotSlot(color, teamSlot, skill));
+    });
+  }
+
+  return { whitePlayers: white, blackPlayers: black, spectators: queue.map((p) => p.id) };
+}
+
+/** The slots on the side to move. */
+function chessActiveSlots(cs: ChessRoomState): ChessPlayerSlot[] {
+  return cs.turn === 'w' ? cs.whitePlayers : cs.blackPlayers;
+}
+
+/**
+ * True when nobody in the room controls the side to move.
+ *
+ * A side with one person and one computer is NOT this: the person plays, and
+ * their computer partner offers a suggestion through the 2v2 proposal box.
+ */
+function chessSideIsBot(cs: ChessRoomState): boolean {
+  const slots = chessActiveSlots(cs);
+  return slots.length > 0 && slots.every((s) => s.isAi);
+}
+
+/** The computer teammate on the side to move, if that side also has a person. */
+function chessAdvisorSlot(cs: ChessRoomState): ChessPlayerSlot | undefined {
+  const slots = chessActiveSlots(cs);
+  if (slots.every((s) => s.isAi)) return undefined;
+  return slots.find((s) => s.isAi);
+}
+
+// ─── Ludo turn engine ───────────────────────────────────────────────────────
+//
+// Rolling, moving and passing the turn all happen from three places — a human
+// action, a computer's step, and the auto-play when a roll leaves exactly one
+// legal move — so the rules live here rather than being written out three
+// times and drifting apart.
+
+const BOT_SKILL_LABELS: Record<LudoBotSkill, string> = {
+  easy: 'Rookie',
+  normal: 'Sharp',
+  hard: 'Ruthless',
+};
+
+function coerceBotSkill(value: unknown): LudoBotSkill {
+  return value === 'easy' || value === 'hard' ? value : 'normal';
+}
+
+/**
+ * Fills in fields a room predating the variable line-up will not have.
+ *
+ * A match already in progress when this deployed has no `seatOrder` and no
+ * `turnSeq`, and every rule below walks one or the other. Repairing it in place
+ * is a few lines; the alternative is a live game throwing on the next roll.
+ */
+function migrateLudoState(ls: LudoRoomState): LudoRoomState {
+  if (!Array.isArray(ls.seatOrder) || ls.seatOrder.length === 0) {
+    ls.seatOrder = seatingFor(4).filter((color) => (ls.tokens[color] ?? []).length > 0);
+    if (ls.seatOrder.length === 0) ls.seatOrder = seatingFor(4);
+  }
+  if (typeof ls.turnSeq !== 'number') ls.turnSeq = 0;
+  if (!Array.isArray(ls.rankings)) ls.rankings = [];
+  return ls;
+}
+
+/** The seat whose turn it is, or undefined if that colour is empty. */
+function activeLudoSeat(ls: LudoRoomState): LudoPlayer | undefined {
+  return ls.players.find((p) => p.color === ls.activeColor);
+}
+
+function ludoSeatName(ls: LudoRoomState, color: LudoColor): string {
+  return ls.players.find((p) => p.color === color)?.name ?? color.toUpperCase();
+}
+
+/**
+ * Rejects anyone who is not the person whose turn it is.
+ *
+ * Ludo had no check like this at all: every roll and every move was accepted
+ * from any player in the room, so one person could play out somebody else's
+ * turn — or the whole game — from their own browser.
+ */
+function requireLudoSeat(ls: LudoRoomState, callerId: unknown): NextResponse | null {
+  if (ls.gameOver) {
+    return NextResponse.json({ error: 'This match has finished' }, { status: 409 });
+  }
+  const seat = activeLudoSeat(ls);
+  if (!seat) {
+    return NextResponse.json({ error: 'Nobody is sitting in that colour' }, { status: 409 });
+  }
+  if (seat.isAi) {
+    return NextResponse.json({ error: 'It is the computer’s turn' }, { status: 403 });
+  }
+  if (seat.playerId !== callerId) {
+    return NextResponse.json({ error: 'It is not your turn' }, { status: 403 });
+  }
+  return null;
+}
+
+/**
+ * Hands the turn to the next seat still in the race.
+ *
+ * Walks `seatOrder` rather than stepping `(i + 1) % 4`, which is what this used
+ * to do — with two or three players that lands on a colour nobody owns and the
+ * game simply stops.
+ */
+function advanceLudoTurn(ls: LudoRoomState): void {
+  ls.hasRolled = false;
+  ls.diceValue = null;
+  // Sixes belong to whoever rolled them. Carrying the count across a turn
+  // change had the next player forfeiting for somebody else's streak.
+  ls.consecutiveSixes = 0;
+  ls.turnSeq += 1;
+
+  const done = (color: LudoColor) => isLudoColorFinished(ls.tokens[color] ?? []);
+  const remaining = ls.seatOrder.filter((color) => !done(color));
+
+  // One seat left still moving means the race is decided — walking your last
+  // tokens home unopposed is not a game, it is paperwork.
+  if (remaining.length <= 1) {
+    for (const color of remaining) {
+      if (!ls.rankings.includes(color)) ls.rankings.push(color);
+    }
+    ls.gameOver = true;
+    return;
+  }
+
+  const next = nextLudoColor(ls.seatOrder, ls.activeColor, done);
+  if (!next) {
+    ls.gameOver = true;
+    return;
+  }
+  ls.activeColor = next;
+}
+
+/** Moves one token, resolves the capture, and decides who rolls next. */
+function applyLudoMove(room: RoomState, ls: LudoRoomState, token: LudoToken, roll: number): void {
+  const color = ls.activeColor;
+  const who = ludoSeatName(ls, color);
+
+  const next = getLudoNextPosition(token, roll);
+  token.position = next;
+  ls.turnSeq += 1;
+
+  let captured = false;
+  if (next >= 0 && next < 52 && !SAFE_POSITIONS.has(next)) {
+    for (const [other, enemies] of Object.entries(ls.tokens) as [LudoColor, LudoToken[]][]) {
+      if (other === color) continue;
+      for (const enemy of enemies) {
+        if (enemy.position !== next) continue;
+        enemy.position = -1;
+        captured = true;
+        pushEvent(room, `💥 ${who} knocked ${ludoSeatName(ls, other)} back to the yard!`, 'debuff');
+      }
+    }
+  }
+
+  ls.lastActionText =
+    `${who} moved with a ${roll}.` + (next === 999 ? ' That token is home!' : '');
+
+  const finished = isLudoColorFinished(ls.tokens[color]);
+  if (finished && !ls.rankings.includes(color)) {
+    ls.rankings.push(color);
+    if (!ls.winner) {
+      ls.winner = color;
+      pushEvent(room, `🏆 ${who} won the Ludo match!`, 'system');
+    } else {
+      pushEvent(room, `🎯 ${who} finished #${ls.rankings.length}.`, 'system');
+    }
+  }
+
+  // A six or a capture earns another roll — but not to a seat that has just
+  // brought its last token home and has nothing left to move.
+  if ((roll === 6 || captured) && !finished) {
+    ls.hasRolled = false;
+    ls.diceValue = null;
+    ls.lastActionText += ' Bonus roll!';
+    return;
+  }
+
+  advanceLudoTurn(ls);
+}
+
+/** Rolls for the seat on turn, and plays the move if there is only one. */
+function applyLudoRoll(room: RoomState, ls: LudoRoomState): void {
+  const roll = Math.floor(Math.random() * 6) + 1;
+  const who = ludoSeatName(ls, ls.activeColor);
+
+  ls.diceValue = roll;
+  ls.hasRolled = true;
+  ls.turnSeq += 1;
+  ls.consecutiveSixes = roll === 6 ? ls.consecutiveSixes + 1 : 0;
+
+  if (ls.consecutiveSixes >= 3) {
+    ls.lastActionText = `Three sixes in a row — ${who} forfeits the turn.`;
+    advanceLudoTurn(ls);
+    return;
+  }
+
+  const legal = ls.tokens[ls.activeColor].filter((t) => canMoveLudoToken(t, roll));
+
+  if (legal.length === 0) {
+    ls.lastActionText = `${who} rolled a ${roll} — nothing can move.`;
+    advanceLudoTurn(ls);
+    return;
+  }
+
+  if (legal.length === 1) {
+    // Not a decision. Making somebody tap the only piece that can move is
+    // ceremony, and on a phone it is a fiddly one.
+    applyLudoMove(room, ls, legal[0], roll);
+    return;
+  }
+
+  ls.lastActionText = `${who} rolled a ${roll} — pick a token.`;
 }
 
 export async function POST(request: Request, { params }: { params: { roomId: string } }) {
@@ -2903,45 +3238,19 @@ async function applyAction(
 
     // ── Chess Game Actions ──────────────────────────────────────────────────
     case 'chess_start_match': {
-      const mode = (body.mode as '1v1' | '2v2' | 'vs_ai') || '1v1';
+      const mode = (body.mode as ChessGameMode) || '1v1';
       const timeControl = (body.timeControl as ChessTimeControl) || 'blitz_5m';
-      const botDifficulty = (body.botDifficulty as BotDifficulty) || 'navigator';
-
-      let baseTimeMs = 300_000;
-      let incMs = 0;
-      if (timeControl === 'bullet_1m') { baseTimeMs = 60_000; incMs = 0; }
-      else if (timeControl === 'blitz_3m') { baseTimeMs = 180_000; incMs = 2_000; }
-      else if (timeControl === 'blitz_5m') { baseTimeMs = 300_000; incMs = 3_000; }
-      else if (timeControl === 'rapid_10m') { baseTimeMs = 600_000; incMs = 5_000; }
-      else if (timeControl === 'casual') { baseTimeMs = 86_400_000; incMs = 0; } // 24h
+      const botDifficulty = coerceChessDifficulty(body.botDifficulty);
+      const humanColor: ChessPieceColor = body.humanColor === 'b' ? 'b' : 'w';
+      const { baseTimeMs, incMs } = chessClockFor(timeControl);
 
       const chess = new Chess();
-      const whitePlayers: any[] = [];
-      const blackPlayers: any[] = [];
-      const spectators: string[] = [];
-
-      if (mode === 'vs_ai') {
-        const human = room.players[0] || makePlayer('Player', 0, true);
-        whitePlayers.push({ playerId: human.id, name: human.name, avatar: human.avatar?.faceUrl, color: 'w', teamSlot: 1 });
-        blackPlayers.push({ playerId: 'bot_ai', name: `Deep Star (${botDifficulty.toUpperCase()})`, avatar: '/avatars/robot_face.jpg', color: 'b', teamSlot: 1, isAi: true });
-      } else if (mode === '1v1') {
-        const p1 = room.players[0];
-        const p2 = room.players[1] || { id: 'p2_temp', name: 'Opponent' };
-        if (p1) whitePlayers.push({ playerId: p1.id, name: p1.name, avatar: p1.avatar?.faceUrl, color: 'w', teamSlot: 1 });
-        if (p2) blackPlayers.push({ playerId: p2.id, name: p2.name, avatar: (p2 as any).avatar?.faceUrl, color: 'b', teamSlot: 1 });
-        for (let i = 2; i < room.players.length; i++) spectators.push(room.players[i].id);
-      } else if (mode === '2v2') {
-        // 2v2 consultation mode
-        const p1 = room.players[0];
-        const p2 = room.players[1];
-        const p3 = room.players[2];
-        const p4 = room.players[3];
-        if (p1) whitePlayers.push({ playerId: p1.id, name: p1.name, avatar: p1.avatar?.faceUrl, color: 'w', teamSlot: 1 });
-        if (p2) whitePlayers.push({ playerId: p2.id, name: p2.name, avatar: p2.avatar?.faceUrl, color: 'w', teamSlot: 2 });
-        if (p3) blackPlayers.push({ playerId: p3.id, name: p3.name, avatar: p3.avatar?.faceUrl, color: 'b', teamSlot: 1 });
-        if (p4) blackPlayers.push({ playerId: p4.id, name: p4.name, avatar: p4.avatar?.faceUrl, color: 'b', teamSlot: 2 });
-        for (let i = 4; i < room.players.length; i++) spectators.push(room.players[i].id);
-      }
+      const { whitePlayers, blackPlayers, spectators } = seatChessMatch(
+        room,
+        mode,
+        humanColor,
+        botDifficulty
+      );
 
       room.roomType = 'chess';
       room.phase = 'chess_match';
@@ -2970,9 +3279,66 @@ async function applyAction(
         proposals: { w: null, b: null },
         botDifficulty,
         lastMove: null,
+        setup: { mode, timeControl, botDifficulty, humanColor },
+        gameNumber: 1,
       };
 
-      pushEvent(room, `♟️ Chess Match started! Mode: ${mode.toUpperCase()}`, 'system');
+      const bots = [...whitePlayers, ...blackPlayers].filter((slot) => slot.isAi).length;
+      pushEvent(
+        room,
+        `♟️ Chess started — ${mode.toUpperCase().replace('_', ' ')}` +
+          (bots ? `, ${bots} computer seat${bots === 1 ? '' : 's'} (${CHESS_BOT_LABELS[botDifficulty]})` : ''),
+        'system'
+      );
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /**
+     * Replays the same line-up with the colours swapped.
+     *
+     * Swapping matters: in a timed game the side that just lost on a bad clock
+     * deserves the other end of it, and against the computer it is the only way
+     * to play Black without restarting from the lobby.
+     */
+    case 'chess_rematch': {
+      const cs = room.chessState;
+      if (!cs) return NextResponse.json({ error: 'No chess match to replay' }, { status: 400 });
+
+      const flip = (slot: ChessPlayerSlot): ChessPlayerSlot => ({
+        ...slot,
+        color: slot.color === 'w' ? 'b' : 'w',
+      });
+      const nextWhite = cs.blackPlayers.map(flip);
+      const nextBlack = cs.whitePlayers.map(flip);
+
+      const chess = new Chess();
+      const { baseTimeMs, incMs } = chessClockFor(cs.timeControl);
+
+      cs.whitePlayers = nextWhite;
+      cs.blackPlayers = nextBlack;
+      cs.fen = chess.fen();
+      cs.pgn = '';
+      cs.history = [];
+      cs.turn = 'w';
+      cs.isCheck = false;
+      cs.isCheckmate = false;
+      cs.isDraw = false;
+      cs.isStalemate = false;
+      cs.winner = undefined;
+      cs.winReason = undefined;
+      cs.lastMove = null;
+      cs.proposals = { w: null, b: null };
+      cs.clocks = {
+        whiteTimeMs: baseTimeMs,
+        blackTimeMs: baseTimeMs,
+        incrementMs: incMs,
+        lastTickTimestamp: Date.now(),
+        activeColor: 'w',
+        isRunning: cs.timeControl !== 'casual',
+      };
+      cs.gameNumber = (cs.gameNumber ?? 1) + 1;
+
+      pushEvent(room, '🔁 Chess rematch — colours swapped.', 'system');
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -2985,19 +3351,37 @@ async function applyAction(
       const cs = room.chessState;
       const chess = new Chess(cs.fen);
 
+      if (cs.winner) {
+        return NextResponse.json({ error: 'This game has finished' }, { status: 409 });
+      }
+
       // Verify the caller is on the side to move.
       //
       // `|| cs.mode === 'vs_ai'` used to short-circuit this entirely, so in a
       // match against the computer ANY caller — including a spectator — could
-      // play moves for either colour. The bot is now allowed only on Black's
-      // turn, and only from the client that drives it (the host).
+      // play moves for either colour.
       const callerId = body.callerId ?? body.playerId;
-      const activeSlots = cs.turn === 'w' ? cs.whitePlayers : cs.blackPlayers;
-      const isOnActiveSide = activeSlots.some((s) => s.playerId === callerId);
-      const isBotMove = cs.mode === 'vs_ai' && cs.turn === 'b' && callerId === room.hostId;
+      const isOnActiveSide = chessActiveSlots(cs).some(
+        (s) => s.playerId === callerId && !s.isAi
+      );
+
+      // A computer move may only come from the one client driving the bots, and
+      // only for a side that is entirely computer-controlled.
+      const isBotMove =
+        !isOnActiveSide &&
+        chessSideIsBot(cs) &&
+        callerId === pickBotDriverId(room.players, room.hostId);
 
       if (!isOnActiveSide && !isBotMove) {
         return NextResponse.json({ error: 'It is not your turn to move' }, { status: 403 });
+      }
+
+      // Duplicate guard for computer moves. Whoever drives the bots can change
+      // mid-game — a host leaving hands the job on — and for a moment two
+      // clients believe it is theirs. The ply they are playing against settles
+      // it: the second one is aiming at a position that no longer exists.
+      if (isBotMove && typeof body.expectedPly === 'number' && body.expectedPly !== cs.history.length) {
+        return NextResponse.json({ room, stale: true });
       }
 
       try {
@@ -3029,9 +3413,10 @@ async function applyAction(
         cs.isStalemate = chess.isStalemate();
         cs.lastMove = { from: move.from, to: move.to, san: move.san };
 
-        // Clear team proposals for the side that just moved
-        if (move.color === 'w') cs.proposals.w = null;
-        else cs.proposals.b = null;
+        // Both sides' suggestions are stale the moment the position changes.
+        // Clearing only the mover's left the opponent staring at a proposal for
+        // a board that no longer existed.
+        cs.proposals = { w: null, b: null };
 
         if (cs.isCheckmate) {
           cs.winner = move.color;
@@ -3058,19 +3443,22 @@ async function applyAction(
         return NextResponse.json({ error: '2v2 consultation mode required' }, { status: 400 });
       }
       const { from, to, promotion, san } = body;
-      const callerId = body.playerId;
       const cs = room.chessState;
+
+      // The authenticated caller, not whatever the body claimed. Reading
+      // body.playerId here let one player post suggestions in another's name.
+      const callerId = body.callerId;
       const player = room.players.find((p) => p.id === callerId);
 
-      const isWhite = cs.whitePlayers.some((p) => p.playerId === callerId);
-      const isBlack = cs.blackPlayers.some((p) => p.playerId === callerId);
+      const isWhite = cs.whitePlayers.some((p) => p.playerId === callerId && !p.isAi);
+      const isBlack = cs.blackPlayers.some((p) => p.playerId === callerId && !p.isAi);
 
       if (!isWhite && !isBlack) {
         return NextResponse.json({ error: 'Only active team members can propose moves' }, { status: 403 });
       }
 
       const proposal = {
-        proposerId: callerId,
+        proposerId: String(callerId),
         proposerName: player?.name || 'Teammate',
         from,
         to,
@@ -3085,12 +3473,63 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    /**
+     * A computer teammate's suggestion in 2v2.
+     *
+     * A side with one person and one computer would otherwise have the person
+     * playing alone against a pair. The computer cannot move for them — it
+     * would be playing their turn — so it puts a move in the consultation box
+     * and they decide.
+     */
+    case 'chess_bot_propose': {
+      const cs = room.chessState;
+      if (!cs || cs.mode !== '2v2') {
+        return NextResponse.json({ error: '2v2 consultation mode required' }, { status: 400 });
+      }
+      if (cs.winner) return NextResponse.json({ room, stale: true });
+
+      if (body.callerId !== pickBotDriverId(room.players, room.hostId)) {
+        return NextResponse.json({ room, stale: true });
+      }
+      if (typeof body.expectedPly === 'number' && body.expectedPly !== cs.history.length) {
+        return NextResponse.json({ room, stale: true });
+      }
+
+      const advisor = chessAdvisorSlot(cs);
+      if (!advisor) {
+        return NextResponse.json({ error: 'No computer teammate on that side' }, { status: 400 });
+      }
+
+      const side = cs.turn;
+      if (cs.proposals[side]) {
+        // A person on that side already suggested something. Talking over them
+        // is exactly what a teammate should not do.
+        return NextResponse.json({ room, stale: true });
+      }
+
+      cs.proposals[side] = {
+        proposerId: advisor.playerId,
+        proposerName: advisor.name,
+        from: String(body.from ?? ''),
+        to: String(body.to ?? ''),
+        promotion: body.promotion,
+        san: body.san,
+        timestamp: Date.now(),
+      };
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
     case 'chess_resign': {
       if (!room.chessState) return NextResponse.json({ error: 'No chess game active' }, { status: 400 });
       const cs = room.chessState;
-      const callerId = body.playerId;
-      const isWhite = cs.whitePlayers.some((p) => p.playerId === callerId);
-      const isBlack = cs.blackPlayers.some((p) => p.playerId === callerId);
+      if (cs.winner) return NextResponse.json({ error: 'This game has finished' }, { status: 409 });
+
+      // The authenticated caller. This used to read body.playerId, which meant
+      // one player could resign the game on somebody else's behalf.
+      const callerId = body.callerId;
+      const isWhite = cs.whitePlayers.some((p) => p.playerId === callerId && !p.isAi);
+      const isBlack = cs.blackPlayers.some((p) => p.playerId === callerId && !p.isAi);
 
       if (!isWhite && !isBlack) return NextResponse.json({ error: 'Only players can resign' }, { status: 403 });
 
@@ -3142,9 +3581,9 @@ async function applyAction(
       const cs = room.chessState;
       if (!cs) return NextResponse.json({ error: 'No chess game active' }, { status: 400 });
 
-      const callerId = body.callerId ?? body.playerId;
-      const isWhite = cs.whitePlayers.some((p) => p.playerId === callerId);
-      const isBlack = cs.blackPlayers.some((p) => p.playerId === callerId);
+      const callerId = body.callerId;
+      const isWhite = cs.whitePlayers.some((p) => p.playerId === callerId && !p.isAi);
+      const isBlack = cs.blackPlayers.some((p) => p.playerId === callerId && !p.isAi);
       if (!isWhite && !isBlack) {
         return NextResponse.json({ error: 'Only players on that side can clear it' }, { status: 403 });
       }
@@ -3155,201 +3594,190 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
-    // ── Ludo Game Actions ───────────────────────────────────────────────────
+    // ── Ludo Game Actions ─────────────────────────────────────────────
     case 'ludo_start_match': {
-      const colors: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
-      const players: LudoPlayer[] = [];
+      const seatCount = Math.min(4, Math.max(2, Number(body.seatCount) || 4));
+      const seatOrder = seatingFor(seatCount);
+      const botSkill = coerceBotSkill(body.botSkill);
 
-      // Assign existing human players to colors, fill remainder with bots
-      for (let i = 0; i < 4; i++) {
-        const color = colors[i];
-        if (i < room.players.length) {
-          const human = room.players[i];
-          players.push({
+      // Whatever the lobby asked for, trimmed to the seats that exist.
+      const requested: ('human' | 'ai')[] = Array.isArray(body.seatKinds)
+        ? body.seatKinds.slice(0, seatOrder.length).map((k: unknown) => (k === 'ai' ? 'ai' : 'human'))
+        : seatOrder.map(() => 'human');
+      while (requested.length < seatOrder.length) requested.push('ai');
+
+      // People first, in join order. A chair marked for a person with nobody
+      // left to sit in it becomes a computer — that is the whole point of the
+      // mixed lineup, and it is why a room of two can still play a full four.
+      const queue = [...room.players];
+      const players: LudoPlayer[] = seatOrder.map((color, i) => {
+        const human = requested[i] === 'human' ? queue.shift() : undefined;
+        if (human) {
+          return {
             playerId: human.id,
             name: human.name,
             avatar: human.avatar?.faceUrl,
             color,
             isAi: false,
-          });
-        } else {
-          players.push({
-            playerId: `bot_${color}`,
-            name: `Bot ${color.toUpperCase()}`,
-            avatar: '/avatars/robot_face.jpg',
-            color,
-            isAi: true,
-          });
+          };
         }
+        return {
+          playerId: `bot_${color}`,
+          // Title case: the roster already shows a colour dot beside this,
+          // and "Sharp YELLOW" reads as shouting rather than as a name.
+          name: `${BOT_SKILL_LABELS[botSkill]} ${color[0].toUpperCase()}${color.slice(1)}`,
+          avatar: '/avatars/robot_face.jpg',
+          color,
+          isAi: true,
+          botSkill,
+        };
+      });
+
+      // A table of nothing but computers has nobody to take a turn, so the
+      // browser that started it would sit watching a game it cannot join.
+      if (room.players.length > 0 && players.every((p) => p.isAi)) {
+        const host = room.players.find((p) => p.id === room.hostId) ?? room.players[0];
+        players[0] = {
+          playerId: host.id,
+          name: host.name,
+          avatar: host.avatar?.faceUrl,
+          color: players[0].color,
+          isAi: false,
+        };
       }
 
-      const tokens: Record<LudoColor, LudoToken[]> = {
-        red: [0, 1, 2, 3].map((id) => ({ id, color: 'red', position: -1 })),
-        green: [0, 1, 2, 3].map((id) => ({ id, color: 'green', position: -1 })),
-        yellow: [0, 1, 2, 3].map((id) => ({ id, color: 'yellow', position: -1 })),
-        blue: [0, 1, 2, 3].map((id) => ({ id, color: 'blue', position: -1 })),
-      };
+      // Colours nobody is sitting in get no tokens at all, so an unused corner
+      // reads as an empty chair rather than four pieces waiting to move.
+      const tokens: Record<LudoColor, LudoToken[]> = { red: [], green: [], yellow: [], blue: [] };
+      for (const color of seatOrder) {
+        tokens[color] = [0, 1, 2, 3].map((id) => ({ id, color, position: -1 }));
+      }
 
       room.roomType = 'ludo';
       room.phase = 'ludo_match';
       room.ludoState = {
         players,
-        activeColor: 'red',
+        seatOrder,
+        activeColor: seatOrder[0],
         diceValue: null,
         hasRolled: false,
         consecutiveSixes: 0,
         tokens,
         winner: null,
         rankings: [],
-        lastActionText: 'Game started! Red rolls first.',
+        lastActionText: `Game on! ${players[0].name} rolls first.`,
+        turnSeq: 0,
+        gameOver: false,
+        setup: { seatCount: seatOrder.length, seatKinds: requested, botSkill },
       };
 
-      pushEvent(room, `🎲 Ludo Match started! 4 Players ready.`, 'system');
+      const botCount = players.filter((p) => p.isAi).length;
+      pushEvent(
+        room,
+        `🎲 Ludo match started — ${seatOrder.length} seats` +
+          (botCount ? `, ${botCount} on ${BOT_SKILL_LABELS[botSkill].toLowerCase()} computer` : ', all human'),
+        'system'
+      );
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /** Starts a fresh game on the lineup the room already agreed on. */
+    case 'ludo_rematch': {
+      const ls = room.ludoState && migrateLudoState(room.ludoState);
+      if (!ls) return NextResponse.json({ error: 'No Ludo match to replay' }, { status: 400 });
+
+      for (const color of ls.seatOrder) {
+        ls.tokens[color] = [0, 1, 2, 3].map((id) => ({ id, color, position: -1 }));
+      }
+      ls.activeColor = ls.seatOrder[0];
+      ls.diceValue = null;
+      ls.hasRolled = false;
+      ls.consecutiveSixes = 0;
+      ls.winner = null;
+      ls.rankings = [];
+      ls.gameOver = false;
+      ls.turnSeq += 1;
+      ls.lastActionText = 'Rematch! Board reset.';
+
+      pushEvent(room, '🔁 Ludo rematch — board reset.', 'system');
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'ludo_roll_dice': {
-      if (!room.ludoState) return NextResponse.json({ error: 'No active Ludo match' }, { status: 400 });
-      const ls = room.ludoState;
+      const ls = room.ludoState && migrateLudoState(room.ludoState);
+      if (!ls) return NextResponse.json({ error: 'No active Ludo match' }, { status: 400 });
+
+      const denied = requireLudoSeat(ls, body.callerId);
+      if (denied) return denied;
       if (ls.hasRolled) return NextResponse.json({ error: 'Already rolled this turn' }, { status: 400 });
 
-      const roll = Math.floor(Math.random() * 6) + 1;
-      ls.diceValue = roll;
-      ls.hasRolled = true;
-
-      const activeColor = ls.activeColor;
-      const myTokens = ls.tokens[activeColor];
-
-      if (roll === 6) {
-        ls.consecutiveSixes += 1;
-      } else {
-        ls.consecutiveSixes = 0;
-      }
-
-      // Three consecutive 6s penalty -> forfeit turn immediately
-      if (ls.consecutiveSixes >= 3) {
-        ls.consecutiveSixes = 0;
-        ls.hasRolled = false;
-        ls.diceValue = null;
-        ls.lastActionText = `3 consecutive 6s! ${activeColor.toUpperCase()} forfeits turn.`;
-        // Advance turn
-        const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
-        ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
-        return NextResponse.json({ room: await writeRoom(room) });
-      }
-
-      const validMoves = myTokens.filter((t) => canMoveLudoToken(t, roll));
-
-      if (validMoves.length === 0) {
-        // No legal moves: pass turn to next color
-        ls.lastActionText = `${activeColor.toUpperCase()} rolled a ${roll} (no moves).`;
-        ls.hasRolled = false;
-        ls.diceValue = null;
-        const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
-        ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
-      } else if (validMoves.length === 1) {
-        // Auto-move single option for speedy mobile play!
-        const token = validMoves[0];
-        const nextPos = getLudoNextPosition(token, roll);
-        token.position = nextPos;
-
-        // Check capture
-        let captured = false;
-        if (nextPos >= 0 && nextPos < 52 && !SAFE_POSITIONS.has(nextPos)) {
-          for (const [color, enemyTokens] of Object.entries(ls.tokens)) {
-            if (color === activeColor) continue;
-            for (const enemy of enemyTokens) {
-              if (enemy.position === nextPos) {
-                enemy.position = -1; // Sent home!
-                captured = true;
-                pushEvent(room, `💥 ${activeColor.toUpperCase()} captured ${color.toUpperCase()}!`, 'debuff');
-              }
-            }
-          }
-        }
-
-        // Check victory
-        const isFinished = myTokens.every((t) => t.position === 999);
-        if (isFinished && !ls.winner) {
-          ls.winner = activeColor;
-          ls.rankings.push(activeColor);
-          pushEvent(room, `🏆 ${activeColor.toUpperCase()} won the Ludo Match!`, 'system');
-        }
-
-        ls.lastActionText = `${activeColor.toUpperCase()} moved token ${token.id + 1} with a ${roll}!`;
-
-        // Grant bonus turn on 6 or capture
-        if (roll === 6 || captured) {
-          ls.hasRolled = false;
-          ls.diceValue = null;
-          ls.lastActionText += ' (Bonus Roll!)';
-        } else {
-          ls.hasRolled = false;
-          ls.diceValue = null;
-          const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
-          ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
-        }
-      }
-
+      applyLudoRoll(room, ls);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
     case 'ludo_move_token': {
-      if (!room.ludoState) return NextResponse.json({ error: 'No active Ludo match' }, { status: 400 });
-      const ls = room.ludoState;
-      const { tokenId } = body;
-      const roll = ls.diceValue;
+      const ls = room.ludoState && migrateLudoState(room.ludoState);
+      if (!ls) return NextResponse.json({ error: 'No active Ludo match' }, { status: 400 });
 
+      const denied = requireLudoSeat(ls, body.callerId);
+      if (denied) return denied;
+
+      const roll = ls.diceValue;
       if (!ls.hasRolled || !roll) {
         return NextResponse.json({ error: 'Must roll dice first' }, { status: 400 });
       }
 
-      const activeColor = ls.activeColor;
-      const token = ls.tokens[activeColor].find((t) => t.id === tokenId);
+      const token = ls.tokens[ls.activeColor].find((t) => t.id === body.tokenId);
       if (!token || !canMoveLudoToken(token, roll)) {
         return NextResponse.json({ error: 'Invalid token move' }, { status: 400 });
       }
 
-      const nextPos = getLudoNextPosition(token, roll);
-      token.position = nextPos;
+      applyLudoMove(room, ls, token, roll);
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
 
-      // Check capture
-      let captured = false;
-      if (nextPos >= 0 && nextPos < 52 && !SAFE_POSITIONS.has(nextPos)) {
-        for (const [color, enemyTokens] of Object.entries(ls.tokens)) {
-          if (color === activeColor) continue;
-          for (const enemy of enemyTokens) {
-            if (enemy.position === nextPos) {
-              enemy.position = -1;
-              captured = true;
-              pushEvent(room, `💥 ${activeColor.toUpperCase()} captured ${color.toUpperCase()}!`, 'debuff');
-            }
-          }
-        }
+    /**
+     * Plays one step of a computer seat's turn.
+     *
+     * Every browser watching the game notices the bot's turn at the same moment
+     * and every one of them sends this, so the request names the turn it meant
+     * to play. Anything arriving against a turn that has already moved on is a
+     * duplicate and is dropped — which is what stops a second browser from
+     * moving a piece using the first browser's decision.
+     */
+    case 'ludo_bot_step': {
+      const ls = room.ludoState && migrateLudoState(room.ludoState);
+      if (!ls) return NextResponse.json({ error: 'No active Ludo match' }, { status: 400 });
+      if (ls.gameOver) return NextResponse.json({ room, stale: true });
+
+      if (Number(body.seq) !== ls.turnSeq) {
+        // Not an error: somebody else got there first.
+        return NextResponse.json({ room, stale: true });
       }
 
-      // Check victory
-      const isFinished = ls.tokens[activeColor].every((t) => t.position === 999);
-      if (isFinished && !ls.winner) {
-        ls.winner = activeColor;
-        ls.rankings.push(activeColor);
-        pushEvent(room, `🏆 ${activeColor.toUpperCase()} won the Ludo Match!`, 'system');
+      const seat = ls.players.find((p) => p.color === ls.activeColor);
+      if (!seat?.isAi) {
+        return NextResponse.json({ error: 'That seat is not a computer' }, { status: 400 });
       }
 
-      ls.lastActionText = `${activeColor.toUpperCase()} moved token ${token.id + 1} with a ${roll}!`;
-
-      // Bonus roll if 6 or capture
-      if (roll === 6 || captured) {
-        ls.hasRolled = false;
-        ls.diceValue = null;
-        ls.lastActionText += ' (Bonus Roll!)';
-      } else {
-        ls.hasRolled = false;
-        ls.diceValue = null;
-        const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
-        ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
+      if (!ls.hasRolled) {
+        applyLudoRoll(room, ls);
+        return NextResponse.json({ room: await writeRoom(room) });
       }
 
+      const roll = ls.diceValue;
+      if (!roll) return NextResponse.json({ room, stale: true });
+
+      const choice = chooseBestLudoMove(ls.tokens[ls.activeColor], roll, ls.tokens, seat.botSkill ?? 'normal');
+      if (!choice) {
+        // A roll with no legal move already passes the turn, so this should be
+        // unreachable — but a bot seat that stalls would freeze the whole game.
+        ls.lastActionText = `${seat.name} has no move.`;
+        advanceLudoTurn(ls);
+        return NextResponse.json({ room: await writeRoom(room) });
+      }
+
+      applyLudoMove(room, ls, choice, roll);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

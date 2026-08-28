@@ -263,7 +263,7 @@ export default function SpellingBeeGame({ room, activePlayer, onCompleteTurn }: 
           : transcript
           ? `heard: "${transcript}"`
           : status === 'listening'
-          ? 'listeningâ€¦'
+          ? 'listening…'
           : status === 'reading'
           ? 'Reading the word...'
           : 'about to start',

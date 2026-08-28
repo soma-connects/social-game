@@ -10,6 +10,8 @@ import {
   TurnResult,
 } from './types';
 import { RoomVibeId } from './roomVibes';
+import { LudoSetup } from './ludo/ludoTypes';
+import { ChessSetup } from './chess/chessTypes';
 import { getIdToken } from './firebase/auth';
 
 const ROOM_CACHE_PREFIX = 'voice_party_room_';
@@ -476,12 +478,52 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'guess_voice_vote', voterId, guessedPlayerId });
   }
 
-  public startChessMatch(roomId: string, mode: '1v1' | '2v2' | 'vs_ai', timeControl: string, botDifficulty?: string) {
-    return this.post(roomId, { action: 'chess_start_match', mode, timeControl, botDifficulty });
+  public startChessMatch(roomId: string, setup: ChessSetup) {
+    return this.post(roomId, {
+      action: 'chess_start_match',
+      mode: setup.mode,
+      timeControl: setup.timeControl,
+      botDifficulty: setup.botDifficulty,
+      humanColor: setup.humanColor,
+    });
+  }
+
+  /** Replays the same line-up with the colours swapped. */
+  public chessRematch(roomId: string) {
+    return this.post(roomId, { action: 'chess_rematch' });
   }
 
   public makeChessMove(roomId: string, playerId: string, from: string, to: string, promotion?: string) {
     return this.post(roomId, { action: 'chess_make_move', playerId, from, to, promotion });
+  }
+
+  /**
+   * Submits a computer move.
+   *
+   * `expectedPly` is the position the engine actually thought about. Whoever
+   * drives the bots can change hands mid-game, and this is what stops the
+   * incoming client from replaying a move for a position that has moved on.
+   */
+  public makeChessBotMove(
+    roomId: string,
+    from: string,
+    to: string,
+    promotion: string | undefined,
+    expectedPly: number
+  ) {
+    return this.post(roomId, { action: 'chess_make_move', from, to, promotion, expectedPly });
+  }
+
+  /** A computer teammate's suggestion for its human partner in 2v2. */
+  public proposeChessBotMove(
+    roomId: string,
+    from: string,
+    to: string,
+    san: string | undefined,
+    promotion: string | undefined,
+    expectedPly: number
+  ) {
+    return this.post(roomId, { action: 'chess_bot_propose', from, to, san, promotion, expectedPly });
   }
 
   public proposeChessMove(roomId: string, playerId: string, from: string, to: string, san?: string, promotion?: string) {
@@ -502,8 +544,18 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'chess_resign', playerId });
   }
 
-  public startLudoMatch(roomId: string) {
-    return this.post(roomId, { action: 'ludo_start_match' });
+  public startLudoMatch(roomId: string, setup?: LudoSetup) {
+    return this.post(roomId, {
+      action: 'ludo_start_match',
+      seatCount: setup?.seatCount ?? 4,
+      seatKinds: setup?.seatKinds,
+      botSkill: setup?.botSkill ?? 'normal',
+    });
+  }
+
+  /** Replays the same lineup on a fresh board. */
+  public ludoRematch(roomId: string) {
+    return this.post(roomId, { action: 'ludo_rematch' });
   }
 
   public rollLudoDice(roomId: string) {
@@ -512,6 +564,17 @@ class RoomStoreManager {
 
   public moveLudoToken(roomId: string, tokenId: number) {
     return this.post(roomId, { action: 'ludo_move_token', tokenId });
+  }
+
+  /**
+   * Plays one step of a computer seat's turn.
+   *
+   * `seq` names the turn the caller is acting on. Every browser in the room
+   * sees the computer's turn arrive at the same instant and every one of them
+   * sends this; the sequence number is what makes the extra copies harmless.
+   */
+  public ludoBotStep(roomId: string, seq: number) {
+    return this.post(roomId, { action: 'ludo_bot_step', seq });
   }
 
   /**

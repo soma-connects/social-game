@@ -90,6 +90,8 @@ interface Peer {
   lastOfferAt?: number;
   /** Consecutive polls this peer has been missing from the call roster. */
   missedPresence: number;
+  /** Stops a failing connection sending 'bye' once per state change. */
+  byeSent?: boolean;
   /** outbound-rtp bytesSent as of the last stats check, to detect real growth. */
   lastOutboundBytes?: number;
   /**
@@ -652,7 +654,23 @@ class VoiceChatManager {
     };
 
     pc.ontrack = (event) => {
-      const [stream] = event.streams;
+      /**
+       * Take the track even when the offer named no stream.
+       *
+       * This is the one-way audio bug. `event.streams` is empty whenever the
+       * far side built its transceiver with no MediaStream to attach — which is
+       * exactly what happens while their microphone is suspended for the speech
+       * recogniser, i.e. any time they are mid mini-game when the connection is
+       * built. Their offer then carries no msid, so this handler used to return
+       * early and their track was never attached to an audio element at all.
+       *
+       * The result is asymmetric by construction and permanent: they hear you
+       * (your offer had a stream), you never hear them, and restoring their
+       * microphone does not help because the track was dropped on arrival
+       * rather than being silent. Wrapping the track is all that is needed —
+       * it is the same media either way.
+       */
+      const stream = event.streams[0] ?? (event.track ? new MediaStream([event.track]) : null);
       if (!stream) return;
       peer.stream = stream;
       audio.srcObject = stream;
@@ -687,10 +705,20 @@ class VoiceChatManager {
 
       if (pc.connectionState === 'failed') {
         peer.failed = true;
-        // Marked, not repaired here. Recovery belongs to the reconcile pass on
-        // the next poll, which knows whether this side is the offerer and can
-        // re-offer with iceRestart. restartIce() on the answering side has
-        // nothing to trigger, so relying on it here left failures permanent.
+
+        // The offering side repairs itself on the next reconcile pass, which
+        // knows it may re-offer with iceRestart. The answering side cannot —
+        // it never creates offers, and restartIce() has nothing to trigger
+        // there — so a failure only the answerer noticed used to be permanent.
+        // Saying goodbye makes the offerer tear its half down and build a fresh
+        // connection, which is the one move available from this side.
+        if (this.myId && this.myId > peer.id && !peer.byeSent) {
+          peer.byeSent = true;
+          void this.send({ kind: 'bye', from: this.myId, to: peer.id });
+          this.destroyPeer(peer);
+          this.peers.delete(peer.id);
+        }
+
         this.error = this.hasRelay
           ? 'A peer connection failed even through the relay. That player may be offline.'
           : 'No TURN relay is configured, so players on mobile networks cannot connect. See /api/ice.';

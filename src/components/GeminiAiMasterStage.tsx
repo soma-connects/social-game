@@ -153,7 +153,7 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
           )}
           <div className="flex items-center gap-2.5">
             <div className={`w-8 h-8 rounded-full bg-gradient-to-r from-partyCyan via-partyYellow to-partyPink flex items-center justify-center text-sm shadow-md ${isSpeaking ? 'animate-pulse glow-cyan' : ''}`}>
-              ðŸ¤–
+              🤖
             </div>
             <div>
               <h3 className="font-extrabold text-sm text-white flex items-center gap-1.5">
@@ -181,7 +181,7 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
           >
             {msg.sender === 'gemini' && (
               <div className="w-8 h-8 rounded-full bg-slate-900 border border-partyCyan/40 text-sm flex items-center justify-center shrink-0 shadow">
-                ðŸ¤–
+                🤖
               </div>
             )}
             <div

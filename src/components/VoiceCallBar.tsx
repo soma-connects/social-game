@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Mic, MicOff, PhoneCall, PhoneOff, Loader2, AlertTriangle, Volume2 } from 'lucide-react';
+import { Mic, MicOff, PhoneCall, PhoneOff, Loader2, AlertTriangle, Volume2, Headphones } from 'lucide-react';
 import { Player } from '@/lib/types';
 import { voiceChat, VoiceState } from '@/lib/voiceChat';
 import AvatarIllustration from './AvatarIllustration';
@@ -70,10 +70,22 @@ export default function VoiceCallBar({
     voiceChat.applyAutoMute(autoMute);
   }, [autoMute, state.status]);
 
-  const handleJoin = async () => {
+  const handleJoin = async (listenOnly = false) => {
     setJoining(true);
     voiceChat.resumeAudio();
-    await voiceChat.join(roomId, myPlayer.id, players.map((p) => p.id));
+    await voiceChat.join(roomId, myPlayer.id, players.map((p) => p.id), { listenOnly });
+    setJoining(false);
+  };
+
+  /**
+   * Opens the microphone on a call joined to listen.
+   *
+   * Not a rejoin — the connection stays up and the sender simply gets a track,
+   * so nobody drops out of the room to start talking.
+   */
+  const handleStartTalking = async () => {
+    setJoining(true);
+    await voiceChat.upgradeToSpeaking();
     setJoining(false);
   };
 
@@ -95,7 +107,7 @@ export default function VoiceCallBar({
   // A failed join must not lock the feature out for the session — a permission
   // prompt gets dismissed by accident all the time.
   const retry = () => {
-    void handleJoin();
+    void handleJoin(false);
   };
 
   const isLive = state.status === 'live';
@@ -113,6 +125,8 @@ export default function VoiceCallBar({
   const measuredPeers = connectedPeers.filter((p) => p.sendingAudio !== undefined);
   const notReachingAnyone =
     isLive &&
+    // Listening deliberately sends nothing, so silence is not a fault.
+    !state.listenOnly &&
     !state.muted &&
     connectedPeers.length > 0 &&
     measuredPeers.length === connectedPeers.length &&
@@ -124,10 +138,14 @@ export default function VoiceCallBar({
       <div className="glass-card rounded-xl px-3 py-1.5 border border-white/10 bg-slate-900/70 flex items-center justify-between gap-2">
         <span className="text-[11px] font-bold text-gray-300 flex items-center gap-1.5 truncate">
           <PhoneCall className={`w-3 h-3 ${isLive ? 'text-emerald-400' : 'text-gray-500'}`} />
-          {isLive ? 'Group voice live' : 'Group voice off'}
+          {isLive ? (state.listenOnly ? 'Listening in' : 'Group voice live') : 'Group voice off'}
         </span>
         <span className="text-[11px] font-black flex items-center gap-1 shrink-0">
-          {state.muted ? (
+          {state.listenOnly ? (
+            <span className="text-sky-300 flex items-center gap-1">
+              <Headphones className="w-3 h-3" /> LISTENING
+            </span>
+          ) : state.muted ? (
             <span className="text-amber-300 flex items-center gap-1">
               <MicOff className="w-3 h-3" /> MUTED
             </span>
@@ -153,16 +171,31 @@ export default function VoiceCallBar({
           <div className="min-w-0">
             <p className="text-sm font-black text-white">JOIN THE VOICE CALL</p>
             <p className="text-[11px] text-emerald-200/80">
-              {players.length} in the room. Tap to talk and hear everyone.
+              {players.length} in the room. Connect to hear everyone and watch them play.
             </p>
           </div>
         </div>
-        <button
-          onClick={handleJoin}
-          className="bg-emerald-500 hover:bg-emerald-400 text-partyDark font-black text-sm px-6 py-2.5 rounded-xl transition-all active:scale-95 shadow-lg shrink-0"
-        >
-          JOIN CALL
-        </button>
+        {/* Two ways in.
+
+            Connecting is what puts you on the peer mesh, and the mesh is what
+            carries the live view of whoever is playing — so making a microphone
+            the price of admission shut spectators out of watching entirely.
+            Listening also leaves the microphone free, which on a phone is the
+            difference between the speech mini-games hearing you and not. */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => handleJoin(true)}
+            className="bg-white/10 hover:bg-white/20 border border-white/20 text-white font-black text-xs px-4 py-2.5 rounded-xl transition-all active:scale-95 flex items-center gap-1.5"
+          >
+            <Headphones className="w-3.5 h-3.5" /> JUST LISTEN
+          </button>
+          <button
+            onClick={() => handleJoin(false)}
+            className="bg-emerald-500 hover:bg-emerald-400 text-partyDark font-black text-sm px-5 py-2.5 rounded-xl transition-all active:scale-95 shadow-lg"
+          >
+            JOIN CALL
+          </button>
+        </div>
       </div>
     );
   }
@@ -207,13 +240,19 @@ export default function VoiceCallBar({
 
         <div className="min-w-0">
           <p className="text-xs font-black text-white uppercase tracking-wide">
-            {isLive ? 'GROUP VOICE LIVE' : state.status === 'connecting' ? 'CONNECTING…' : 'GROUP VOICE OFF'}
+            {isLive
+              ? state.listenOnly
+                ? 'LISTENING IN'
+                : 'GROUP VOICE LIVE'
+              : state.status === 'connecting'
+              ? 'CONNECTING…'
+              : 'GROUP VOICE OFF'}
           </p>
           <p className="text-[11px] text-gray-400">
             {isLive
               ? `${connectedIds.size} of ${Math.max(0, players.length - 1)} ${
                   players.length - 1 === 1 ? 'player' : 'players'
-                } connected`
+                } connected${state.listenOnly ? ' · mic closed' : ''}`
               : 'Talk to your crew while you play'}
           </p>
         </div>
@@ -240,7 +279,18 @@ export default function VoiceCallBar({
       )}
 
       <div className="flex items-center gap-2">
-        {isLive && (
+        {isLive && state.listenOnly && (
+          <button
+            onClick={handleStartTalking}
+            disabled={joining}
+            className="px-3 py-2 rounded-xl border font-black text-xs flex items-center gap-1.5 transition-all bg-sky-500/25 text-sky-200 border-sky-400/50 hover:bg-sky-500/40 disabled:opacity-50"
+          >
+            {joining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mic className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">TURN ON MIC</span>
+          </button>
+        )}
+
+        {isLive && !state.listenOnly && (
           <button
             onClick={() => voiceChat.toggleMuted()}
             className={`px-3 py-2 rounded-xl border font-black text-xs flex items-center gap-1.5 transition-all ${
@@ -263,15 +313,30 @@ export default function VoiceCallBar({
             <span className="hidden sm:inline">LEAVE</span>
           </button>
         ) : (
-          <button
-            onClick={retry}
-            disabled={joining || players.length < 2}
-            title={players.length < 2 ? 'Wait for another player to join the room' : undefined}
-            className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-partyDark font-black text-xs flex items-center gap-1.5 transition-all shadow"
-          >
-            <PhoneCall className="w-3.5 h-3.5" />
-            <span>{state.status === 'error' ? 'RETRY VOICE' : 'JOIN VOICE'}</span>
-          </button>
+          <>
+            <button
+              onClick={() => handleJoin(true)}
+              disabled={joining || players.length < 2}
+              title={
+                players.length < 2
+                  ? 'Wait for another player to join the room'
+                  : 'Hear the room and watch them play, without opening your mic'
+              }
+              className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs flex items-center gap-1.5 transition-all"
+            >
+              <Headphones className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">LISTEN</span>
+            </button>
+            <button
+              onClick={retry}
+              disabled={joining || players.length < 2}
+              title={players.length < 2 ? 'Wait for another player to join the room' : undefined}
+              className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-partyDark font-black text-xs flex items-center gap-1.5 transition-all shadow"
+            >
+              <PhoneCall className="w-3.5 h-3.5" />
+              <span>{state.status === 'error' ? 'RETRY VOICE' : 'JOIN VOICE'}</span>
+            </button>
+          </>
         )}
       </div>
 

@@ -49,6 +49,14 @@ export interface PeerState {
 export interface VoiceState {
   status: VoiceStatus;
   muted: boolean;
+  /**
+   * On the call, but not sending anything.
+   *
+   * A distinct state from muted. Muted means there is a microphone and it is
+   * closed; this means the device was never opened at all — so there is nothing
+   * to unmute, and the speech recogniser is free to take it.
+   */
+  listenOnly: boolean;
   error: string | null;
   peers: PeerState[];
   /** True while the local player is above the speaking threshold. */
@@ -171,6 +179,19 @@ class VoiceChatManager {
    */
   private autoMuted = false;
 
+  /**
+   * True when this player joined to listen rather than to talk.
+   *
+   * The mesh is identical either way — same peer connections, same data
+   * channel, same video — it simply carries no outgoing audio. That matters for
+   * two reasons beyond politeness: watching somebody else play requires a peer
+   * connection, and requiring a microphone to get one shut spectators out of
+   * the live view entirely; and on a phone, a call that is not holding the
+   * device leaves it available to the speech recogniser, which is the whole
+   * contention that makes the voice mini-games hard on Android.
+   */
+  private listenOnly = false;
+
   /** Relay configuration from /api/ice, cached until its credentials expire. */
   private iceServers: RTCIceServer[] = [];
   private iceExpiresAt = 0;
@@ -210,8 +231,9 @@ class VoiceChatManager {
     return {
       status: this.status,
       muted: micStream.isMuted(),
+      listenOnly: this.listenOnly,
       error: this.error,
-      speaking: this.localSpeaking && !micStream.isMuted(),
+      speaking: !this.listenOnly && this.localSpeaking && !micStream.isMuted(),
       audioBlocked: this.audioBlocked,
       peers: [...this.peers.values()].map((peer) => ({
         playerId: peer.id,
@@ -243,7 +265,7 @@ class VoiceChatManager {
    * `autoMuted` shows the app was the one holding it closed.
    */
   public applyAutoMute(shouldMute: boolean): void {
-    if (!this.isJoined()) return;
+    if (!this.isJoined() || this.listenOnly) return;
     if (shouldMute && !micStream.isMuted()) {
       micStream.setMuted(true);
       this.autoMuted = true;
@@ -372,7 +394,12 @@ class VoiceChatManager {
 
   // ------------------------------------------------------------- join/leave
 
-  public async join(roomId: string, myPlayerId: string, peerIds: string[]): Promise<MicError | null> {
+  public async join(
+    roomId: string,
+    myPlayerId: string,
+    peerIds: string[],
+    options: { listenOnly?: boolean } = {}
+  ): Promise<MicError | null> {
     if (this.roomId === roomId && this.myId === myPlayerId && this.status !== 'off') {
       this.syncPeers(peerIds);
       return null;
@@ -380,22 +407,25 @@ class VoiceChatManager {
 
     this.roomId = roomId;
     this.myId = myPlayerId;
+    this.listenOnly = options.listenOnly === true;
     this.status = 'connecting';
     this.error = null;
     this.emit();
 
-    const { stream, error } = await micStream.acquire();
-    if (error || !stream) {
-      this.status = 'error';
-      this.error = error?.message ?? 'The microphone could not start.';
-      this.emit();
-      return error;
-    }
+    if (!this.listenOnly) {
+      const { stream, error } = await micStream.acquire();
+      if (error || !stream) {
+        this.status = 'error';
+        this.error = error?.message ?? 'The microphone could not start.';
+        this.emit();
+        return error;
+      }
 
-    this.localStream = stream;
-    // Tells the speech recogniser it must not take the microphone away.
-    micStream.setCallActive(true);
-    this.startLevelMeter();
+      this.localStream = stream;
+      // Tells the speech recogniser it must not take the microphone away.
+      micStream.setCallActive(true);
+      this.startLevelMeter();
+    }
 
     // Fetched before any peer is created: a connection built with STUN-only
     // config cannot be upgraded to use a relay afterwards, it has to be made
@@ -406,8 +436,15 @@ class VoiceChatManager {
     // and given back afterwards. Peer connections outlive that, so the track on
     // each sender has to be swapped rather than the call torn down — otherwise
     // everyone hears silence from this player for the rest of the session.
+    //
+    // Not subscribed while listening. micStream notifies on every acquire, and
+    // a listener starting a speech mini-game acquires the microphone — which
+    // would have handed that track straight to every peer and put somebody on
+    // air who had specifically chosen not to be.
     this.unsubscribeStream?.();
-    this.unsubscribeStream = micStream.onStreamChange((next) => this.onLocalStreamChanged(next));
+    if (!this.listenOnly) {
+      this.unsubscribeStream = micStream.onStreamChange((next) => this.onLocalStreamChanged(next));
+    }
 
     this.pollTimer = setInterval(() => void this.pollSignals(), SIGNAL_POLL_MS);
     void this.pollSignals();
@@ -421,6 +458,39 @@ class VoiceChatManager {
   }
 
   /**
+   * Opens the microphone on a call that was joined to listen.
+   *
+   * No renegotiation and no reconnect: the audio sender was created with the
+   * connection, so starting to talk is the same replaceTrack the microphone
+   * handover already uses. Somebody who joined to watch can decide to join in
+   * without dropping out of the room to do it.
+   */
+  public async upgradeToSpeaking(): Promise<MicError | null> {
+    if (!this.isJoined() || !this.listenOnly) return null;
+
+    const { stream, error } = await micStream.acquire();
+    if (error || !stream) {
+      this.error = error?.message ?? 'The microphone could not start.';
+      this.emit();
+      return error;
+    }
+
+    this.listenOnly = false;
+    micStream.setCallActive(true);
+
+    // Routed through the same handler the suspend/resume cycle uses, so there
+    // is exactly one piece of code that knows how to attach a new track to
+    // every peer.
+    this.onLocalStreamChanged(stream);
+
+    this.unsubscribeStream?.();
+    this.unsubscribeStream = micStream.onStreamChange((next) => this.onLocalStreamChanged(next));
+
+    this.emit();
+    return null;
+  }
+
+  /**
    * Swaps the outgoing audio track when the shared microphone is suspended for
    * the speech recogniser and later restored.
    *
@@ -429,6 +499,11 @@ class VoiceChatManager {
    * flicker for the other five players.
    */
   private onLocalStreamChanged(next: MediaStream | null): void {
+    // A listener has no outgoing audio by definition. Guarded here as well as
+    // at the subscription, because this is the function that actually puts a
+    // track on the wire and it must not be reachable in that state.
+    if (this.listenOnly) return;
+
     this.localStream = next;
     const track = next?.getAudioTracks()[0] ?? null;
 
@@ -453,6 +528,7 @@ class VoiceChatManager {
   }
 
   public leave(): void {
+    this.listenOnly = false;
     this.unsubscribeStream?.();
     this.unsubscribeStream = null;
     this.releaseAudioUnlock?.();
@@ -508,6 +584,9 @@ class VoiceChatManager {
   }
 
   public setMuted(muted: boolean): boolean {
+    // Nothing to close. Callers wanting to start talking use
+    // upgradeToSpeaking, which actually opens the device.
+    if (this.listenOnly) return true;
     const result = micStream.setMuted(muted);
     this.emit();
     return result;

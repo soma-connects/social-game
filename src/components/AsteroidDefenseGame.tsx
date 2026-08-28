@@ -5,6 +5,7 @@ import { Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { Player, RoomState } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
+import { useLiveBroadcast } from '@/hooks/useLiveStage';
 import { SpeechDiagnostics, speechEngine } from '@/lib/speechService';
 import { isMobileAudioPlatform, micStream } from '@/lib/micStream';
 import { measurePixelText } from '@/lib/pixelFont';
@@ -123,6 +124,18 @@ export default function AsteroidDefenseGame({
   const [ready, setReady] = useState(false);
   /** True once the microphone permission has been settled up front. */
   const micProbed = useRef(false);
+
+  /**
+   * Streams the arcade screen to the room while a wave is running.
+   *
+   * Rocks falling towards a station is a spectacle; "Wave 3 — 2 shields left"
+   * is a status line. The canvas rides the peer connection the voice call
+   * already holds, so this costs no server traffic at all.
+   */
+  const { publishCanvas } = useLiveBroadcast(status === 'playing');
+  useEffect(() => {
+    publishCanvas(status === 'playing' ? canvasRef.current : null);
+  }, [status, publishCanvas]);
 
   const stopEverything = useCallback(() => {
     game.current.active = false;

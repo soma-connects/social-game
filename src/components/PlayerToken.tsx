@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { motion, useAnimation, AnimatePresence } from 'framer-motion';
 import { Player } from '@/lib/types';
-import { BOARD_GRAPH, PREV_NODES } from '@/lib/gameRules';
+import { BOARD_GRAPH, PREV_NODES, STARTING_LIVES } from '@/lib/gameRules';
 import AvatarIllustration from './AvatarIllustration';
 
 interface PlayerTokenProps {
@@ -128,12 +128,43 @@ export default function PlayerToken({ player, isActive, spreadX, spreadY }: Play
           )}
         </AnimatePresence>
 
+        {/* Frozen, and therefore not going anywhere next turn. Without a mark
+            on the board, a skipped turn looks like the game forgetting them. */}
+        {player.skipNextTurn && (
+          <div className="absolute -inset-2 rounded-full border-2 border-sky-300/70 bg-sky-400/20 z-0 animate-pulse" />
+        )}
+
         <AvatarIllustration
           avatar={player.avatar}
           size="sm"
           isSpeaking={isActive}
           className={`relative z-10 shadow-2xl border-2 ${isActive ? 'border-partyYellow' : 'border-white/20'}`}
         />
+
+        {/* Lives, on the board rather than only in the sidebar.
+            
+            Survival is the stat that decides whether the next bad round sends
+            you back to the launchpad, and it was only visible in a panel that
+            is hidden entirely below 1024px — so on a phone, the thing most
+            likely to end your run could not be seen at all. */}
+        <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 flex items-center gap-[2px] z-20">
+          {Array.from({ length: STARTING_LIVES }).map((_, i) => (
+            <span
+              key={i}
+              className={`block w-1.5 h-1.5 rounded-full border border-black/40 ${
+                i < (player.lives ?? STARTING_LIVES)
+                  ? 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.9)]'
+                  : 'bg-slate-700'
+              }`}
+            />
+          ))}
+        </div>
+
+        {/* Name. Six near-identical circles on a dark map are unreadable
+            without one, and the fan-out only tells you they are separate. */}
+        <span className="absolute -bottom-[18px] left-1/2 -translate-x-1/2 text-[8px] font-black text-white/90 whitespace-nowrap drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] z-20 max-w-[64px] truncate">
+          {player.name}
+        </span>
       </motion.div>
     </motion.div>
   );

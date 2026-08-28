@@ -42,6 +42,8 @@ export interface PeerState {
   failed?: boolean;
   /** Undefined until first measured. False means connected but no bytes are moving out. */
   sendingAudio?: boolean;
+  /** True while this peer's live game view is arriving. */
+  hasVideo?: boolean;
 }
 
 export interface VoiceState {
@@ -92,6 +94,19 @@ interface Peer {
   missedPresence: number;
   /** Stops a failing connection sending 'bye' once per state change. */
   byeSent?: boolean;
+  /**
+   * The performer's screen, when they are broadcasting one.
+   *
+   * A separate transceiver from the audio, created up front for the same
+   * reason: a sender that already exists can have its track swapped in with
+   * replaceTrack, and swapping needs no renegotiation. Adding a video track to
+   * a live connection mid-call would, and re-offering to five peers in the
+   * middle of somebody's turn is exactly when it must not happen.
+   */
+  videoSender?: RTCRtpSender;
+  videoStream: MediaStream | null;
+  /** Low-latency channel for live game state. Unreliable and unordered. */
+  data?: RTCDataChannel;
   /** outbound-rtp bytesSent as of the last stats check, to detect real growth. */
   lastOutboundBytes?: number;
   /**
@@ -166,6 +181,21 @@ class VoiceChatManager {
 
   private listeners = new Set<(state: VoiceState) => void>();
 
+  // ── live game view ────────────────────────────────────────────────────────
+  //
+  // The room already holds a full peer mesh for voice, so watching somebody
+  // play needs no new connections — only a video track nobody was using and a
+  // data channel alongside it. Room state moves through Firestore on a poll and
+  // could never carry this: a mirrored game at ten frames a second is hundreds
+  // of writes a minute to a document the whole room subscribes to.
+
+  /** The performer's canvas, while they are broadcasting it. */
+  private publishedVideo: MediaStream | null = null;
+  /** Notified for every live-state message arriving from any peer. */
+  private dataListeners = new Set<(raw: string, from: string) => void>();
+  /** Notified when a peer's video arrives or goes away. */
+  private videoListeners = new Set<() => void>();
+
   // ------------------------------------------------------------------ state
 
   public subscribe(cb: (state: VoiceState) => void): () => void {
@@ -191,6 +221,7 @@ class VoiceChatManager {
         route: peer.route,
         failed: peer.failed,
         sendingAudio: peer.sendingAudio,
+        hasVideo: !!peer.videoStream,
       })),
     };
   }
@@ -454,6 +485,7 @@ class VoiceChatManager {
       this.levelFrame = null;
     }
 
+    this.publishedVideo = null;
     this.peers.forEach((peer) => this.destroyPeer(peer));
     this.peers.clear();
 
@@ -620,6 +652,7 @@ class VoiceChatManager {
       pendingCandidates: [],
       remoteDescriptionSet: false,
       missedPresence: 0,
+      videoStream: null,
     };
 
     /**
@@ -641,6 +674,40 @@ class VoiceChatManager {
       streams: this.localStream ? [this.localStream] : [],
     });
     if (track) void transceiver.sender.replaceTrack(track).catch(() => {});
+
+    /**
+     * A video transceiver nobody is using yet.
+     *
+     * Same trick as the audio sender above, for the same reason. Watching
+     * somebody play means putting their canvas on a video track, and a track
+     * added to a live connection forces a fresh offer/answer with every peer —
+     * mid-turn, which is the worst possible moment. Declaring the transceiver
+     * now means starting and stopping the broadcast is only ever replaceTrack,
+     * and the connection is never renegotiated at all.
+     */
+    const videoTransceiver = pc.addTransceiver('video', { direction: 'sendrecv' });
+    peer.videoSender = videoTransceiver.sender;
+    const publishedTrack = this.publishedVideo?.getVideoTracks()[0] ?? null;
+    if (publishedTrack) {
+      void videoTransceiver.sender.replaceTrack(publishedTrack).catch(() => {});
+    }
+
+    /**
+     * The live-state channel.
+     *
+     * Only the side that will make the offer creates it; the other side picks
+     * it up through ondatachannel. Both creating one would leave two channels
+     * per pair, each carrying the same frames.
+     *
+     * Unreliable and unordered on purpose: this carries the state of a game as
+     * it is being played, and a frame that arrives late is worthless. Retrying
+     * a lost one would hold up the frames behind it, so the mirror would stall
+     * exactly when the game got interesting.
+     */
+    if (this.myId && this.myId < peerId) {
+      this.attachDataChannel(peer, pc.createDataChannel('live', { ordered: false, maxRetransmits: 0 }));
+    }
+    pc.ondatachannel = (event) => this.attachDataChannel(peer, event.channel);
 
     pc.onicecandidate = (event) => {
       if (event.candidate && this.myId) {
@@ -672,6 +739,21 @@ class VoiceChatManager {
        */
       const stream = event.streams[0] ?? (event.track ? new MediaStream([event.track]) : null);
       if (!stream) return;
+
+      // The live game view, not somebody's voice. It goes to a <video> rather
+      // than an <audio>, and must never be fed to the speaking-level analyser.
+      if (event.track?.kind === 'video') {
+        peer.videoStream = stream;
+        event.track.onended = () => {
+          peer.videoStream = null;
+          this.videoListeners.forEach((cb) => cb());
+          this.emit();
+        };
+        this.videoListeners.forEach((cb) => cb());
+        this.emit();
+        return;
+      }
+
       peer.stream = stream;
       audio.srcObject = stream;
       audio.muted = false;
@@ -801,6 +883,18 @@ class VoiceChatManager {
     peer.pc.onicecandidate = null;
     peer.pc.ontrack = null;
     peer.pc.onconnectionstatechange = null;
+    peer.pc.ondatachannel = null;
+    if (peer.data) {
+      peer.data.onmessage = null;
+      try {
+        peer.data.close();
+      } catch {
+        /* already closed */
+      }
+      peer.data = undefined;
+    }
+    peer.videoStream = null;
+    peer.videoSender = undefined;
     try {
       peer.pc.close();
     } catch {
@@ -830,6 +924,79 @@ class VoiceChatManager {
       this.error = 'Could not start a voice connection with a player.';
       this.emit();
     }
+  }
+
+  // ------------------------------------------------------- live game view
+
+  private attachDataChannel(peer: Peer, channel: RTCDataChannel): void {
+    peer.data = channel;
+    channel.onmessage = (event) => {
+      if (typeof event.data !== 'string') return;
+      this.dataListeners.forEach((cb) => cb(event.data, peer.id));
+    };
+    channel.onclose = () => {
+      if (peer.data === channel) peer.data = undefined;
+    };
+  }
+
+  /**
+   * Starts or stops broadcasting the performer's screen to the room.
+   *
+   * Pass a canvas capture stream to go live, or null to stop. Stopping
+   * deliberately replaces the track with null rather than closing anything:
+   * the transceiver has to survive so the next turn can start broadcasting
+   * without renegotiating.
+   */
+  public publishVideo(stream: MediaStream | null): void {
+    this.publishedVideo = stream;
+    const track = stream?.getVideoTracks()[0] ?? null;
+
+    this.peers.forEach((peer) => {
+      peer.videoSender?.replaceTrack(track).catch(() => {
+        /* the connection is going away anyway */
+      });
+    });
+  }
+
+  /** The live game view arriving from one player, if they are broadcasting. */
+  public getRemoteVideo(playerId: string): MediaStream | null {
+    return this.peers.get(playerId)?.videoStream ?? null;
+  }
+
+  /** Fires whenever any peer's video arrives or ends. */
+  public onVideoChange(cb: () => void): () => void {
+    this.videoListeners.add(cb);
+    return () => {
+      this.videoListeners.delete(cb);
+    };
+  }
+
+  /**
+   * Sends one live-state frame to everybody on the call.
+   *
+   * Returns how many peers it actually reached, so the caller can fall back to
+   * the room document when nobody is listening — somebody watching from a tab
+   * that never joined the voice call has no data channel to receive on.
+   */
+  public sendLiveData(payload: string): number {
+    let delivered = 0;
+    this.peers.forEach((peer) => {
+      if (peer.data?.readyState !== 'open') return;
+      try {
+        peer.data.send(payload);
+        delivered += 1;
+      } catch {
+        /* buffer full or closing — the next frame is along in a moment */
+      }
+    });
+    return delivered;
+  }
+
+  public onLiveData(cb: (raw: string, from: string) => void): () => void {
+    this.dataListeners.add(cb);
+    return () => {
+      this.dataListeners.delete(cb);
+    };
   }
 
   // ------------------------------------------------------------ signalling

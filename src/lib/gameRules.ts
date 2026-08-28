@@ -577,6 +577,18 @@ export const BOARD_DEPTH: Record<number, number> = (() => {
 /** Total steps from the launchpad to the finish, for progress readouts. */
 export const BOARD_LENGTH: number = BOARD_DEPTH[FINISH_NODE] ?? TOTAL_TILES - 1;
 
+/**
+ * Tiles that actually do something when you land on them.
+ *
+ * Three quarters of BOARD_GRAPH is 'empty' interpolation points that exist only
+ * to bend the road into a curve. The board header was reporting the raw node
+ * count — "99 ADVENTURE NODES" — while the finish line beneath it was labelled
+ * tile #24, which is the number a player can actually count on screen.
+ */
+export const EVENT_TILES: number = Object.values(BOARD_GRAPH).filter(
+  (node) => node.type !== 'empty'
+).length;
+
 /** How far along the road a player is, in steps. */
 export function boardProgress(position: number): number {
   return BOARD_DEPTH[position] ?? 0;

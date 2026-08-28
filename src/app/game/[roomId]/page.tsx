@@ -46,7 +46,7 @@ import AiGameMasterBanner from '@/components/AiGameMasterBanner';
 import GeminiAiMasterStage from '@/components/GeminiAiMasterStage';
 import AiMasterGame from '@/components/AiMasterGame';
 import SocialVoicePanel from '@/components/SocialVoicePanel';
-import SpectatorView from '@/components/SpectatorView';
+import LiveStage from '@/components/LiveStage';
 import RoastIntermission from '@/components/RoastIntermission';
 import BattleScoreboard from '@/components/BattleScoreboard';
 import TeamBattleGameSelect from '@/components/TeamBattleGameSelect';
@@ -68,6 +68,7 @@ import { MINIGAME_BRIEFINGS } from '@/lib/miniGameBriefings';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { voiceChat } from '@/lib/voiceChat';
+import { liveLink } from '@/lib/liveLink';
 import { micStream } from '@/lib/micStream';
 import {
   UserPlus,
@@ -127,12 +128,37 @@ export default function GameRoomPage() {
       unsubscribe();
       roomStore.stopPolling();
       speechEngine.release();
+      liveLink.stopPublishing();
       voiceChat.leave();
       micStream.stop();
     };
   }, [roomId]);
 
   const { room, status, error } = snapshot;
+
+  /**
+   * The slow path into the live stage.
+   *
+   * Whatever the room document knows is fed in as a floor. liveLink ignores it
+   * while the peer mesh is delivering, so this only ever shows for somebody who
+   * is not on the voice call — and it is better than the blank panel they used
+   * to get.
+   */
+  useEffect(() => {
+    liveLink.ingestRoomState(room?.liveState ?? null);
+  }, [room?.liveState]);
+
+  /**
+   * A new performer means the stage is empty until they say otherwise.
+   *
+   * Without this the previous player's last frame stays on screen through the
+   * whole of the next person's turn, and the room watches a still of somebody
+   * who finished a minute ago.
+   */
+  const stageOwner = room?.players[room.activePlayerIndex]?.id ?? null;
+  useEffect(() => {
+    liveLink.clear();
+  }, [stageOwner, room?.phase]);
 
   // ── Voice replay ──────────────────────────────────────────────────────────
   // Passed explicitly: identity is stored per room, and this reads during the
@@ -531,9 +557,8 @@ export default function GameRoomPage() {
                   onCompleteTurn={handleMiniGameComplete('voice_arena')}
                 />
               ) : (
-                <SpectatorView
-                  activePlayer={activePlayer}
-                  live={room.liveState ?? null}
+                <LiveStage
+                  performer={activePlayer}
                   label="is in the Voice Arena"
                 />
               )}
@@ -551,9 +576,8 @@ export default function GameRoomPage() {
                   onComplete={handleMiniGameComplete('pitch_bird')}
                 />
               ) : (
-                <SpectatorView
-                  activePlayer={activePlayer}
-                  live={room.liveState ?? null}
+                <LiveStage
+                  performer={activePlayer}
                   label="is flying in PitchBird 🐦"
                 />
               )}
@@ -584,9 +608,8 @@ export default function GameRoomPage() {
                   onComplete={handleMiniGameComplete('solfege')}
                 />
               ) : (
-                <SpectatorView
-                  activePlayer={activePlayer}
-                  live={room.liveState ?? null}
+                <LiveStage
+                  performer={activePlayer}
                   label="is on the karaoke mic 🎵"
                 />
               )}
@@ -604,9 +627,8 @@ export default function GameRoomPage() {
                   onCompleteTurn={handleMiniGameComplete('spelling_bee')}
                 />
               ) : (
-                <SpectatorView
-                  activePlayer={activePlayer}
-                  live={room.liveState ?? null}
+                <LiveStage
+                  performer={activePlayer}
                   label="is spelling in the Spelling Bee 🐝"
                 />
               )}
@@ -677,9 +699,8 @@ export default function GameRoomPage() {
                   onCompleteTurn={handleMiniGameComplete('trivia_showdown')}
                 />
               ) : (
-                <SpectatorView
-                  activePlayer={activePlayer}
-                  live={room.liveState ?? null}
+                <LiveStage
+                  performer={activePlayer}
                   label="is answering Trivia in Trivia Showdown 🧠"
                 />
               )}
@@ -697,9 +718,8 @@ export default function GameRoomPage() {
                   onCompleteTurn={handleMiniGameComplete('asteroid_defense')}
                 />
               ) : (
-                <SpectatorView
-                  activePlayer={activePlayer}
-                  live={room.liveState ?? null}
+                <LiveStage
+                  performer={activePlayer}
                   label="is defending the station from ASTEROIDS ☄️"
                 />
               )}

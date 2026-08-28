@@ -156,9 +156,16 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
 
   return (
     <div className="max-w-5xl mx-auto px-2 sm:px-4 py-3 space-y-4 relative pb-28">
-      {/* Background Ambient Glow */}
-      <div className="absolute top-10 left-1/4 w-72 h-72 bg-cyan-500/15 blur-3xl rounded-full pointer-events-none" />
-      <div className="absolute bottom-10 right-1/4 w-80 h-80 bg-partyYellow/15 blur-3xl rounded-full pointer-events-none" />
+      {/* Background ambient glow.
+      
+          Wrapped in its own clipping layer. These are 288px and 320px circles
+          positioned from the edges, so on a 375px phone they hung past the
+          right edge of the document and gave the whole page a horizontal
+          scrollbar — the board could be swiped sideways into empty space. */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-3xl">
+        <div className="absolute top-10 left-1/4 w-72 h-72 bg-cyan-500/15 blur-3xl rounded-full" />
+        <div className="absolute bottom-10 right-1/4 w-80 h-80 bg-partyYellow/15 blur-3xl rounded-full" />
+      </div>
 
       {/* Board Background Music */}
       <BackgroundMusic screen="board" />

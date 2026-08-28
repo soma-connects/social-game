@@ -15,6 +15,7 @@ import { ChessSetup } from './chess/chessTypes';
 import { KaraokeSetup } from './karaoke/karaokeTypes';
 import { HangoutDeckId } from './hangout/hangoutTypes';
 import { getIdToken } from './firebase/auth';
+import { liveLink } from './liveLink';
 
 const ROOM_CACHE_PREFIX = 'voice_party_room_';
 const MY_PLAYER_ID_KEY = 'voice_party_my_player_id';
@@ -679,6 +680,24 @@ class RoomStoreManager {
     minIntervalMs = 1500
   ): void {
     const now = Date.now();
+
+    // The peer mesh gets it first, and gets it every time.
+    //
+    // This is what makes the room able to actually watch somebody play. The
+    // write below is rate-limited to something a shared Firestore document can
+    // survive, which is nowhere near fast enough to follow a game — but a data
+    // channel already open to everybody costs nothing per frame, so the same
+    // call feeds both and liveLink decides how often to put one on the wire.
+    liveLink.send({
+      game: this.snapshot.room?.currentMiniGame ?? 'other',
+      prompt: state.prompt,
+      detail: state.detail,
+      status: state.status,
+      score: state.score,
+      progress: state.progress,
+      good: state.good,
+    });
+
     if (now - this.lastLivePush < minIntervalMs) return;
 
     // Nothing spectators can see has changed — don't pay for a write.

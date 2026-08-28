@@ -32,6 +32,9 @@ const LOOKS: Record<BoardEventKind, { icon: string; from: string; to: string; sp
   rewind: { icon: '⏪', from: 'from-slate-500', to: 'to-slate-800' },
   freeze: { icon: '❄️', from: 'from-sky-300', to: 'to-blue-700', pulse: true },
   bomb: { icon: '💣', from: 'from-rose-600', to: 'to-neutral-900', spin: 'cw' },
+  // Losing your last life used to borrow the rewind card, so the biggest thing
+  // that can happen to you on this board looked like being nudged backwards.
+  wipeout: { icon: '☠️', from: 'from-red-700', to: 'to-black', pulse: true },
 };
 
 /** Long enough to read, short enough not to stall the next roll. */

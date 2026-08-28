@@ -356,7 +356,9 @@ export type BoardEventKind =
   | 'rewind'
   | 'freeze'
   | 'bomb'
-  | 'shield_up';
+  | 'shield_up'
+  /** Ran out of lives and restarted from the launchpad. */
+  | 'wipeout';
 
 /**
  * The last thing that happened on the board, broadcast to the whole room.

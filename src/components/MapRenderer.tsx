@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { MapTheme, Player } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
 // Shared with the server so the board shown matches the tile effects applied.
-import { BOARD_GRAPH, TOTAL_TILES } from '@/lib/gameRules';
+import { BOARD_GRAPH, EVENT_TILES, TOTAL_TILES } from '@/lib/gameRules';
 import TileNode from './TileNode';
 import PlayerToken from './PlayerToken';
 import AvatarIllustration from './AvatarIllustration';
@@ -87,7 +87,7 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
           <span>{themeConfig.icon}</span>
           <span>{themeConfig.name.toUpperCase()} ROADMAP</span>
         </div>
-        <span className="text-[10px] font-mono font-bold text-gray-300">{totalTiles} ADVENTURE NODES</span>
+        <span className="text-[10px] font-mono font-bold text-gray-300">{EVENT_TILES} ADVENTURE NODES</span>
       </div>
 
       {/*
@@ -195,7 +195,7 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
       {/* Bottom Landmark Track Decoration */}
       <div className="flex justify-between items-center z-10 pt-2 border-t border-white/10 text-xs font-bold text-cyan-200/70 tracking-widest">
         <span className="flex items-center gap-1">LAUNCHPAD (TILE #1)</span>
-        <span className="flex items-center gap-1">AURORA STATION (TILE #24) 🏆</span>
+        <span className="flex items-center gap-1">AURORA STATION (TILE #{EVENT_TILES}) 🏆</span>
       </div>
     </div>
   );

@@ -855,7 +855,7 @@ function chargeFailedChallenge(room: RoomState, player: Player, game: MiniGameId
   }
 
   pushEvent(room, `☠️ ${player.name} ran out of lives — back to the launchpad with a fresh bar!`, 'debuff');
-  pushBoardEvent(room, 'rewind', player, {
+  pushBoardEvent(room, 'wipeout', player, {
     banner: '☠️ WIPED OUT!',
     message: `${player.name} lost their last life and restarts from the launchpad.`,
     fromNode: from,

@@ -17,6 +17,7 @@ import { Player } from '@/lib/types';
 import { usePitchDetection, CALIBRATION_MS } from '@/hooks/usePitchDetection';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
+import { useLiveBroadcast } from '@/hooks/useLiveStage';
 import { Mic, MicOff, Volume2 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -138,6 +139,18 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
   } = usePitchDetection();
 
   const [gameState, setGameState] = useState<GameState>('calibrating');
+
+  /**
+   * Puts this canvas on everybody else's screen while the round is live.
+   *
+   * The room used to get a line of text saying how it was going. The bird is
+   * the game — whether it clears the gate is the whole joke — so the canvas
+   * itself goes out over the peer connection the voice call already holds.
+   */
+  const { publishCanvas } = useLiveBroadcast(gameState === 'playing');
+  useEffect(() => {
+    publishCanvas(gameState === 'playing' ? canvasRef.current : null);
+  }, [gameState, publishCanvas]);
   const [finalScore, setFinalScore] = useState(0);
   const [micError, setMicError] = useState(false);
   const [calCountdown, setCalCountdown] = useState(Math.round(CALIBRATION_MS / 1000));

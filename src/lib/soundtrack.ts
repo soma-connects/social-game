@@ -18,7 +18,9 @@ export type SoundtrackScreen =
   | 'asteroid_defense'
   | 'ludo'
   | 'chess'
-  | 'team_battle';
+  | 'team_battle'
+  | 'karaoke'
+  | 'hangout';
 
 export interface Soundtrack {
   src: string;
@@ -79,6 +81,18 @@ export const SOUNDTRACKS: Record<SoundtrackScreen, Soundtrack> = {
     volume: 0.22,
     mood: 'Rock, for the crew-versus-crew series. The most competitive screen gets the most aggressive track.',
   },
+
+  karaoke: {
+    src: `${AUDIO}/maksymmalko-game-gaming-minecraft-background-music-379533.mp3`,
+    volume: 0.16,
+    mood: 'Between songs only — the stage kills the bed entirely while somebody is singing, because a speaker playing into an open mic is scored as if the singer produced it.',
+  },
+
+  hangout: {
+    src: `${AUDIO}/lexin_music-space-ambient-sci-fi-121842.mp3`,
+    volume: 0.12,
+    mood: 'The quietest track in the set. The lounge is people talking; the music is the room tone behind them and nothing more.',
+  },
 };
 
 /**
@@ -87,4 +101,4 @@ export const SOUNDTRACKS: Record<SoundtrackScreen, Soundtrack> = {
  * Swap it into any screen above if a track wears out — the whole point of the
  * table is that it costs one line.
  */
-export const SPARE_TRACKS = [`${AUDIO}/maksymmalko-game-gaming-minecraft-background-music-379533.mp3`];
+export const SPARE_TRACKS: string[] = [];

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Mic, Users, Trophy, MapPin, UserMinus, WifiOff, Heart } from 'lucide-react';
-import { Player } from '@/lib/types';
+import { Player, RoomState } from '@/lib/types';
 import { BOARD_LENGTH, MAX_PLAYERS, STARTING_LIVES, TEAMS, boardProgress, getTeam } from '@/lib/gameRules';
 import AvatarIllustration from './AvatarIllustration';
 
@@ -15,7 +15,7 @@ interface LeftSidebarProps {
   /** Only the host gets the remove control. */
   canManage?: boolean;
   onKickPlayer?: (player: Player) => void;
-  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master';
+  roomType?: NonNullable<RoomState['roomType']>;
 }
 
 export default function LeftSidebar({

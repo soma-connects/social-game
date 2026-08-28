@@ -12,6 +12,8 @@ import {
 import { RoomVibeId } from './roomVibes';
 import { LudoSetup } from './ludo/ludoTypes';
 import { ChessSetup } from './chess/chessTypes';
+import { KaraokeSetup } from './karaoke/karaokeTypes';
+import { HangoutDeckId } from './hangout/hangoutTypes';
 import { getIdToken } from './firebase/auth';
 
 const ROOM_CACHE_PREFIX = 'voice_party_room_';
@@ -542,6 +544,85 @@ class RoomStoreManager {
 
   public resignChess(roomId: string, playerId: string) {
     return this.post(roomId, { action: 'chess_resign', playerId });
+  }
+
+  // ── Karaoke Stage ─────────────────────────────────────────────────────────
+
+  public startKaraoke(roomId: string, setup: KaraokeSetup) {
+    return this.post(roomId, {
+      action: 'karaoke_start',
+      setlist: setup.setlist,
+      order: setup.order,
+    });
+  }
+
+  /**
+   * Posts a finished performance.
+   *
+   * Scored in the browser because that is where the microphone is — a pitch
+   * trace is sixty samples a second and shipping it would cost more traffic
+   * than the rest of the game put together. `seq` names the turn it belongs
+   * to, so a retry cannot score the same song twice.
+   */
+  public submitKaraokePerformance(
+    roomId: string,
+    performance: {
+      seq: number;
+      songId: string;
+      accuracy: number;
+      notesHit: number;
+      notesTotal: number;
+      bestStreak: number;
+      points: number;
+      grade: string;
+      verdict: string;
+    }
+  ) {
+    return this.post(roomId, { action: 'karaoke_submit', ...performance });
+  }
+
+  /** A reaction to the performance on screen. Worth points to the singer. */
+  public cheerKaraoke(roomId: string, reaction: SocialReactionId) {
+    return this.post(roomId, { action: 'karaoke_cheer', reaction });
+  }
+
+  public karaokeNext(roomId: string) {
+    return this.post(roomId, { action: 'karaoke_next' });
+  }
+
+  public karaokeEncore(roomId: string) {
+    return this.post(roomId, { action: 'karaoke_encore' });
+  }
+
+  // ── Hangout Lounge ────────────────────────────────────────────────────────
+
+  public openHangout(roomId: string, spotlightSeconds = 60) {
+    return this.post(roomId, { action: 'hangout_open', spotlightSeconds });
+  }
+
+  public hangoutTakeMic(roomId: string) {
+    return this.post(roomId, { action: 'hangout_take_mic' });
+  }
+
+  public hangoutPassMic(roomId: string, targetId: string) {
+    return this.post(roomId, { action: 'hangout_pass_mic', targetId });
+  }
+
+  public hangoutDropMic(roomId: string) {
+    return this.post(roomId, { action: 'hangout_drop_mic' });
+  }
+
+  /** `text` is only used by the AI deck, which is written in the browser. */
+  public hangoutDraw(roomId: string, deck: HangoutDeckId, text?: string) {
+    return this.post(roomId, { action: 'hangout_draw', deck, text });
+  }
+
+  public hangoutSound(roomId: string, padId: string) {
+    return this.post(roomId, { action: 'hangout_sound', padId });
+  }
+
+  public hangoutReact(roomId: string, reaction: SocialReactionId) {
+    return this.post(roomId, { action: 'hangout_react', reaction });
   }
 
   public startLudoMatch(roomId: string, setup?: LudoSetup) {

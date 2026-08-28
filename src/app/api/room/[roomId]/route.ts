@@ -37,6 +37,10 @@ import {
   SAFE_POSITIONS,
 } from '@/lib/ludo/ludoRules';
 import { AVATARS, DARES, DUEL_TOPICS } from '@/lib/gameContent';
+import { KaraokePerformance, KaraokeState } from '@/lib/karaoke/karaokeTypes';
+import { SONGBOOK, getSong } from '@/lib/karaoke/songbook';
+import { HangoutState } from '@/lib/hangout/hangoutTypes';
+import { HANGOUT_DECKS, SOUNDBOARD_PADS, drawCard } from '@/lib/hangout/decks';
 import {
   DEFAULT_TURN_SECONDS,
   JUDGE_PASS_BONUS,
@@ -519,6 +523,10 @@ const HOST_ONLY_ACTIONS = new Set([
   'chess_rematch',
   'ludo_start_match',
   'ludo_rematch',
+  'karaoke_start',
+  'karaoke_next',
+  'karaoke_encore',
+  'hangout_open',
   'update_settings',
   'set_theme',
   'update_minigames',
@@ -1168,6 +1176,137 @@ export async function GET(_request: Request, { params }: { params: { roomId: str
   // and health-check surface now. Presence pruning rides on the heartbeat.
   if (prunePresence(room)) await writeRoom(room);
   return NextResponse.json(room);
+}
+
+// ─── Karaoke Stage ──────────────────────────────────────────────────────────
+
+/** Points the room can add to a performance by reacting to it. */
+const KARAOKE_CROWD_POINTS: Record<SocialReactionId, number> = {
+  fire: 30,
+  drama: 25,
+  laugh: 20,
+  almost: 15,
+};
+
+/** Ceiling on the crowd bonus, so a big room cannot outweigh the singing. */
+const MAX_CROWD_BONUS = 200;
+
+/**
+ * Points the whole set is worth, used only to sanity-check what a browser
+ * claims it scored. The performance itself is graded client-side — the pitch
+ * data never leaves the singer's device — so the server's job is to reject
+ * anything outside the range an honest client could produce.
+ */
+const MAX_SUBMITTED_POINTS = 1000;
+
+/** Who sings next, wrapping to the next song when everybody has had a go. */
+function advanceKaraoke(room: RoomState, ks: KaraokeState): void {
+  ks.turnSeq += 1;
+  ks.lastPerformance = null;
+  ks.startedAt = Date.now();
+
+  const singers = ks.singerOrder.length;
+  if (singers === 0) {
+    ks.phase = 'finished';
+    return;
+  }
+
+  if (ks.setup.order === 'block') {
+    // One singer does their whole setlist before the next takes the mic.
+    ks.songIndex += 1;
+    if (ks.songIndex >= ks.setup.setlist.length) {
+      ks.songIndex = 0;
+      ks.singerIndex += 1;
+    }
+  } else {
+    // Everybody sings song one, then everybody sings song two. The party
+    // default, because nobody waits through four songs for their first turn.
+    ks.singerIndex += 1;
+    if (ks.singerIndex >= singers) {
+      ks.singerIndex = 0;
+      ks.songIndex += 1;
+    }
+  }
+
+  const done =
+    ks.setup.order === 'block'
+      ? ks.singerIndex >= singers
+      : ks.songIndex >= ks.setup.setlist.length;
+
+  if (done) {
+    ks.phase = 'finished';
+    ks.singerIndex = Math.min(ks.singerIndex, Math.max(0, singers - 1));
+    ks.songIndex = Math.min(ks.songIndex, Math.max(0, ks.setup.setlist.length - 1));
+    pushEvent(room, '🎤 The setlist is finished.', 'system');
+    return;
+  }
+
+  ks.phase = 'on_deck';
+  syncKaraokeActivePlayer(room, ks);
+}
+
+/**
+ * Points `activePlayerIndex` at whoever is singing.
+ *
+ * The spectator plumbing — live state, the social panel, the "waiting on"
+ * copy — all key off the active player, and reusing it here is far better than
+ * teaching every one of those places about a second idea of whose turn it is.
+ */
+function syncKaraokeActivePlayer(room: RoomState, ks: KaraokeState): void {
+  const singerId = ks.singerOrder[ks.singerIndex];
+  const index = room.players.findIndex((p) => p.id === singerId);
+  if (index >= 0) room.activePlayerIndex = index;
+}
+
+/** Drops singers who have left, so the queue never stalls on an empty chair. */
+function pruneKaraokeSingers(room: RoomState, ks: KaraokeState): void {
+  const present = new Set(room.players.map((p) => p.id));
+  const singerId = ks.singerOrder[ks.singerIndex];
+  const filtered = ks.singerOrder.filter((id) => present.has(id));
+  if (filtered.length === ks.singerOrder.length) return;
+
+  ks.singerOrder = filtered;
+  const stillThere = filtered.indexOf(singerId);
+  ks.singerIndex = stillThere >= 0 ? stillThere : Math.min(ks.singerIndex, Math.max(0, filtered.length - 1));
+}
+
+// ─── Hangout Lounge ─────────────────────────────────────────────────────────
+
+/** Vibe a reaction adds to the room. */
+const HANGOUT_VIBE: Record<SocialReactionId, number> = {
+  laugh: 2,
+  fire: 2,
+  drama: 3,
+  almost: 1,
+};
+
+/** Reactions kept in state — these drive an animation, not a history. */
+const MAX_HANGOUT_REACTIONS = 12;
+
+const DEFAULT_SPOTLIGHT_SECONDS = 60;
+
+function freshHangoutState(seconds = DEFAULT_SPOTLIGHT_SECONDS): HangoutState {
+  return {
+    spotlightId: null,
+    spotlightName: null,
+    spotlightEndsAt: null,
+    spotlightSeconds: seconds,
+    card: null,
+    vibe: 0,
+    lastSound: null,
+    reactions: [],
+    spotlightHistory: [],
+    seq: 0,
+  };
+}
+
+/** Clears a spotlight whose time has run out, so state never shows a stale one. */
+function expireSpotlight(hs: HangoutState): void {
+  if (hs.spotlightEndsAt && Date.now() > hs.spotlightEndsAt) {
+    hs.spotlightId = null;
+    hs.spotlightName = null;
+    hs.spotlightEndsAt = null;
+  }
 }
 
 // ─── Chess line-up ──────────────────────────────────────────────────────────
@@ -3778,6 +3917,373 @@ async function applyAction(
       }
 
       applyLudoMove(room, ls, choice, roll);
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    // ── Karaoke Stage ───────────────────────────────────────────────────────
+    case 'karaoke_start': {
+      const requested = Array.isArray(body.setlist) ? body.setlist.map(String) : [];
+      // Only songs that exist, deduped, order preserved. A setlist naming a
+      // song the songbook does not have would stall the stage on a blank turn.
+      const setlist = [...new Set(requested)].filter((id) => Boolean(getSong(id)));
+      if (setlist.length === 0) setlist.push(SONGBOOK[0].id);
+
+      const order = body.order === 'block' ? 'block' : 'rotate';
+      const singerOrder = room.players.map((p) => p.id);
+      if (singerOrder.length === 0) {
+        return NextResponse.json({ error: 'Nobody is in the room' }, { status: 409 });
+      }
+
+      room.roomType = 'karaoke';
+      room.phase = 'karaoke_stage';
+      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      room.matchStartedAt = Date.now();
+      room.matchArchived = false;
+      room.winner = null;
+      room.liveState = null;
+
+      const karaokeState: KaraokeState = {
+        setup: { setlist, order },
+        phase: 'on_deck',
+        singerOrder,
+        singerIndex: 0,
+        songIndex: 0,
+        scores: Object.fromEntries(singerOrder.map((id) => [id, 0])),
+        performances: [],
+        lastPerformance: null,
+        startedAt: Date.now(),
+        turnSeq: 1,
+      };
+      room.karaokeState = karaokeState;
+      syncKaraokeActivePlayer(room, karaokeState);
+
+      pushEvent(
+        room,
+        `🎤 Karaoke Stage — ${setlist.length} song${setlist.length === 1 ? '' : 's'}, ${singerOrder.length} on the mic`,
+        'system'
+      );
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /**
+     * Records a finished performance.
+     *
+     * The grading itself happens in the singer's browser, because that is the
+     * only place the microphone data exists — shipping a pitch trace to the
+     * server every frame would be far more traffic than the whole rest of the
+     * game combined. What the server does is bound it: only the singer may
+     * submit, only once per turn, and only a score a real performance could
+     * produce.
+     */
+    case 'karaoke_submit': {
+      const ks = room.karaokeState;
+      if (!ks) return NextResponse.json({ error: 'No karaoke set running' }, { status: 400 });
+      if (ks.phase !== 'on_deck' && ks.phase !== 'performing') {
+        return NextResponse.json({ room, stale: true });
+      }
+
+      const singerId = ks.singerOrder[ks.singerIndex];
+      if (body.callerId !== singerId) {
+        return NextResponse.json({ error: 'Only the singer submits their own turn' }, { status: 403 });
+      }
+      if (Number(body.seq) !== ks.turnSeq) {
+        // A resubmission of a turn the room has already moved past.
+        return NextResponse.json({ room, stale: true });
+      }
+
+      const singer = room.players.find((p) => p.id === singerId);
+      const song = getSong(String(body.songId ?? '')) ?? getSong(ks.setup.setlist[ks.songIndex]);
+      const clamp = (value: unknown, max: number) =>
+        Math.max(0, Math.min(max, Math.round(Number(value) || 0)));
+
+      const performance: KaraokePerformance = {
+        playerId: singerId,
+        playerName: singer?.name ?? 'Singer',
+        avatar: singer?.avatar?.faceUrl,
+        songId: song?.id ?? 'unknown',
+        songTitle: song?.title ?? 'Unknown song',
+        accuracy: Math.max(0, Math.min(1, Number(body.accuracy) || 0)),
+        notesHit: clamp(body.notesHit, 999),
+        notesTotal: clamp(body.notesTotal, 999),
+        bestStreak: clamp(body.bestStreak, 999),
+        points: clamp(body.points, MAX_SUBMITTED_POINTS),
+        crowdBonus: 0,
+        grade: String(body.grade ?? '—').slice(0, 3),
+        verdict: String(body.verdict ?? '').slice(0, 160),
+        at: Date.now(),
+      };
+
+      ks.phase = 'applause';
+      ks.lastPerformance = performance;
+      ks.performances.push(performance);
+      ks.scores[singerId] = (ks.scores[singerId] ?? 0) + performance.points;
+      ks.turnSeq += 1;
+      room.liveState = null;
+
+      // Karaoke feeds the same lifetime score everything else does, so a night
+      // of singing shows up in a player's record rather than evaporating.
+      if (singer) {
+        singer.score += performance.points;
+        updatePlayerLevel(singer);
+      }
+
+      pushEvent(
+        room,
+        `🎤 ${performance.playerName} sang ${performance.songTitle} — grade ${performance.grade} (${performance.points})`,
+        'point'
+      );
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /** A reaction to the performance on screen, worth real points to the singer. */
+    case 'karaoke_cheer': {
+      const ks = room.karaokeState;
+      if (!ks?.lastPerformance) return NextResponse.json({ room, stale: true });
+      if (!isSocialReaction(body.reaction)) {
+        return NextResponse.json({ error: 'Unknown reaction' }, { status: 400 });
+      }
+
+      const callerId = String(body.callerId ?? '');
+      if (callerId === ks.lastPerformance.playerId) {
+        return NextResponse.json({ error: 'You cannot cheer for yourself' }, { status: 403 });
+      }
+
+      // One cheer each per performance. Without this a single player holding
+      // the button is worth more than the entire rest of the room.
+      room.socialRound ??= { targetPlayerId: ks.lastPerformance.playerId, reactions: [], judgeVotes: [] };
+      if (room.socialRound.targetPlayerId !== ks.lastPerformance.playerId) {
+        room.socialRound = { targetPlayerId: ks.lastPerformance.playerId, reactions: [], judgeVotes: [] };
+      }
+      if (room.socialRound.reactions.some((r) => r.voterId === callerId)) {
+        return NextResponse.json({ room, alreadyCheered: true });
+      }
+
+      const cheerer = room.players.find((p) => p.id === callerId);
+      room.socialRound.reactions.push({
+        id: `cheer_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        reaction: body.reaction,
+        voterId: callerId,
+        voterName: cheerer?.name ?? 'Someone',
+        targetPlayerId: ks.lastPerformance.playerId,
+        timestamp: new Date().toISOString(),
+      });
+
+      const added = KARAOKE_CROWD_POINTS[body.reaction];
+      const before = ks.lastPerformance.crowdBonus;
+      ks.lastPerformance.crowdBonus = Math.min(MAX_CROWD_BONUS, before + added);
+      const gained = ks.lastPerformance.crowdBonus - before;
+
+      if (gained > 0) {
+        const singerId = ks.lastPerformance.playerId;
+        ks.scores[singerId] = (ks.scores[singerId] ?? 0) + gained;
+        const singer = room.players.find((p) => p.id === singerId);
+        if (singer) {
+          singer.vibeScore = (singer.vibeScore ?? 0) + gained;
+          updatePlayerLevel(singer);
+        }
+        // The stored performance is a separate object from lastPerformance, so
+        // the history would otherwise keep the pre-cheer number forever.
+        const recorded = ks.performances[ks.performances.length - 1];
+        if (recorded && recorded.at === ks.lastPerformance.at) recorded.crowdBonus = ks.lastPerformance.crowdBonus;
+      }
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /** Moves the stage on — the next singer, the next song, or the end. */
+    case 'karaoke_next': {
+      const ks = room.karaokeState;
+      if (!ks) return NextResponse.json({ error: 'No karaoke set running' }, { status: 400 });
+
+      room.socialRound = null;
+      room.liveState = null;
+      pruneKaraokeSingers(room, ks);
+      advanceKaraoke(room, ks);
+
+      if (ks.phase === 'finished') {
+        const ranked = Object.entries(ks.scores).sort((a, b) => b[1] - a[1]);
+        const topId = ranked[0]?.[0];
+        room.winner = room.players.find((p) => p.id === topId) ?? null;
+      }
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /** Runs the same setlist again with scores reset. */
+    case 'karaoke_encore': {
+      const ks = room.karaokeState;
+      if (!ks) return NextResponse.json({ error: 'No karaoke set to repeat' }, { status: 400 });
+
+      ks.singerOrder = room.players.map((p) => p.id);
+      ks.singerIndex = 0;
+      ks.songIndex = 0;
+      ks.phase = 'on_deck';
+      ks.scores = Object.fromEntries(ks.singerOrder.map((id) => [id, 0]));
+      ks.performances = [];
+      ks.lastPerformance = null;
+      ks.startedAt = Date.now();
+      ks.turnSeq += 1;
+      room.winner = null;
+      room.socialRound = null;
+      syncKaraokeActivePlayer(room, ks);
+
+      pushEvent(room, '🎶 Encore — the set runs again.', 'system');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    // ── Hangout Lounge ──────────────────────────────────────────────────────
+    case 'hangout_open': {
+      room.roomType = 'hangout';
+      room.phase = 'hangout_lounge';
+      room.winner = null;
+      room.liveState = null;
+      room.socialRound = null;
+      room.hangoutState = freshHangoutState(
+        Math.max(20, Math.min(180, Number(body.spotlightSeconds) || 60))
+      );
+      pushEvent(room, '🍻 The lounge is open. No scores, no timer, just the room.', 'system');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'hangout_take_mic': {
+      const hs = room.hangoutState;
+      if (!hs) return NextResponse.json({ error: 'The lounge is not open' }, { status: 400 });
+
+      const callerId = String(body.callerId ?? '');
+      const player = room.players.find((p) => p.id === callerId);
+      if (!player) return NextResponse.json({ error: 'Not in this room' }, { status: 403 });
+
+      expireSpotlight(hs);
+      hs.spotlightId = player.id;
+      hs.spotlightName = player.name;
+      hs.spotlightEndsAt = Date.now() + hs.spotlightSeconds * 1000;
+      if (!hs.spotlightHistory.includes(player.id)) hs.spotlightHistory.push(player.id);
+      // A lap everyone has completed starts again, so "not yet" stays useful.
+      if (hs.spotlightHistory.length >= room.players.length) hs.spotlightHistory = [player.id];
+      hs.seq += 1;
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'hangout_pass_mic': {
+      const hs = room.hangoutState;
+      if (!hs) return NextResponse.json({ error: 'The lounge is not open' }, { status: 400 });
+
+      const target = room.players.find((p) => p.id === String(body.targetId ?? ''));
+      if (!target) return NextResponse.json({ error: 'No such player' }, { status: 404 });
+
+      hs.spotlightId = target.id;
+      hs.spotlightName = target.name;
+      hs.spotlightEndsAt = Date.now() + hs.spotlightSeconds * 1000;
+      if (!hs.spotlightHistory.includes(target.id)) hs.spotlightHistory.push(target.id);
+      if (hs.spotlightHistory.length >= room.players.length) hs.spotlightHistory = [target.id];
+      hs.seq += 1;
+
+      const from = room.players.find((p) => p.id === String(body.callerId ?? ''));
+      pushEvent(room, `🎙️ ${from?.name ?? 'Someone'} passed the mic to ${target.name}`, 'social');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'hangout_drop_mic': {
+      const hs = room.hangoutState;
+      if (!hs) return NextResponse.json({ error: 'The lounge is not open' }, { status: 400 });
+
+      // Only the holder puts it down. Anyone else doing it is taking the floor
+      // off somebody mid-sentence, which is the one rude thing in here.
+      if (hs.spotlightId !== String(body.callerId ?? '')) {
+        return NextResponse.json({ error: 'You do not have the mic' }, { status: 403 });
+      }
+      hs.spotlightId = null;
+      hs.spotlightName = null;
+      hs.spotlightEndsAt = null;
+      hs.seq += 1;
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'hangout_draw': {
+      const hs = room.hangoutState;
+      if (!hs) return NextResponse.json({ error: 'The lounge is not open' }, { status: 400 });
+
+      const deck = String(body.deck ?? 'hot_take');
+      if (!(deck in HANGOUT_DECKS)) {
+        return NextResponse.json({ error: 'Unknown deck' }, { status: 400 });
+      }
+      const deckId = deck as keyof typeof HANGOUT_DECKS;
+
+      // The AI deck's text is written by the caller's browser, so it is capped
+      // and trimmed here rather than trusted — it goes on everyone's screen.
+      const supplied = typeof body.text === 'string' ? body.text.trim().slice(0, 240) : '';
+      const text = deckId === 'host' && supplied ? supplied : drawCard(deckId, hs.card?.text);
+
+      const drawer = room.players.find((p) => p.id === String(body.callerId ?? ''));
+      hs.card = {
+        id: `card_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        deck: deckId,
+        text,
+        drawnBy: drawer?.id ?? '',
+        drawnByName: drawer?.name ?? 'Someone',
+        at: Date.now(),
+      };
+      hs.seq += 1;
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /** A soundboard pad, replayed on every device in the room. */
+    case 'hangout_sound': {
+      const hs = room.hangoutState;
+      if (!hs) return NextResponse.json({ error: 'The lounge is not open' }, { status: 400 });
+
+      const padId = String(body.padId ?? '');
+      if (!SOUNDBOARD_PADS.some((pad) => pad.id === padId)) {
+        return NextResponse.json({ error: 'Unknown pad' }, { status: 400 });
+      }
+
+      const player = room.players.find((p) => p.id === String(body.callerId ?? ''));
+      hs.lastSound = {
+        padId,
+        by: player?.id ?? '',
+        byName: player?.name ?? 'Someone',
+        at: Date.now(),
+      };
+      hs.seq += 1;
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'hangout_react': {
+      const hs = room.hangoutState;
+      if (!hs) return NextResponse.json({ error: 'The lounge is not open' }, { status: 400 });
+      if (!isSocialReaction(body.reaction)) {
+        return NextResponse.json({ error: 'Unknown reaction' }, { status: 400 });
+      }
+
+      expireSpotlight(hs);
+      const player = room.players.find((p) => p.id === String(body.callerId ?? ''));
+      hs.reactions = [
+        ...hs.reactions,
+        {
+          id: `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+          reaction: body.reaction,
+          by: player?.id ?? '',
+          byName: player?.name ?? 'Someone',
+          targetId: hs.spotlightId,
+          at: Date.now(),
+        },
+      ].slice(-MAX_HANGOUT_REACTIONS);
+
+      hs.vibe += HANGOUT_VIBE[body.reaction];
+      hs.seq += 1;
+
+      // Whoever had the floor gets the credit, which is the only progression
+      // the lounge hands out — and it is social score, not a game score.
+      const target = hs.spotlightId ? room.players.find((p) => p.id === hs.spotlightId) : undefined;
+      if (target && target.id !== player?.id) {
+        target.vibeScore = (target.vibeScore ?? 0) + HANGOUT_VIBE[body.reaction];
+        updatePlayerLevel(target);
+      }
+
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

@@ -52,3 +52,6 @@ next-env.d.ts
 # stops several MB of unused PNGs shipping with every clone and deploy.
 # Delete this line if they are meant to be tracked.
 /public/designs
+
+# Output of `npm run check:karaoke`, rebuilt on every run.
+/.karaoke-check/

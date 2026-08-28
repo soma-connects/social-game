@@ -393,6 +393,102 @@ class AudioFeedbackEngine {
   public playTap() {
     this.playPop();
   }
+
+  /**
+   * Plays a melody so the singer knows the tune before they have to sing it.
+   *
+   * Scheduled against the AudioContext clock rather than with setTimeout. A
+   * timer-driven melody drifts audibly within a couple of bars — the browser
+   * is free to be late, and every late note pushes the next one further out —
+   * which for a game about matching a tune is worse than no guide at all.
+   *
+   * Ignores the SFX mute for the same reason playReferenceTone does: this is
+   * the question, not a party noise.
+   */
+  public playMelody(notes: { freq: number; at: number; seconds: number }[]): () => void {
+    const ctx = this.getContext();
+    if (!ctx || notes.length === 0) return () => {};
+
+    const start = ctx.currentTime + 0.12;
+    const voices: { osc: OscillatorNode; gain: GainNode }[] = [];
+
+    for (const note of notes) {
+      if (!Number.isFinite(note.freq) || note.freq <= 0) continue;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const at = start + note.at;
+      // Held slightly short so repeated notes at the same pitch are audibly
+      // two notes rather than one long one.
+      const until = at + Math.max(0.08, note.seconds - 0.06);
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(note.freq, at);
+
+      gain.gain.setValueAtTime(0, at);
+      gain.gain.linearRampToValueAtTime(0.22, at + 0.02);
+      gain.gain.setValueAtTime(0.22, Math.max(at + 0.03, until - 0.05));
+      gain.gain.linearRampToValueAtTime(0, until);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(at);
+      osc.stop(until + 0.03);
+      voices.push({ osc, gain });
+    }
+
+    return () => {
+      const now = ctx.currentTime;
+      for (const { osc, gain } of voices) {
+        try {
+          gain.gain.cancelScheduledValues(now);
+          gain.gain.setValueAtTime(gain.gain.value, now);
+          gain.gain.linearRampToValueAtTime(0, now + 0.05);
+          osc.stop(now + 0.07);
+        } catch {
+          /* never started, or already stopped */
+        }
+      }
+    };
+  }
+
+  /**
+   * A click on the beat, for singing to.
+   *
+   * Deliberately a filtered noise burst rather than a tone: the microphone is
+   * open and the pitch detector is listening, and anything with a pitch would
+   * be picked up and scored as if the singer had produced it.
+   */
+  public playMetronomeTick(accent = false) {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const length = Math.floor(ctx.sampleRate * 0.02);
+    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+    }
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(accent ? 2600 : 1700, now);
+    filter.Q.setValueAtTime(1.2, now);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(accent ? 0.16 : 0.09, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    source.start(now);
+  }
 }
 
 export const audioSFX = new AudioFeedbackEngine();

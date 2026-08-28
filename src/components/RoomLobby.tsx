@@ -40,6 +40,8 @@ import { LudoSetup } from '@/lib/ludo/ludoTypes';
 import LudoSetupPanel, { defaultLudoSetup } from './ludo/LudoSetupPanel';
 import { ChessSetup } from '@/lib/chess/chessTypes';
 import ChessSetupPanel, { defaultChessSetup } from './chess/ChessSetupPanel';
+import { KaraokeSetup } from '@/lib/karaoke/karaokeTypes';
+import KaraokeSetupPanel, { defaultKaraokeSetup } from './karaoke/KaraokeSetupPanel';
 import AvatarIllustration from './AvatarIllustration';
 import BackgroundMusic from './BackgroundMusic';
 
@@ -50,7 +52,7 @@ interface RoomLobbyProps {
   onSelectMode?: (
     mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo',
     /** Per-mode line-up chosen in the panels below, when the mode has one. */
-    options?: { ludo?: LudoSetup; chess?: ChessSetup }
+    options?: { ludo?: LudoSetup; chess?: ChessSetup; karaoke?: KaraokeSetup }
   ) => void;
 }
 
@@ -98,6 +100,8 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
     chessTouched.current = true;
     setChessSetup(next);
   };
+
+  const [karaokeSetup, setKaraokeSetup] = useState<KaraokeSetup>(() => defaultKaraokeSetup());
   const [isShuffling, setIsShuffling] = useState(false);
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
@@ -547,7 +551,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
-                    KARAOKE & PITCH ARCADE
+                    KARAOKE STAGE
                     {activeMode === 'karaoke' && (
                       <span className="bg-partyPink text-white text-[9px] px-2 py-0.5 rounded-full font-black">
                         SELECTED
@@ -555,7 +559,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                     )}
                   </h4>
                   <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    PitchBird flying 🐦, Solfege Note Matching 🎵 & Voice Arena fast-mic!
+                    Sing a real melody down a scrolling note track, in your own key. Scored live, note by note.
                   </p>
                 </div>
               </button>
@@ -577,7 +581,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
-                    15s ROAST HANGOUT
+                    HANGOUT LOUNGE
                     {activeMode === 'hangout' && (
                       <span className="bg-emerald-500 text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">
                         SELECTED
@@ -585,7 +589,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                     )}
                   </h4>
                   <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    Open-mic voice lounge, party soundboard pad (Danfo Horn) & roast countdown!
+                    No scores. Shared soundboard, a mic you can pass, and five decks of prompts.
                   </p>
                 </div>
               </button>
@@ -789,6 +793,33 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 />
               </div>
             )}
+
+            {/* Karaoke picks its own setlist and turn order. */}
+            {activeMode === 'karaoke' && (
+              <div className="pt-3">
+                <KaraokeSetupPanel
+                  value={karaokeSetup}
+                  onChange={setKaraokeSetup}
+                  singers={room.players}
+                  editable={myPlayer.isHost}
+                />
+              </div>
+            )}
+
+            {/* The lounge has nothing to configure, which is the point of it. */}
+            {activeMode === 'hangout' && (
+              <div className="pt-3 rounded-2xl border border-emerald-500/25 bg-emerald-950/20 p-3 sm:p-4 animate-fadeIn">
+                <h4 className="font-extrabold text-xs sm:text-sm text-white">🍻 THE LOUNGE</h4>
+                <p className="mt-1 text-[11px] text-slate-400 leading-relaxed">
+                  No scores, no rounds, no winner. A shared soundboard everyone hears, a
+                  mic you can pass to whoever has gone quiet, and five decks of prompts for
+                  when the conversation stalls.
+                </p>
+                <p className="mt-1.5 text-[10px] text-emerald-300/80 font-bold">
+                  Open it and leave it open — it is the room, not a match.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Toggle Button for Custom Deck Settings (HIDDEN BY DEFAULT) */}
@@ -797,7 +828,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 room into team mode so the crew roster appears above and people
                 can arrange sides, the second actually starts the series. */}
             <button
-              onClick={() => (onSelectMode ? onSelectMode(activeMode, { ludo: ludoSetup, chess: chessSetup }) : onStartGame())}
+              onClick={() => (onSelectMode ? onSelectMode(activeMode, { ludo: ludoSetup, chess: chessSetup, karaoke: karaokeSetup }) : onStartGame())}
               className="w-full bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-sm sm:text-base py-3 sm:py-3.5 px-6 sm:px-8 rounded-2xl flex items-center justify-center gap-2 sm:gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-yellow"
             >
               <Play className="w-5 h-5 fill-current" />

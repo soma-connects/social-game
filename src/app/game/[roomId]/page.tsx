@@ -26,6 +26,16 @@ const ChessGame = dynamic(() => import('@/components/chess/ChessGame'), {
 const LudoGame = dynamic(() => import('@/components/ludo/LudoGame'), {
   loading: () => <div className="p-8 text-center text-amber-400 font-bold animate-pulse">Loading Ludo Arena...</div>,
 });
+
+// Both carry their own canvas or audio machinery and are only reached from one
+// mode each, so neither belongs in the bundle everybody downloads.
+const KaraokeStage = dynamic(() => import('@/components/karaoke/KaraokeStage'), {
+  loading: () => <div className="p-8 text-center text-fuchsia-300 font-bold animate-pulse">Setting up the stage...</div>,
+});
+
+const HangoutLounge = dynamic(() => import('@/components/hangout/HangoutLounge'), {
+  loading: () => <div className="p-8 text-center text-emerald-300 font-bold animate-pulse">Opening the lounge...</div>,
+});
 import PowerupShop from '@/components/PowerupShop';
 import RoadmapBoard from '@/components/RoadmapBoard';
 import TrapWordPicker from '@/components/TrapWordPicker';
@@ -44,11 +54,13 @@ import TeamBattleIntro from '@/components/TeamBattleIntro';
 import TeamBattleRecap from '@/components/TeamBattleRecap';
 import { LudoSetup } from '@/lib/ludo/ludoTypes';
 import { ChessSetup } from '@/lib/chess/chessTypes';
+import { KaraokeSetup } from '@/lib/karaoke/karaokeTypes';
+import { defaultKaraokeSetup } from '@/components/karaoke/KaraokeSetupPanel';
 import { defaultChessSetup } from '@/components/chess/ChessSetupPanel';
 import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
-import { MapTheme, MiniGameId, Player } from '@/lib/types';
+import { GamePhase, MapTheme, MiniGameId, Player } from '@/lib/types';
 import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam } from '@/lib/gameRules';
 import PowerupTargetPicker from '@/components/PowerupTargetPicker';
 import MiniGameBriefing, { useMiniGameBriefing } from '@/components/MiniGameBriefing';
@@ -71,6 +83,23 @@ import {
   Package,
   ChevronDown,
 } from 'lucide-react';
+
+/**
+ * Phases with no roadmap board under them.
+ *
+ * Powerups only mean anything on the board — a Rocket Nitro cannot move a chess
+ * piece or a karaoke score — so the inventory has no business appearing here.
+ * It was gated on `phase !== 'lobby'`, which meant every standalone mode carried
+ * a panel of items nobody could use, offering to "fly 3 spaces further down the
+ * road" in a room with no road in it.
+ */
+const BOARDLESS_PHASES = new Set<GamePhase>([
+  'lobby',
+  'chess_match',
+  'ludo_match',
+  'karaoke_stage',
+  'hangout_lounge',
+]);
 
 export default function GameRoomPage() {
   const params = useParams();
@@ -302,6 +331,8 @@ export default function GameRoomPage() {
   const currentTheme: MapTheme = room.theme || 'forest';
   const isMyTurn = activePlayer?.id === myPlayer.id;
 
+  const hasInventory = !BOARDLESS_PHASES.has(room.phase);
+
   const handleStartMatch = () => {
     audioSFX.playNollywoodBrass();
     roomStore.startMatch(roomId);
@@ -309,7 +340,7 @@ export default function GameRoomPage() {
 
   const handleSelectMode = async (
     mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo',
-    options?: { ludo?: LudoSetup; chess?: ChessSetup }
+    options?: { ludo?: LudoSetup; chess?: ChessSetup; karaoke?: KaraokeSetup }
   ) => {
     if (mode === 'board') {
       handleStartMatch();
@@ -337,9 +368,11 @@ export default function GameRoomPage() {
       audioSFX.playNollywoodBrass();
       await roomStore.startAiMaster(roomId);
     } else if (mode === 'karaoke') {
-      setComingSoonTitle('🎤 Karaoke & Pitch Arcade Mode');
+      audioSFX.playNollywoodBrass();
+      await roomStore.startKaraoke(roomId, options?.karaoke ?? defaultKaraokeSetup());
     } else if (mode === 'hangout') {
-      setComingSoonTitle('🍻 15s Roast & Open-Mic Lounge Mode');
+      audioSFX.playStreetVendorBell();
+      await roomStore.openHangout(roomId);
     }
   };
 
@@ -689,6 +722,18 @@ export default function GameRoomPage() {
             </div>
           )}
 
+          {room.phase === 'karaoke_stage' && (
+            <div className="space-y-6">
+              <KaraokeStage room={room} myPlayer={myPlayer} roomId={roomId} />
+            </div>
+          )}
+
+          {room.phase === 'hangout_lounge' && (
+            <div className="space-y-6">
+              <HangoutLounge room={room} myPlayer={myPlayer} roomId={roomId} />
+            </div>
+          )}
+
           {room.phase === 'ai_master_round' && (
             <div className="space-y-6">
               <AiMasterGame room={room} myPlayer={myPlayer} roomId={roomId} />
@@ -840,7 +885,7 @@ export default function GameRoomPage() {
           })()}
         </main>
 
-        {room.phase !== 'lobby' && (
+        {hasInventory && (
           <RightSidebar
             activePlayer={activePlayer}
             myPlayer={myPlayer}
@@ -872,21 +917,23 @@ export default function GameRoomPage() {
             almost nobody used the button, while the inventory — which decides
             whether you can act on your turn — had no route at all on a phone:
             RightSidebar is `hidden lg:block`, so below 1024px it never renders. */}
-        <button
-          onClick={() => setShowMobileInventory(true)}
-          className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyPink active:scale-95 transition-all relative"
-        >
-          <Package className="w-5 h-5 text-partyPink" />
-          <span className="text-[10px] font-black uppercase">ITEMS ({myPlayer.inventory.length})</span>
-          {myPlayer.inventory.length > 0 && (
-            <span className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-partyPink animate-pulse" />
-          )}
-        </button>
+        {hasInventory && (
+          <button
+            onClick={() => setShowMobileInventory(true)}
+            className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyPink active:scale-95 transition-all relative"
+          >
+            <Package className="w-5 h-5 text-partyPink" />
+            <span className="text-[10px] font-black uppercase">ITEMS ({myPlayer.inventory.length})</span>
+            {myPlayer.inventory.length > 0 && (
+              <span className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-partyPink animate-pulse" />
+            )}
+          </button>
+        )}
       </div>
 
       {/* Mobile inventory. Same powerups and the same rules as the desktop
           sidebar, including the target picker for the offensive items. */}
-      {showMobileInventory && (
+      {showMobileInventory && hasInventory && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-md animate-fadeIn lg:hidden">
           <div className="glass-card rounded-t-3xl sm:rounded-3xl p-5 border border-partyPink/50 w-full sm:max-w-md space-y-4 bg-slate-900/95 shadow-2xl max-h-[80vh] overflow-y-auto pb-8">
             <div className="flex items-center justify-between pb-2 border-b border-white/10">

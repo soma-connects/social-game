@@ -159,6 +159,8 @@ export type GamePhase =
   | 'chess_match'
   | 'ludo_match'
   | 'ai_master_round'
+  | 'karaoke_stage'
+  | 'hangout_lounge'
   | 'game_over';
 
 /** The qualifying mini-games that feed the main board game. */
@@ -442,7 +444,7 @@ export type RoomState = {
   } | null;
   winner: Player | null;
   /** The high-level mode the room is running in. */
-  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master';
+  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master' | 'karaoke' | 'hangout';
   /** The social vibe the host picked, steering the AI Master's tone and mini-game mix. Undefined reads as classic_party. */
   roomVibe?: RoomVibeId;
   /** Set instead of a solo winner when the room is in team mode. */
@@ -516,6 +518,10 @@ export type RoomState = {
   ludoState?: import('./ludo/ludoTypes').LudoRoomState | null;
   /** AI Master game state. */
   aiMasterState?: AiMasterState | null;
+  /** Karaoke Stage state. */
+  karaokeState?: import('./karaoke/karaokeTypes').KaraokeState | null;
+  /** Hangout Lounge state. */
+  hangoutState?: import('./hangout/hangoutTypes').HangoutState | null;
   /** Session memory — small structured events for Who Said It? and AI callbacks. */
   sessionMemory?: SessionMemoryEvent[];
 };

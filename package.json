@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check:karaoke": "tsc scripts/check-karaoke.ts src/lib/karaoke/songbook.ts src/lib/karaoke/karaokeScoring.ts src/lib/solfege.ts --outDir .karaoke-check --module commonjs --target ES2019 --moduleResolution node --skipLibCheck --esModuleInterop && node .karaoke-check/scripts/check-karaoke.js"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",

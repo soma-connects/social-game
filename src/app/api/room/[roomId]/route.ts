@@ -1703,7 +1703,8 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       // After the response is built, so recording a match never delays the
       // game-over screen, and guarded by archiveMatch's own idempotency rather
       // than by anything this loop tracks.
-      if (room.phase === 'game_over' && !room.matchArchived) {
+      if (matchIsDecided(room) && !room.matchArchived) {
+        resolveMatchWinner(room);
         await archiveMatch(room, 'winner');
       }
 
@@ -1720,6 +1721,65 @@ export async function POST(request: Request, { params }: { params: { roomId: str
         );
       }
     }
+  }
+}
+
+/**
+ * Whether the match now has a result worth recording.
+ *
+ * The board game raises `game_over` and this used to test only for that, so
+ * chess, ludo and karaoke — none of which use that phase, because each has its
+ * own end screen worth keeping — were only ever archived if the host went out
+ * of their way to tap "end match". Winning and closing the tab, which is what
+ * actually happens, recorded nothing at all.
+ *
+ * The lounge is deliberately absent: it has no winner and never ends, so it is
+ * archived as `ended_early` when somebody closes it, like any other session.
+ */
+function matchIsDecided(room: RoomState): boolean {
+  if (room.phase === 'game_over') return true;
+  if (room.chessState?.winner) return true;
+  if (room.ludoState?.gameOver) return true;
+  if (room.karaokeState?.phase === 'finished') return true;
+  return false;
+}
+
+/**
+ * Fills in `room.winner` from whichever mode decided it.
+ *
+ * Each standalone mode names its winner in its own terms — a colour, a piece
+ * colour, a score table — and the match record wants a player. Done here rather
+ * than at each of the half-dozen points a game can end (checkmate, resignation,
+ * a flag falling, the last token coming home), because the archive is the only
+ * thing that needs the translation.
+ *
+ * Left alone if the winner is a computer, or the game was drawn: `winnerUid`
+ * would be null either way, and inventing a human winner would be worse than
+ * recording none.
+ */
+function resolveMatchWinner(room: RoomState): void {
+  if (room.winner) return;
+
+  const cs = room.chessState;
+  if (cs?.winner && cs.winner !== 'draw') {
+    const slots = cs.winner === 'w' ? cs.whitePlayers : cs.blackPlayers;
+    const human = slots.find((slot) => !slot.isAi);
+    room.winner = room.players.find((p) => p.id === human?.playerId) ?? null;
+    return;
+  }
+
+  const ls = room.ludoState;
+  if (ls?.gameOver) {
+    const first = ls.rankings[0] ?? ls.winner;
+    const seat = ls.players.find((seat) => seat.color === first && !seat.isAi);
+    room.winner = room.players.find((p) => p.id === seat?.playerId) ?? null;
+    return;
+  }
+
+  const ks = room.karaokeState;
+  if (ks?.phase === 'finished') {
+    const ranked = Object.entries(ks.scores).sort((a, b) => b[1] - a[1]);
+    room.winner = room.players.find((p) => p.id === ranked[0]?.[0]) ?? null;
   }
 }
 
@@ -3258,6 +3318,17 @@ async function applyAction(
       room.triviaState = null;
       room.guessTheVoiceState = null;
       room.aiMasterState = null;
+      // The standalone modes were missing from this list entirely, so ending a
+      // match left the finished board sitting in the room document — and left
+      // roomType claiming the room was still a chess room. Karaoke was the
+      // worst of them: its performance history grew with every set and never
+      // got cleared, inside a document that shares a 1 MiB cap with everything
+      // else in the room.
+      room.chessState = null;
+      room.ludoState = null;
+      room.karaokeState = null;
+      room.hangoutState = null;
+      room.roomType = 'board_game';
 
       pushEvent(room, `🏁 ${room.players.find((p) => p.id === body.callerId)?.name ?? 'The host'} ended the match — back to the lobby`, 'system');
       return NextResponse.json({ room: await writeRoom(room) });
@@ -3393,6 +3464,12 @@ async function applyAction(
 
       room.roomType = 'chess';
       room.phase = 'chess_match';
+      // Without these a finished game is not a match: buildRecord bails on a
+      // missing matchId, so every game of chess ever played went unrecorded.
+      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      room.matchStartedAt = Date.now();
+      room.matchArchived = false;
+      room.winner = null;
       room.chessState = {
         mode,
         timeControl,
@@ -3476,6 +3553,13 @@ async function applyAction(
         isRunning: cs.timeControl !== 'casual',
       };
       cs.gameNumber = (cs.gameNumber ?? 1) + 1;
+
+      // A rematch is a separate match. Reusing the previous id would make
+      // the archive write a no-op and the second game would vanish.
+      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      room.matchStartedAt = Date.now();
+      room.matchArchived = false;
+      room.winner = null;
 
       pushEvent(room, '🔁 Chess rematch — colours swapped.', 'system');
       return NextResponse.json({ room: await writeRoom(room) });
@@ -3794,6 +3878,11 @@ async function applyAction(
 
       room.roomType = 'ludo';
       room.phase = 'ludo_match';
+      // Same as chess above — no matchId meant no record of the game.
+      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      room.matchStartedAt = Date.now();
+      room.matchArchived = false;
+      room.winner = null;
       room.ludoState = {
         players,
         seatOrder,
@@ -3837,6 +3926,13 @@ async function applyAction(
       ls.gameOver = false;
       ls.turnSeq += 1;
       ls.lastActionText = 'Rematch! Board reset.';
+
+      // A rematch is a separate match. Reusing the previous id would make
+      // the archive write a no-op and the second game would vanish.
+      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      room.matchStartedAt = Date.now();
+      room.matchArchived = false;
+      room.winner = null;
 
       pushEvent(room, '🔁 Ludo rematch — board reset.', 'system');
       return NextResponse.json({ room: await writeRoom(room) });
@@ -4123,9 +4219,15 @@ async function applyAction(
       ks.lastPerformance = null;
       ks.startedAt = Date.now();
       ks.turnSeq += 1;
-      room.winner = null;
       room.socialRound = null;
       syncKaraokeActivePlayer(room, ks);
+
+      // A rematch is a separate match. Reusing the previous id would make
+      // the archive write a no-op and the second game would vanish.
+      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      room.matchStartedAt = Date.now();
+      room.matchArchived = false;
+      room.winner = null;
 
       pushEvent(room, '🎶 Encore — the set runs again.', 'system');
       return NextResponse.json({ room: await writeRoom(room) });

@@ -113,7 +113,6 @@ export default function GameRoomPage() {
   const [showMobileFeed, setShowMobileFeed] = useState(false);
   const [showMobileInventory, setShowMobileInventory] = useState(false);
   const [showGeminiMode, setShowGeminiMode] = useState(false);
-  const [comingSoonTitle, setComingSoonTitle] = useState<string | null>(null);
   const [activeDareTarget, setActiveDareTarget] = useState<Player | null>(null);
   /** Set while an offensive powerup is waiting for a target to be chosen. */
   const [pendingPowerup, setPendingPowerup] = useState<ShopItem | null>(null);
@@ -501,23 +500,6 @@ export default function GameRoomPage() {
             />
           )}
 
-          {comingSoonTitle && (
-            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
-              <div className="glass-card rounded-3xl p-6 sm:p-8 max-w-md w-full border border-partyYellow text-center space-y-4">
-                <div className="text-4xl">🚀</div>
-                <h3 className="text-xl font-black text-white">{comingSoonTitle}</h3>
-                <p className="text-xs text-gray-300">
-                  This dedicated mode feature is currently in active development for the next update. Launch Board Game or AI Master Mode to play right now!
-                </p>
-                <button
-                  onClick={() => setComingSoonTitle(null)}
-                  className="w-full bg-partyYellow text-partyDark font-black text-sm py-3.5 rounded-xl hover:bg-yellow-400 transition-all shadow-lg"
-                >
-                  BACK TO LOBBY
-                </button>
-              </div>
-            </div>
-          )}
 
           {room.phase === 'lobby' && (
             <RoomLobby

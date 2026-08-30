@@ -72,25 +72,56 @@ state, never from the client, so a PitchBird score cannot be graded on the voice
 scale.
 
 
-## Cloud Run must run as a single instance
+## Where state lives
 
-Rooms, the event feed and the WebRTC signalling mailboxes all live in the memory
-of one container. There is no database. If Cloud Run scales to two instances,
-players get load-balanced across them and end up in different copies of the same
-room — one player rolls the dice and nobody else sees it.
+Nothing is held in the memory of a single container any more, so the app can run
+on as many instances as the platform wants to give it.
 
-Deploy with the instance count pinned:
+| What | Where | Why there |
+| --- | --- | --- |
+| Room document, players, event feed | Firestore | Durable, and the browser subscribes to it directly — that subscription is what makes the game live without polling. |
+| Room secrets (auth tokens, the trivia answer, the Truth-or-Bluff lie) | Firestore, under `rooms/{id}/private` | Closed to browsers by `firestore.rules`. A field is not hidden just because the UI does not render it. |
+| WebRTC signalling mailboxes, voice presence | Redis (Upstash) | Several messages a second per player, each worthless once stale. A database write per candidate would cost more than the rest of the game combined. |
+
+This used to be one in-process `Map`, which worked only because Cloud Run was
+pinned with `--min-instances=1 --max-instances=1`. On any platform that scales —
+Vercel included — a request lands on whichever instance is warm, so an offer
+written by one instance was invisible to the instance the other player polled.
+The call would simply never connect, with nothing in any log to explain it.
+
+## Deploying to Vercel
+
+Connect the repository and set the environment variables below. `.env.local.example`
+is the template.
+
+**Redis.** Add a database from the Vercel Storage tab (Upstash Marketplace) and
+Vercel injects `KV_REST_API_URL` / `KV_REST_API_TOKEN` automatically. A database
+created directly on upstash.com gives `UPSTASH_REDIS_REST_URL` /
+`UPSTASH_REDIS_REST_TOKEN` instead; the server reads either pair, so both work.
+
+Without Redis the game still runs — board, chess, ludo, karaoke, the lounge —
+but **voice calls cannot connect**, because signalling has nowhere shared to
+queue messages. The server logs a warning saying exactly that rather than
+failing silently.
+
+**Firebase.** The `NEXT_PUBLIC_FIREBASE_*` values are compiled into the browser
+bundle and shipped to every visitor, so they are not secrets — `firestore.rules`
+is what guards the data. The Admin SDK needs credentials too; `/api/health`
+reports whether it can actually reach Firestore, which is the first thing to
+check when every room request returns 500.
+
+**`GEMINI_API_KEY` is a real secret.** Server-side only, never prefixed with
+`NEXT_PUBLIC_`.
+
+## Deploying to Cloud Run
+
+Still supported — `Dockerfile` and `cloudbuild.yaml` are current. The instance
+pinning is no longer required now that state is shared, though `--min-instances=1`
+is still worth keeping to avoid a cold start on the first request of the evening:
 
 ```bash
-gcloud run deploy voice-party-roadmap-game --source . --region us-central1 --allow-unauthenticated --min-instances=1 --max-instances=1
+gcloud run deploy voice-party-roadmap-game --source . --region us-central1 --allow-unauthenticated --min-instances=1
 ```
-
-`--min-instances=1` also keeps the container warm, so open rooms survive between
-turns instead of being wiped by a scale-to-zero.
-
-Known limit: a container restart (a redeploy, or a crash) still drops every open
-room. Players see "ROOM … IS NOT OPEN" and start a new one. Moving room state to
-Firestore or Redis is the fix if that becomes a problem.
 
 ## Voice chat and TURN
 

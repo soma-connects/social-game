@@ -26,6 +26,10 @@ yarn-error.log*
 # — it was one `git add .` away from being published.
 .env.*
 !.env.example
+# The Redis/Firebase template. Matches the `.env.*` rule above, so it needs an
+# explicit exception or the one file meant to be committed never is — which is
+# how it went missing from main.
+!.env.local.example
 
 # firebase
 # Deploy cache. It is ~700MB of packed function bundles and is rebuilt on every

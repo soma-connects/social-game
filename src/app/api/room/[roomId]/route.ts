@@ -613,12 +613,13 @@ function authorize(
   action: string,
   token: string,
   tokens: Record<string, string>
-): { caller: Caller } | { error: NextResponse } {
+): { caller: Caller } | { error: NextResponse; unknownToken?: boolean } {
   const playerId = Object.keys(tokens).find((id) => tokens[id] === token);
   const player = playerId ? room.players.find((p) => p.id === playerId) : undefined;
 
   if (!token || !player) {
     return {
+      unknownToken: true,
       error: NextResponse.json(
         { error: 'Rejoin the room — this browser is not signed in to it.', code: 'no_session' },
         { status: 401 }
@@ -1677,8 +1678,18 @@ export async function POST(request: Request, { params }: { params: { roomId: str
     }
 
     if (!UNAUTHENTICATED_ACTIONS.has(action)) {
-      const { tokens } = await readSecrets(roomId);
-      const auth = authorize(room, action, String(body.token ?? ''), tokens);
+      const token = String(body.token ?? '');
+      let auth = authorize(room, action, token, (await readSecrets(roomId)).tokens);
+
+      // A token map read from cache can be one instance behind the join that
+      // issued the token, and from here that is indistinguishable from a forged
+      // one. Confirm against a fresh read before rejecting: the client treats
+      // this particular refusal as "you are not in this room" and clears the
+      // session, so being briefly out of date would sign a real player out.
+      if ('error' in auth && auth.unknownToken) {
+        auth = authorize(room, action, token, (await readSecrets(roomId, { fresh: true })).tokens);
+      }
+
       if ('error' in auth) return auth.error;
       const callerId = auth.caller.player.id;
 

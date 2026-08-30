@@ -52,13 +52,19 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       const messages: unknown[] = Array.isArray(body.messages) ? body.messages : [body.message];
       let sent = 0;
 
-      for (const raw of messages) {
-        if (!isValidSignal(raw)) continue;
-        // A player may only send as themselves, and only to someone in the room.
-        if (raw.from !== playerId) continue;
-        if (!room.players.some((p) => p.id === raw.to)) continue;
-        if (enqueueSignal(roomId, raw)) sent++;
-      }
+      // Queued in parallel. Signalling is chatty and the client batches several
+      // candidates into one request; awaiting each in turn would add a Redis
+      // round trip per candidate to a path that runs every second.
+      const queued = await Promise.all(
+        messages.map(async (raw) => {
+          if (!isValidSignal(raw)) return false;
+          // A player may only send as themselves, and only to someone in the room.
+          if (raw.from !== playerId) return false;
+          if (!room.players.some((p) => p.id === raw.to)) return false;
+          return enqueueSignal(roomId, raw);
+        })
+      );
+      sent = queued.filter(Boolean).length;
 
       return NextResponse.json({ sent });
     }
@@ -66,19 +72,20 @@ export async function POST(request: Request, { params }: { params: { roomId: str
     // Draining doubles as the presence heartbeat, so one request per tick covers
     // both "anything for me?" and "I am still on the call".
     case 'poll': {
-      return NextResponse.json({
-        messages: drainSignals(roomId, playerId),
-        present: getVoicePresence(roomId),
-      });
+      const [messages, present] = await Promise.all([
+        drainSignals(roomId, playerId),
+        getVoicePresence(roomId),
+      ]);
+      return NextResponse.json({ messages, present });
     }
 
     case 'leave': {
-      clearVoicePresence(roomId, playerId);
-      for (const peer of room.players) {
-        if (peer.id !== playerId) {
-          enqueueSignal(roomId, { kind: 'bye', from: playerId, to: peer.id });
-        }
-      }
+      await Promise.all([
+        clearVoicePresence(roomId, playerId),
+        ...room.players
+          .filter((peer) => peer.id !== playerId)
+          .map((peer) => enqueueSignal(roomId, { kind: 'bye', from: playerId, to: peer.id })),
+      ]);
       return NextResponse.json({ ok: true });
     }
 

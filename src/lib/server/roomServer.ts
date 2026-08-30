@@ -1,14 +1,24 @@
 import { randomBytes } from 'node:crypto';
+import { Redis } from '@upstash/redis';
 import { EventLog, RoomState } from '../types';
 import { ROOM_TTL_MS } from '../gameRules';
 
-// Shared in-process state for the room API and the WebRTC signalling API.
+// Shared state for the room API and the WebRTC signalling API.
 //
-// IMPORTANT for the Cloud Run deployment: this only holds together while every
-// request lands on the same container. The service must run with
-// `--min-instances=1 --max-instances=1`, or players get split across instances
-// and see different rooms. Moving to Firestore or Redis is the fix if the game
-// ever needs more than one instance.
+// Two stores, split by what the data is rather than by convenience:
+//
+//   Firestore — the room document and its private secrets. Durable, and the
+//     browser subscribes to the room directly, which is what makes the game
+//     live without polling.
+//   Redis — WebRTC signalling mailboxes and voice presence. Far too chatty for
+//     a database write per message, and worthless the moment it is stale.
+//
+// The signalling half used to be a plain in-process Map. That only ever worked
+// because Cloud Run was pinned to a single container with
+// `--min-instances=1 --max-instances=1`; on Vercel a request lands on whichever
+// ephemeral instance happens to be warm, so an offer written by one instance
+// was invisible to the instance the answering player polled — the call would
+// simply never connect, with nothing in any log to say why.
 
 /** A WebRTC signalling message, relayed verbatim between two players. */
 export type SignalMessage =
@@ -21,34 +31,44 @@ export type SignalMessage =
 const SIGNAL_TTL_MS = 30 * 1000;
 const MAX_MAILBOX = 60;
 
-type StoredRoom = {
-  room: RoomState;
-  touchedAt: number;
-  /** playerId -> messages waiting to be collected by that player. */
-  mailboxes: Map<string, { message: SignalMessage; at: number }[]>;
-  /** playerId -> last time they polled, used to show who is actually on the call. */
-  voicePresence: Map<string, number>;
-};
+const SIGNAL_TTL_SEC = Math.ceil(SIGNAL_TTL_MS / 1000);
+/** Presence outlives a single poll but not the room it belongs to. */
+const PRESENCE_TTL_SEC = Math.ceil(ROOM_TTL_MS / 1000);
 
-// Anchored to globalThis rather than a plain module-level const, for two reasons
-// that both bite in practice:
-//
-//   1. Next.js bundles each route segment separately, so /api/room/[roomId] and
-//      /api/room/[roomId]/signal each get their OWN instance of this module. A
-//      module-level Map means the signalling route cannot see any room.
-//   2. In dev, editing a file reloads the module and would wipe every open room.
-//
-// globalThis is per-process, so both routes share one store and it survives
-// hot reloads.
-const globalStore = globalThis as unknown as { __voicePartyRooms?: Map<string, StoredRoom> };
-const rooms: Map<string, StoredRoom> = (globalStore.__voicePartyRooms ??= new Map());
+/**
+ * Vercel's Upstash Marketplace integration injects `KV_REST_API_URL` and
+ * `KV_REST_API_TOKEN` (the legacy Vercel KV names), while a database created
+ * directly on upstash.com gives `UPSTASH_REDIS_REST_URL` and
+ * `UPSTASH_REDIS_REST_TOKEN`. Reading either means both setups work without
+ * anybody having to rename an environment variable to find out why the call
+ * will not connect.
+ */
+const redisUrl = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL ?? '';
+const redisToken = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN ?? '';
 
-function sweep(): void {
-  const cutoff = Date.now() - ROOM_TTL_MS;
-  rooms.forEach((entry, id) => {
-    if (entry.touchedAt < cutoff) rooms.delete(id);
-  });
+/**
+ * Null when nothing is configured.
+ *
+ * Signalling degrades to "no voice call" rather than taking the whole room
+ * down: every other part of the game works without it, and a local checkout
+ * with no Redis credentials should still be playable.
+ */
+const redis = redisUrl && redisToken ? new Redis({ url: redisUrl, token: redisToken }) : null;
+
+let warnedNoRedis = false;
+function signalStore(): Redis | null {
+  if (!redis && !warnedNoRedis) {
+    warnedNoRedis = true;
+    console.warn(
+      'No Redis configured (KV_REST_API_URL/TOKEN or UPSTASH_REDIS_REST_URL/TOKEN). ' +
+        'Voice calls cannot connect: WebRTC signalling has nowhere shared to queue messages.'
+    );
+  }
+  return redis;
 }
+
+const mailboxKey = (roomId: string, playerId: string) => `mailbox:${roomId}:${playerId}`;
+const presenceKey = (roomId: string) => `presence:${roomId}`;
 
 import { adminDb } from '../firebase/server';
 
@@ -66,18 +86,7 @@ export class RoomConflictError extends Error {
 /** Remembers the revision each request read, so writeRoom can detect a clash. */
 const revisionsRead = new WeakMap<RoomState, number>();
 
-function cacheLocally(room: RoomState): void {
-  const existing = rooms.get(room.roomId);
-  rooms.set(room.roomId, {
-    room,
-    touchedAt: Date.now(),
-    mailboxes: existing?.mailboxes ?? new Map(),
-    voicePresence: existing?.voicePresence ?? new Map(),
-  });
-}
-
 export async function readRoom(roomId: string): Promise<RoomState | null> {
-  sweep();
   const doc = await adminDb.collection('rooms').doc(roomId).get();
   if (!doc.exists) return null;
 
@@ -85,10 +94,6 @@ export async function readRoom(roomId: string): Promise<RoomState | null> {
   // Tracked off to the side rather than on RoomState, so the revision never
   // reaches the client or shows up in a room diff.
   revisionsRead.set(room, room.rev ?? 0);
-
-  // The mailboxes stay in memory — WebRTC signalling is far too chatty for a
-  // database round trip — so the signalling route needs the room cached here.
-  cacheLocally(room);
 
   return room;
 }
@@ -120,7 +125,6 @@ export async function writeRoom(room: RoomState): Promise<RoomState> {
   });
 
   revisionsRead.set(room, room.rev ?? 0);
-  cacheLocally(room);
 
   return room;
 }
@@ -167,18 +171,46 @@ const secretsCache: Map<string, RoomSecrets> = ((
   globalThis as unknown as { __voicePartySecrets?: Map<string, RoomSecrets> }
 ).__voicePartySecrets ??= new Map());
 
-export async function readSecrets(roomId: string): Promise<RoomSecrets> {
+/**
+ * How long a cached secrets map is trusted.
+ *
+ * Short, because the cache is per-instance and the data behind it changes
+ * whenever somebody joins. On a single pinned container an unbounded cache was
+ * correct; across several serverless instances it means one instance can hold
+ * a token map that predates a player entirely.
+ */
+const SECRETS_CACHE_MS = 30_000;
+const secretsCachedAt: Map<string, number> = ((
+  globalThis as unknown as { __voicePartySecretsAt?: Map<string, number> }
+).__voicePartySecretsAt ??= new Map());
+
+/**
+ * The room's private state.
+ *
+ * Pass `fresh` to bypass the cache. Callers that are about to reject somebody
+ * for having an unknown token must do that: a token missing from a stale cache
+ * and a forged token are indistinguishable from here, and the client treats
+ * the rejection as "you are not in this room" and clears the session — so
+ * being one instance behind would log a legitimate player out.
+ */
+export async function readSecrets(
+  roomId: string,
+  options: { fresh?: boolean } = {}
+): Promise<RoomSecrets> {
+  const cachedAt = secretsCachedAt.get(roomId) ?? 0;
   const cached = secretsCache.get(roomId);
-  if (cached) return cached;
+  if (!options.fresh && cached && Date.now() - cachedAt < SECRETS_CACHE_MS) return cached;
 
   const doc = await privateRef(roomId).get();
   const secrets = doc.exists ? ({ ...EMPTY_SECRETS, ...(doc.data() as RoomSecrets) }) : { ...EMPTY_SECRETS };
   secretsCache.set(roomId, secrets);
+  secretsCachedAt.set(roomId, Date.now());
   return secrets;
 }
 
 export async function writeSecrets(roomId: string, secrets: RoomSecrets): Promise<void> {
   secretsCache.set(roomId, secrets);
+  secretsCachedAt.set(roomId, Date.now());
   await privateRef(roomId).set(secrets);
 }
 
@@ -199,42 +231,102 @@ export function pushEvent(room: RoomState, text: string, type: EventLog['type'])
 
 // --------------------------------------------------------------- signalling
 
-export function enqueueSignal(roomId: string, message: SignalMessage): boolean {
-  const entry = rooms.get(roomId);
-  if (!entry) return false;
+/**
+ * Queues a signalling message for one player.
+ *
+ * Returns false when there is nowhere to put it, so the caller can report a
+ * failed send rather than silently dropping an offer the other side is waiting
+ * for.
+ */
+export async function enqueueSignal(roomId: string, message: SignalMessage): Promise<boolean> {
+  const store = signalStore();
+  if (!store) return false;
 
-  const box = entry.mailboxes.get(message.to) ?? [];
-  box.push({ message, at: Date.now() });
+  const key = mailboxKey(roomId, message.to);
+  const pipeline = store.pipeline();
+  pipeline.rpush(key, JSON.stringify({ message, at: Date.now() }));
   // Drop the oldest if a player stops collecting, so one dead tab cannot grow
   // the mailbox without bound.
-  entry.mailboxes.set(message.to, box.slice(-MAX_MAILBOX));
-  entry.touchedAt = Date.now();
-  return true;
+  pipeline.ltrim(key, -MAX_MAILBOX, -1);
+  // The whole mailbox expires on its own. An offer nobody collected is dead
+  // anyway, and this is what stops abandoned rooms leaking keys forever.
+  pipeline.expire(key, SIGNAL_TTL_SEC);
+
+  try {
+    await pipeline.exec();
+    return true;
+  } catch (error) {
+    console.error('enqueueSignal failed', error);
+    return false;
+  }
 }
 
 /** Drains and returns everything waiting for this player. */
-export function drainSignals(roomId: string, playerId: string): SignalMessage[] {
-  const entry = rooms.get(roomId);
-  if (!entry) return [];
+export async function drainSignals(roomId: string, playerId: string): Promise<SignalMessage[]> {
+  const store = signalStore();
+  if (!store) return [];
 
-  entry.touchedAt = Date.now();
-  entry.voicePresence.set(playerId, Date.now());
+  const key = mailboxKey(roomId, playerId);
 
-  const box = entry.mailboxes.get(playerId) ?? [];
-  entry.mailboxes.set(playerId, []);
+  try {
+    // Read and clear in one pipeline. Done as two round trips, a message
+    // arriving in between would be deleted without ever being delivered.
+    const pipeline = store.pipeline();
+    pipeline.lrange(key, 0, -1);
+    pipeline.del(key);
+    // Polling is what "being on the call" means, so it doubles as the presence
+    // heartbeat rather than needing its own request.
+    pipeline.hset(presenceKey(roomId), { [playerId]: Date.now() });
+    pipeline.expire(presenceKey(roomId), PRESENCE_TTL_SEC);
 
-  const fresh = Date.now() - SIGNAL_TTL_MS;
-  return box.filter((item) => item.at >= fresh).map((item) => item.message);
+    const [items] = (await pipeline.exec()) as [unknown[], unknown, unknown, unknown];
+
+    const fresh = Date.now() - SIGNAL_TTL_MS;
+    return (items ?? [])
+      .map((item) => {
+        // Upstash parses JSON on the way back when it can, so an entry arrives
+        // either already decoded or still as a string depending on the client
+        // version. Handling both keeps this working across an upgrade.
+        try {
+          return typeof item === 'string'
+            ? (JSON.parse(item) as { message: SignalMessage; at: number })
+            : (item as { message: SignalMessage; at: number });
+        } catch {
+          return null;
+        }
+      })
+      .filter((item): item is { message: SignalMessage; at: number } => !!item && item.at >= fresh)
+      .map((item) => item.message);
+  } catch (error) {
+    console.error('drainSignals failed', error);
+    return [];
+  }
 }
 
 /** Players who have polled recently, i.e. who are actually on the call. */
-export function getVoicePresence(roomId: string, withinMs = 6000): string[] {
-  const entry = rooms.get(roomId);
-  if (!entry) return [];
-  const cutoff = Date.now() - withinMs;
-  return [...entry.voicePresence.entries()].filter(([, at]) => at >= cutoff).map(([id]) => id);
+export async function getVoicePresence(roomId: string, withinMs = 6000): Promise<string[]> {
+  const store = signalStore();
+  if (!store) return [];
+
+  try {
+    const entries = await store.hgetall<Record<string, number | string>>(presenceKey(roomId));
+    if (!entries) return [];
+    const cutoff = Date.now() - withinMs;
+    return Object.entries(entries)
+      .filter(([, at]) => Number(at) >= cutoff)
+      .map(([id]) => id);
+  } catch (error) {
+    console.error('getVoicePresence failed', error);
+    return [];
+  }
 }
 
-export function clearVoicePresence(roomId: string, playerId: string): void {
-  rooms.get(roomId)?.voicePresence.delete(playerId);
+export async function clearVoicePresence(roomId: string, playerId: string): Promise<void> {
+  const store = signalStore();
+  if (!store) return;
+  try {
+    await store.hdel(presenceKey(roomId), playerId);
+  } catch (error) {
+    console.error('clearVoicePresence failed', error);
+  }
 }

@@ -411,7 +411,9 @@ function finishSeries(room: RoomState): void {
     const team = getTeam(room.winningTeam);
     pushEvent(room, `🏆 ${team.name} takes the series ${Math.max(red, blue)}–${Math.min(red, blue)}!`, 'system');
   } else {
-    pushEvent(room, `🤝 The series ends level at ${red}–${red}`, 'system');
+    // Prints the same today, since this branch only runs when the two are
+    // equal — but it says the wrong thing the moment the tie test changes.
+    pushEvent(room, `🤝 The series ends level at ${red}–${blue}`, 'system');
   }
 }
 

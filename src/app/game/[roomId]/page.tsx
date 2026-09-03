@@ -492,6 +492,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
+                  movingOnAt={room.phaseDeadline ?? null}
                   label="is in the Voice Arena"
                 />
               )}
@@ -512,6 +513,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
+                  movingOnAt={room.phaseDeadline ?? null}
                   label="is flying in PitchBird ðŸ¦"
                 />
               )}
@@ -545,6 +547,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
+                  movingOnAt={room.phaseDeadline ?? null}
                   label="is on the karaoke mic ðŸŽµ"
                 />
               )}
@@ -565,6 +568,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
+                  movingOnAt={room.phaseDeadline ?? null}
                   label="is spelling in the Spelling Bee ðŸ"
                 />
               )}
@@ -638,6 +642,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
+                  movingOnAt={room.phaseDeadline ?? null}
                   label="is answering Trivia in Trivia Showdown ðŸ§ "
                 />
               )}
@@ -658,6 +663,7 @@ export default function GameRoomPage() {
                 <SpectatorView
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
+                  movingOnAt={room.phaseDeadline ?? null}
                   label="is defending the station from ASTEROIDS â˜„ï¸"
                 />
               )}
@@ -693,6 +699,7 @@ export default function GameRoomPage() {
                 roomId={roomId}
                 myPlayer={myPlayer}
                 myResult={(room.roundResults ?? []).find((r) => r.playerId === myPlayer.id) ?? null}
+                closingAt={room.phaseDeadline ?? null}
                 ready={(room.shopReady ?? []).includes(myPlayer.id)}
                 waitingOn={room.players
                   .filter((p) => !(room.shopReady ?? []).includes(p.id) && p.id !== myPlayer.id)

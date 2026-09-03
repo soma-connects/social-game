@@ -62,6 +62,12 @@ import {
   writeRoom,
   writeSecrets,
 } from '@/lib/server/roomServer';
+import {
+  PERFORMER_PHASES,
+  clearPhaseDeadline,
+  phaseHasStalled,
+  syncPhaseDeadline,
+} from '@/lib/server/phaseDeadline';
 import { archiveMatch } from '@/lib/server/matchArchive';
 import { verifyUid } from '@/lib/firebase/server';
 import { aiGameMaster } from '@/lib/aiGameMaster';
@@ -157,19 +163,6 @@ const PRESENCE_TIMEOUT_MS = 25000;
  * headroom. Roughly ten seconds of Opus.
  */
 const MAX_CLIP_CHARS = 300_000;
-
-/**
- * Phases that are waiting on one specific performer, so losing them means the
- * round has to be skipped rather than waited out.
- *
- * Derived from the mini-game list instead of hand-listed: every game added since
- * this check was written — trivia, asteroid defense, the vote-based rounds —
- * was missing from it, and the room hung when its performer dropped.
- */
-const PERFORMER_PHASES = new Set<GamePhase>([
-  ...ALL_MINI_GAMES.map(miniGamePhase),
-  'roast_intermission',
-]);
 
 /**
  * Players the game should still wait for.
@@ -300,6 +293,30 @@ function advanceRoundOrOpenShop(room: RoomState): void {
   room.phase = 'powerup_shop';
   room.shopReady = [];
   pushEvent(room, `🛒 Round ${room.roundNumber ?? 1}: everyone to the buff shop`, 'system');
+}
+
+/**
+ * Closes the roast and hands the mini-game to whoever has not taken it yet.
+ *
+ * Shared by the performer's own "roast over" tap and by the deadline that fires
+ * when it never arrives, so a timed-out roast still awards the badge the room
+ * spent the last half-minute earning them.
+ */
+function finishRoast(room: RoomState): void {
+  // Re-pick the badge now the roast reactions are in. A round that only got
+  // funny *after* the attempt should still be able to earn Room Favorite.
+  const performer = room.players[room.activePlayerIndex];
+  const round = room.socialRound?.targetPlayerId === performer?.id ? room.socialRound : null;
+  if (performer && round) {
+    const badge = pickSocialBadge(round, room.turnResult?.performance ?? 0);
+    if (addBadge(performer, badge)) {
+      pushEvent(room, `${performer.name} earned badge: ${badge}`, 'social');
+    }
+  }
+
+  // Hand over to the next player who has not taken the mini-game yet. Only
+  // once everybody has played does the room move on to shopping.
+  advanceRoundOrOpenShop(room);
 }
 
 /** Copies a fresh set of team assignments onto the live player objects. */
@@ -673,6 +690,64 @@ function expireStalledRoll(room: RoomState, now: number): void {
     }
   }
   advanceRoll(room);
+}
+
+/**
+ * Moves the room on when whoever it was waiting for never showed up.
+ *
+ * Ridden on the heartbeat like `expireStalledRoll`, so it needs no timer of its
+ * own and no client willing to send anything.
+ */
+function expireStalledPhase(room: RoomState, now: number): void {
+  if (!phaseHasStalled(room, now)) return;
+  clearPhaseDeadline(room);
+
+  if (room.phase === 'powerup_shop') {
+    // Anyone who never pressed done is treated as done. They keep their coins;
+    // the alternative is the whole room waiting on one person's shopping.
+    const waiting = activePlayers(room).filter((p) => !(room.shopReady ?? []).includes(p.id));
+    if (waiting.length > 0) {
+      pushEvent(room, `⏳ Shop closing — ${waiting.map((p) => p.name).join(', ')} ran out of time`, 'system');
+    }
+    openBoardPhase(room);
+    return;
+  }
+
+  if (room.phase === 'roast_intermission') {
+    // The result is already banked — only the performer's "roast over" tap is
+    // missing, and finishRoast is exactly what that tap does.
+    finishRoast(room);
+    return;
+  }
+
+  const performer = room.players[room.activePlayerIndex];
+  if (!performer) {
+    advanceRoundOrOpenShop(room);
+    return;
+  }
+
+  pushEvent(room, `⏳ ${performer.name} ran out of time on ${MINIGAME_LABELS[room.currentMiniGame ?? 'voice_arena']}`, 'system');
+
+  // A forfeit has to be banked, not just skipped. advanceRoundOrOpenShop hands
+  // the turn to the first live player with no result this round — so leaving the
+  // row empty would hand it straight back to the player who just timed out, and
+  // the room would tick between the same two states forever.
+  //
+  // No life is charged. Losing one is for bombing an attempt you actually made;
+  // this player made none, and taking a life for an absence would also let the
+  // board punish somebody whose phone simply rang.
+  room.roundResults = (room.roundResults ?? []).filter((r) => r.playerId !== performer.id);
+  room.roundResults.push({
+    playerId: performer.id,
+    playerName: performer.name,
+    game: room.currentMiniGame ?? 'voice_arena',
+    pointsEarned: 0,
+    performance: 0,
+    steps: 0,
+    rolled: false,
+  });
+  room.turnResult = null;
+  advanceRoundOrOpenShop(room);
 }
 
 /**
@@ -1081,6 +1156,7 @@ function startNextRound(room: RoomState): void {
   room.shopReady = [];
   room.turnResult = null;
   room.rollDeadline = null;
+  clearPhaseDeadline(room);
   room.boardEvent = null;
   room.truthBluffState = null;
   room.storyBuilderState = null;
@@ -2075,20 +2151,7 @@ async function applyAction(
     }
 
     case 'finish_roast': {
-      // Re-pick the badge now the roast reactions are in. A round that only got
-      // funny *after* the attempt should still be able to earn Room Favorite.
-      const performer = room.players[room.activePlayerIndex];
-      const round = room.socialRound?.targetPlayerId === performer?.id ? room.socialRound : null;
-      if (performer && round) {
-        const badge = pickSocialBadge(round, room.turnResult?.performance ?? 0);
-        if (addBadge(performer, badge)) {
-          pushEvent(room, `${performer.name} earned badge: ${badge}`, 'social');
-        }
-      }
-
-      // Hand over to the next player who has not taken the mini-game yet. Only
-      // once everybody has played does the room move on to shopping.
-      advanceRoundOrOpenShop(room);
+      finishRoast(room);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -2774,6 +2837,7 @@ async function applyAction(
       room.turnResult = null;
       room.boardEvent = null;
       room.rollDeadline = null;
+      clearPhaseDeadline(room);
       room.currentDare = null;
       room.socialRound = null;
       room.liveState = null;
@@ -2823,8 +2887,12 @@ async function applyAction(
         (room.phase === 'roadmap_turn' || room.phase === 'branch_choice') &&
         !!room.rollDeadline &&
         now >= room.rollDeadline;
+      // Same reasoning for the waits before the board: a blown deadline that is
+      // only noticed on whichever beat happens to also be due a refresh leaves
+      // the room sitting there for up to PRESENCE_TIMEOUT_MS/3 longer.
+      const phaseStalled = phaseHasStalled(room, now);
 
-      if (!wasAway && !needsRefresh && !rollStalled) {
+      if (!wasAway && !needsRefresh && !rollStalled && !phaseStalled) {
         return NextResponse.json({ ok: true });
       }
 
@@ -2835,6 +2903,11 @@ async function applyAction(
       }
       prunePresence(room);
       expireStalledRoll(room, now);
+      expireStalledPhase(room, now);
+      // Arm the clock for whatever the room is waiting on now. Last, so it sees
+      // the phase the two expiries above may have just moved it into, and so a
+      // fresh wait is never handed a deadline that has already passed.
+      syncPhaseDeadline(room, now);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

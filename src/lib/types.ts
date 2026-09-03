@@ -486,6 +486,26 @@ export type RoomState = {
    * five have no way to move the game on.
    */
   rollDeadline?: number | null;
+  /**
+   * Epoch ms by which the phase *before* the board has to have moved on.
+   *
+   * `rollDeadline` only guards the dice. Everything leading up to them waits on
+   * a tap that may never come: a mini-game is only banked when the performer
+   * presses "proceed", the roast only ends when their client says so, and the
+   * shop only closes once every player has pressed done. A player who is still
+   * heartbeating but has put their phone down is invisible to presence pruning,
+   * so the whole room sits there indefinitely.
+   */
+  phaseDeadline?: number | null;
+  /**
+   * Which wait `phaseDeadline` was armed for — phase, performer and round.
+   *
+   * Without it the clock would carry over between two turns that happen to sit
+   * in the same phase (the repeat rule makes back-to-back picks unlikely, not
+   * impossible), and the second player would inherit the first player's
+   * already-spent deadline and be timed out on arrival.
+   */
+  phaseDeadlineKey?: string | null;
 
   // ── Round-based loop ──────────────────────────────────────────────────────
   // A round is: every player takes the mini-game one at a time, then everyone

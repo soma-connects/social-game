@@ -117,23 +117,41 @@ export default function TriviaShowdownGame({
     [triviaState, teardown, onCompleteTurn, room.roomId]
   );
 
-  // Countdown timer
+  // What the timer needs to read when it fires, without depending on it.
+  //
+  // This countdown used to list `transcript`, `textInput` and `handleEvaluate`
+  // as dependencies, and every one of them changes while the player is
+  // answering: speech recognition reports interim results several times a
+  // second, and typing changes the input on every keystroke. Each change tore
+  // the interval down and started a fresh 1000ms one, so the tick never came
+  // round — the clock sat still for exactly as long as somebody kept talking,
+  // which is to say for the whole question.
+  //
+  // Same fix the roast countdown and the voice arena already use: the effect
+  // depends on `status` alone, and everything that changes underneath it is
+  // read through a ref.
+  const timeLeftRef = useRef(20);
+  const answerRef = useRef('');
+  answerRef.current = transcript || textInput;
+  const evaluateRef = useRef(handleEvaluate);
+  evaluateRef.current = handleEvaluate;
+
   useEffect(() => {
-    if (status === 'asking' || status === 'listening') {
-      timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            handleEvaluate(transcript || textInput);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
+    if (status !== 'asking' && status !== 'listening') return;
+
+    timerRef.current = setInterval(() => {
+      const next = timeLeftRef.current - 1;
+      timeLeftRef.current = next;
+      setTimeLeft(next);
+      // Fired here rather than inside a setState updater: updaters have to stay
+      // pure, and React is free to run them more than once.
+      if (next <= 0) void evaluateRef.current(answerRef.current);
+    }, 1000);
+
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [status, transcript, textInput, handleEvaluate]);
+  }, [status]);
 
   // Listen via Mic
   const startListening = async () => {

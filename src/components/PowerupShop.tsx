@@ -9,6 +9,10 @@ import { audioSFX } from '@/lib/audioFeedback';
 import { powerupArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
 import AvatarIllustration from './AvatarIllustration';
+import { useCountdown } from '@/hooks/useCountdown';
+
+/** Shown late rather than for the whole two minutes, so it reads as a nudge. */
+const SHOP_COUNTDOWN_WITHIN_MS = 45_000;
 
 interface PowerupShopProps {
   roomId: string;
@@ -18,6 +22,14 @@ interface PowerupShopProps {
   myResult: RoundResult | null;
   /** Names still choosing, so nobody wonders what the hold-up is. */
   waitingOn: string[];
+  /**
+   * Epoch ms at which the shop closes itself and the board opens.
+   *
+   * Everyone shops at once, so one player who never presses done used to hold
+   * the whole room. The server closes the shop on its own now; showing when
+   * turns that from a hang into a wait with an end to it.
+   */
+  closingAt?: number | null;
   ready: boolean;
   onDone: () => void;
 }
@@ -34,9 +46,11 @@ export default function PowerupShop({
   myPlayer,
   myResult,
   waitingOn,
+  closingAt,
   ready,
   onDone,
 }: PowerupShopProps) {
+  const closingIn = useCountdown(closingAt, SHOP_COUNTDOWN_WITHIN_MS);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -162,6 +176,11 @@ export default function PowerupShop({
             {waitingOn.length > 0 && (
               <p className="text-[11px] font-bold text-emerald-200/80">
                 Still shopping: {waitingOn.join(', ')}
+              </p>
+            )}
+            {waitingOn.length > 0 && closingIn !== null && (
+              <p className="text-[11px] font-bold text-amber-300">
+                Shop closes in {closingIn}s
               </p>
             )}
           </div>

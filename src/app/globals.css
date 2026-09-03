@@ -110,3 +110,39 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 240, 255, 0.8);
 }
+
+/* ── Board map ─────────────────────────────────────────────────────────────
+   Starfield, drifting debris and the flow along the road. Kept here rather
+   than inline so the whole board shares one set of timings, and so anything
+   that runs forever can be switched off in one place for reduced motion. */
+
+@keyframes boardTwinkle {
+  0%, 100% { opacity: var(--twinkle-lo, 0.35); }
+  50%      { opacity: 1; }
+}
+
+@keyframes boardDrift {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to   { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes boardRoadFlow {
+  to { stroke-dashoffset: -20; }
+}
+
+.board-road-flow {
+  animation: boardRoadFlow 2.4s linear infinite;
+}
+
+.board-road-chevrons {
+  animation: boardRoadFlow 3.6s linear infinite;
+}
+
+/* The board animates constantly by design — a sky that never stops moving is
+   the wrong thing to show someone who has asked the system to calm down. */
+@media (prefers-reduced-motion: reduce) {
+  .board-road-flow,
+  .board-road-chevrons {
+    animation: none;
+  }
+}

@@ -45,6 +45,7 @@ import TeamBattleRecap from '@/components/TeamBattleRecap';
 import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
+import { DEFAULT_THEME, isPlayableTheme } from '@/lib/themeConfig';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
 import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam } from '@/lib/gameRules';
 import PowerupTargetPicker from '@/components/PowerupTargetPicker';
@@ -296,7 +297,7 @@ export default function GameRoomPage() {
 
   const activePlayer = room.players[room.activePlayerIndex] || room.players[0];
   const leaderPlayer = [...room.players].sort((a, b) => b.score - a.score)[0] || room.players[0];
-  const currentTheme: MapTheme = room.theme || 'forest';
+  const currentTheme: MapTheme = isPlayableTheme(room.theme) ? room.theme : DEFAULT_THEME;
   const isMyTurn = activePlayer?.id === myPlayer.id;
 
   const handleStartMatch = () => {
@@ -1147,7 +1148,7 @@ function BoardPeek({
 
       {open && (
         <div className="animate-fadeIn">
-          <MapRenderer theme={theme} players={players} activePlayerId={activePlayerId} />
+          <MapRenderer theme={theme} players={players} activePlayerId={activePlayerId} variant="peek" />
         </div>
       )}
     </div>

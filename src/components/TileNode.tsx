@@ -5,11 +5,25 @@ import { motion } from 'framer-motion';
 import { MapTheme, TileNodeType } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
 
+/**
+ * One landing spot on the road.
+ *
+ * Drawn flat rather than tilted. These used to be rotated 45° on the X axis to
+ * suggest depth, which on a small circle mostly reads as squashed — and the icon
+ * then had to be counter-rotated back upright, so the 3D never applied to the
+ * thing you actually look at. A flat disc with a thick rim and a dropped shadow
+ * gives the same weight and stays legible at any zoom.
+ */
+
 interface TileNodeProps {
   index: number;
   nodeType: TileNodeType;
   theme: MapTheme;
   isFinish?: boolean;
+  /** Diameter in pixels, so tiles scale with the world rather than the screen. */
+  size?: number;
+  /** Hides the number badge and hover affordances on the small overview. */
+  quiet?: boolean;
   onClick?: () => void;
 }
 
@@ -22,70 +36,91 @@ const TILE_DESCRIPTIONS: Record<string, string> = {
   trap: 'Asteroid Field! Fall back -3 spaces.',
   bonus: 'Gold Mine! +50 Coins.',
   mystery: 'Mystery Event! Anything can happen.',
-  empty: ''
+  empty: '',
 };
 
-export default function TileNode({ index, nodeType, theme, isFinish = false, onClick }: TileNodeProps) {
-  const themeConfig = THEMES[theme] || THEMES.forest;
+export default function TileNode({
+  index,
+  nodeType,
+  theme,
+  isFinish = false,
+  size = 56,
+  quiet = false,
+  onClick,
+}: TileNodeProps) {
+  const themeConfig = THEMES[theme] || THEMES.space;
   const nodeStyle = themeConfig.nodeColors[nodeType] || themeConfig.nodeColors.normal;
 
   return (
     <motion.div
-      whileHover={{ scale: 1.25, translateY: -8, zIndex: 50 }}
-      whileTap={{ scale: 0.95, translateY: 0 }}
+      whileHover={quiet ? undefined : { scale: 1.18, y: -6, zIndex: 50 }}
+      whileTap={quiet ? undefined : { scale: 0.94 }}
       onClick={onClick}
-      style={{
-        transformStyle: 'preserve-3d',
-        transform: 'perspective(800px) rotateX(45deg) rotateZ(0deg)',
-      }}
-      className={`relative w-12 h-12 sm:w-14 sm:h-14 flex flex-col items-center justify-center cursor-pointer group transition-all`}
+      style={{ width: size, height: size }}
+      className="relative flex items-center justify-center group cursor-pointer"
     >
-      {/* Tooltip (Hover Detail) */}
-      <div 
-        className="absolute -top-16 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-50 w-max max-w-[130px] text-center"
-        style={{ transform: 'translateZ(50px) rotateX(-45deg)' }}
-      >
-        <div className="bg-slate-900/95 backdrop-blur-xl border border-white/20 text-white text-[10px] font-bold px-3 py-2 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.8)] leading-tight">
-          <span className="text-[12px] block mb-0.5">{isFinish ? '🏆' : nodeStyle.icon}</span>
-          {isFinish ? 'The Final Station!' : TILE_DESCRIPTIONS[nodeType]}
+      {!quiet && (
+        <div
+          className="absolute opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 w-max max-w-[150px] text-center"
+          style={{ bottom: size + 8 }}
+        >
+          <div className="bg-slate-900/95 backdrop-blur-xl border border-white/20 text-white text-[10px] font-bold px-3 py-2 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.8)] leading-tight">
+            <span className="text-[13px] block mb-0.5">{isFinish ? '🏆' : nodeStyle.icon}</span>
+            {isFinish ? 'The Final Station!' : TILE_DESCRIPTIONS[nodeType]}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Outer Energy Field (Glow) */}
-      <div className={`absolute inset-[-12px] rounded-full border border-white/10 blur-md ${nodeStyle.glow} opacity-60 group-hover:opacity-100 transition-opacity`} />
-      
-      {/* Base Platform (3D Depth) */}
-      <div className={`absolute inset-0 rounded-full border-b-[8px] border-black/70 shadow-[0_20px_30px_rgba(0,0,0,0.9)] ${nodeStyle.bg}`} style={{ transform: 'translateZ(0px)' }} />
+      {/* Halo. Deliberately tight: spread wide it stops reading as light coming
+          off the tile and starts reading as a bubble around it. */}
+      <div
+        className={`absolute rounded-full ${nodeStyle.glow} opacity-45 group-hover:opacity-90 transition-opacity`}
+        style={{ inset: size * 0.06 }}
+      />
 
-      {/* Inner Glowing Core */}
-      <div 
-        className={`absolute inset-[6px] rounded-full border-2 ${nodeStyle.border} bg-black/50 backdrop-blur-xl shadow-[inset_0_0_20px_rgba(255,255,255,0.4)] flex items-center justify-center overflow-hidden`}
-        style={{ transform: 'translateZ(6px)', transformStyle: 'preserve-3d' }}
+      {/* The disc: a bright face over a dark rim, so it sits on the road
+          rather than floating above it. */}
+      <div
+        className={`absolute inset-0 rounded-full ${nodeStyle.bg} border-2 ${nodeStyle.border}`}
+        style={{
+          boxShadow: `0 ${size * 0.13}px 0 rgba(4,6,20,0.85), 0 ${size * 0.2}px ${size * 0.3}px rgba(0,0,0,0.55), inset 0 ${size * 0.06}px ${size * 0.12}px rgba(255,255,255,0.35)`,
+        }}
+      />
+
+      {/* Top-lit sheen. */}
+      <div
+        className="absolute rounded-full pointer-events-none"
+        style={{
+          inset: size * 0.1,
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.35) 0%, transparent 55%)',
+        }}
+      />
+
+      <span
+        className="relative z-10 block leading-none pointer-events-none"
+        style={{ fontSize: size * 0.44, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.85))' }}
       >
-        {/* Core grid lines */}
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.1)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.1)_1px,transparent_1px)] bg-[size:10px_10px] opacity-30" />
-      </div>
-
-      {/* Billboarded Icon (Stands up straight facing camera) */}
-      <div 
-        className="absolute z-10 pointer-events-none drop-shadow-[0_0_12px_rgba(255,255,255,0.8)]"
-        style={{ transform: 'translateZ(25px) rotateX(-45deg)' }}
-      >
-        <span className="text-xl sm:text-2xl block filter drop-shadow-xl">
-          {isFinish ? '🏆' : nodeStyle.icon}
-        </span>
-      </div>
-
-      {/* Billboarded Node Index Badge */}
-      <span 
-        className="absolute -top-6 bg-slate-950/80 backdrop-blur-md text-cyan-100 border border-cyan-400/50 font-mono text-[10px] font-black px-2 py-0.5 rounded-full shadow-[0_0_15px_rgba(34,211,238,0.6)] group-hover:-top-4 transition-all duration-300 opacity-100 group-hover:opacity-0"
-        style={{ transform: 'translateZ(30px) rotateX(-45deg)' }}
-      >
-        #{index}
+        {isFinish ? '🏆' : nodeStyle.icon}
       </span>
-      
+
+      {!quiet && (
+        <span
+          className="absolute bg-slate-950/85 backdrop-blur text-cyan-100 border border-cyan-400/40 font-mono font-black rounded-full shadow-lg pointer-events-none"
+          style={{
+            top: -size * 0.26,
+            fontSize: Math.max(9, size * 0.19),
+            padding: `${size * 0.02}px ${size * 0.12}px`,
+          }}
+        >
+          {index}
+        </span>
+      )}
+
       {isFinish && (
-        <div className="absolute inset-[-20px] rounded-full border-2 border-partyYellow/50 border-dashed animate-[spin_10s_linear_infinite]" style={{ transform: 'translateZ(0px)' }} />
+        <div
+          className="absolute rounded-full border-2 border-partyYellow/60 border-dashed animate-[spin_12s_linear_infinite] pointer-events-none"
+          style={{ inset: -size * 0.24 }}
+        />
       )}
     </motion.div>
   );

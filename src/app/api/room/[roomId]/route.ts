@@ -62,6 +62,7 @@ import {
   writeRoom,
   writeSecrets,
 } from '@/lib/server/roomServer';
+import { isPlayableTheme } from '@/lib/themeConfig';
 import {
   PERFORMER_PHASES,
   clearPhaseDeadline,
@@ -1446,7 +1447,13 @@ async function applyAction(
     }
 
     case 'set_theme': {
-      if (body.theme) room.theme = body.theme;
+      // Validated rather than trusted: the picker only offers themes that have
+      // art, and a theme without one silently renders as outer space with a few
+      // recoloured tiles.
+      if (!isPlayableTheme(body.theme)) {
+        return NextResponse.json({ error: 'That map is not available yet' }, { status: 400 });
+      }
+      room.theme = body.theme;
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

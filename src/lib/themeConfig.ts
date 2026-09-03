@@ -4,6 +4,16 @@ export interface ThemeConfig {
   id: MapTheme;
   name: string;
   icon: string;
+  /**
+   * Whether this theme can actually be played.
+   *
+   * Only Galactic Voyage has art. The other six were selectable, but the board
+   * hardcoded the space background for every one of them — so picking Arctic
+   * Snow changed a handful of tile colours and left you in outer space. They
+   * stay defined, and come back the moment each one has a backdrop and props of
+   * its own; until then offering them is a promise the board cannot keep.
+   */
+  available?: boolean;
   bgGradient: string;
   roadColor: string;
   roadStroke: string;
@@ -127,20 +137,21 @@ export const THEMES: Record<MapTheme, ThemeConfig> = {
     id: 'space',
     name: 'Galactic Voyage',
     icon: '🪐',
+    available: true,
     bgGradient: 'from-blue-950 via-indigo-950 to-purple-950',
     roadColor: '#1E1B4B',
     roadStroke: '#818CF8',
     landmarkBg: '#0F172A',
     landmarks: { trees: '', water: '', hills: '', special: '' }, // we'll use actual images in MapRenderer
     nodeColors: {
-      normal: { bg: 'bg-indigo-900/80', border: 'border-indigo-400', glow: 'shadow-[0_0_15px_rgba(129,140,248,0.6)]', icon: '✨' },
-      buff: { bg: 'bg-emerald-900/80', border: 'border-emerald-400', glow: 'shadow-[0_0_15px_rgba(52,211,153,0.6)]', icon: '🚀' },
-      debuff: { bg: 'bg-rose-900/80', border: 'border-rose-400', glow: 'shadow-[0_0_15px_rgba(251,113,133,0.6)]', icon: '☄️' },
-      dare: { bg: 'bg-purple-900/80', border: 'border-purple-400', glow: 'shadow-[0_0_15px_rgba(192,132,252,0.6)]', icon: '🎤' },
-      mystery: { bg: 'bg-amber-900/80', border: 'border-amber-400', glow: 'shadow-[0_0_15px_rgba(251,191,36,0.6)]', icon: '❓' },
-      bonus: { bg: 'bg-cyan-900/80', border: 'border-cyan-400', glow: 'shadow-[0_0_15px_rgba(34,211,238,0.6)]', icon: '⭐' },
-      trap: { bg: 'bg-red-900/80', border: 'border-red-500', glow: 'shadow-[0_0_15px_rgba(248,113,113,0.6)]', icon: '💣' },
-      duel: { bg: 'bg-fuchsia-900/80', border: 'border-fuchsia-400', glow: 'shadow-[0_0_15px_rgba(232,121,249,0.6)]', icon: '⚔️' },
+      normal: { bg: 'bg-indigo-500/85', border: 'border-indigo-300', glow: 'shadow-[0_0_18px_rgba(129,140,248,0.75)]', icon: '✨' },
+      buff: { bg: 'bg-emerald-500/90', border: 'border-emerald-300', glow: 'shadow-[0_0_18px_rgba(52,211,153,0.8)]', icon: '🚀' },
+      debuff: { bg: 'bg-rose-500/90', border: 'border-rose-300', glow: 'shadow-[0_0_18px_rgba(251,113,133,0.8)]', icon: '☄️' },
+      dare: { bg: 'bg-purple-500/90', border: 'border-purple-300', glow: 'shadow-[0_0_18px_rgba(192,132,252,0.8)]', icon: '🎤' },
+      mystery: { bg: 'bg-amber-400/90', border: 'border-amber-200', glow: 'shadow-[0_0_18px_rgba(251,191,36,0.85)]', icon: '❓' },
+      bonus: { bg: 'bg-cyan-400/90', border: 'border-cyan-200', glow: 'shadow-[0_0_18px_rgba(34,211,238,0.85)]', icon: '⭐' },
+      trap: { bg: 'bg-red-500/90', border: 'border-red-300', glow: 'shadow-[0_0_18px_rgba(248,113,113,0.85)]', icon: '💣' },
+      duel: { bg: 'bg-fuchsia-500/90', border: 'border-fuchsia-300', glow: 'shadow-[0_0_18px_rgba(232,121,249,0.85)]', icon: '⚔️' },
       empty: { bg: '', border: '', glow: '', icon: '' },
     },
   },
@@ -166,3 +177,12 @@ export const THEMES: Record<MapTheme, ThemeConfig> = {
     },
   },
 };
+
+/** The one theme that ships today. Everything else is waiting on art. */
+export const DEFAULT_THEME: MapTheme = 'space';
+
+export const PLAYABLE_THEMES = Object.values(THEMES).filter((t) => t.available);
+
+export function isPlayableTheme(value: unknown): value is MapTheme {
+  return typeof value === 'string' && THEMES[value as MapTheme]?.available === true;
+}

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Palette, Check, Sparkles } from 'lucide-react';
+import { Palette, Check, Sparkles, Lock } from 'lucide-react';
 import { MapTheme } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
 import { audioSFX } from '@/lib/audioFeedback';
@@ -13,6 +13,10 @@ interface ThemeSelectorProps {
 
 export default function ThemeSelector({ currentTheme, onSelectTheme }: ThemeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
+
+  const themes = Object.values(THEMES);
+  const playable = themes.filter((t) => t.available);
+  const parked = themes.filter((t) => !t.available);
 
   const handleSelect = (themeId: MapTheme) => {
     audioSFX.playChoiSuccess();
@@ -37,11 +41,13 @@ export default function ThemeSelector({ currentTheme, onSelectTheme }: ThemeSele
             <span className="text-xs font-black text-white flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-partyYellow" /> MAP THEMES
             </span>
-            <span className="text-[10px] font-mono text-gray-400">7 THEMES</span>
+            <span className="text-[10px] font-mono text-gray-400">
+              {playable.length} READY
+            </span>
           </div>
 
           <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
-            {Object.values(THEMES).map((theme) => {
+            {playable.map((theme) => {
               const isSelected = theme.id === currentTheme;
               return (
                 <button
@@ -61,6 +67,30 @@ export default function ThemeSelector({ currentTheme, onSelectTheme }: ThemeSele
                 </button>
               );
             })}
+
+            {/* Shown but not offered. These used to be pickable and simply drew
+                the space map with a few tile colours changed, which reads as the
+                theme being broken rather than unbuilt. */}
+            {parked.length > 0 && (
+              <>
+                <p className="pt-2 pb-1 px-1 text-[10px] font-black uppercase tracking-wider text-gray-500 border-t border-white/10 mt-1">
+                  Waiting on artwork
+                </p>
+                {parked.map((theme) => (
+                  <div
+                    key={theme.id}
+                    className="w-full p-2 rounded-xl flex items-center justify-between text-xs text-gray-500 opacity-70 cursor-not-allowed"
+                    title={`${theme.name} needs its own backdrop and scenery before it can be played`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-lg grayscale">{theme.icon}</span>
+                      <span className="font-bold">{theme.name}</span>
+                    </div>
+                    <Lock className="w-3.5 h-3.5" />
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         </div>
       )}

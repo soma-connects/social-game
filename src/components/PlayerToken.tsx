@@ -9,6 +9,8 @@ interface PlayerTokenProps {
   isActive: boolean;
   spreadX: number;
   spreadY: number;
+  /** Smaller on the overview, where six tokens share a much smaller board. */
+  size?: 'xs' | 'sm';
 }
 
 /**
@@ -48,9 +50,35 @@ function graphPath(from: number, to: number): number[] {
   );
 }
 
-export default function PlayerToken({ player, isActive, spreadX, spreadY }: PlayerTokenProps) {
+export default function PlayerToken({
+  player,
+  isActive,
+  spreadX,
+  spreadY,
+  size = 'sm',
+}: PlayerTokenProps) {
   const controls = useAnimation();
   const prevPosRef = useRef(player.boardPosition);
+
+  /**
+   * Where the token sits before any animation has run.
+   *
+   * This used to be left entirely to `controls.set()` in the effect below, and
+   * that never landed: with `initial={false}` there is no declarative starting
+   * position, and the imperative set is dropped if it runs before the element
+   * has subscribed to the controls. The result was that on every page load —
+   * every refresh, every player joining — all the tokens rendered stacked in the
+   * board's top-left corner instead of on their tiles, and only sorted
+   * themselves out once somebody moved.
+   *
+   * Giving the element a real starting position fixes the load, and the effect
+   * below still owns the walking animation.
+   */
+  const startNode = BOARD_GRAPH[player.boardPosition];
+  const initialPosition = {
+    left: `${(startNode?.x ?? 50) + spreadX}%`,
+    top: `${(startNode?.y ?? 50) + spreadY}%`,
+  };
 
   useEffect(() => {
     const prevPos = prevPosRef.current;
@@ -95,7 +123,7 @@ export default function PlayerToken({ player, isActive, spreadX, spreadY }: Play
     <motion.div
       key={player.id}
       animate={controls}
-      initial={false}
+      initial={initialPosition}
       className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none ${
         isActive ? 'z-40' : 'z-30'
       }`}
@@ -130,7 +158,7 @@ export default function PlayerToken({ player, isActive, spreadX, spreadY }: Play
 
         <AvatarIllustration
           avatar={player.avatar}
-          size="sm"
+          size={size}
           isSpeaking={isActive}
           className={`relative z-10 shadow-2xl border-2 ${isActive ? 'border-partyYellow' : 'border-white/20'}`}
         />

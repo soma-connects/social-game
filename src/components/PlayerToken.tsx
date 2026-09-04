@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { motion, useAnimation, AnimatePresence } from 'framer-motion';
 import { Player } from '@/lib/types';
-import { BOARD_GRAPH, PREV_NODES } from '@/lib/gameRules';
+import { BOARD_GRAPH, PREV_NODES, STARTING_LIVES } from '@/lib/gameRules';
 import AvatarIllustration from './AvatarIllustration';
 
 interface PlayerTokenProps {
@@ -162,6 +162,33 @@ export default function PlayerToken({
           isSpeaking={isActive}
           className={`relative z-10 shadow-2xl border-2 ${isActive ? 'border-partyYellow' : 'border-white/20'}`}
         />
+
+        {/*
+          Lives, on the token itself.
+
+          They were only ever drawn in LeftSidebar, which is `hidden lg:flex` —
+          so below 1024px nothing showed them at all, and this is a game played
+          on phones. Bombing a mini-game costs a life and running out sends you
+          back to the launchpad, which is a hard rule to learn from a counter
+          you cannot see.
+
+          On the token rather than in a corner because that is where a player is
+          already looking on their turn.
+        */}
+        {size !== 'xs' && (
+          <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 flex items-center gap-[3px] z-20">
+            {Array.from({ length: STARTING_LIVES }).map((_, i) => (
+              <span
+                key={i}
+                className={`block w-[7px] h-[7px] rounded-full border border-black/50 shadow-sm transition-colors ${
+                  i < (player.lives ?? STARTING_LIVES)
+                    ? 'bg-rose-500 shadow-[0_0_5px_rgba(244,63,94,0.9)]'
+                    : 'bg-slate-700'
+                }`}
+              />
+            ))}
+          </div>
+        )}
       </motion.div>
     </motion.div>
   );

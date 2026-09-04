@@ -85,6 +85,12 @@ export default function GameRoomPage() {
   const [activeDareTarget, setActiveDareTarget] = useState<Player | null>(null);
   /** Set while an offensive powerup is waiting for a target to be chosen. */
   const [pendingPowerup, setPendingPowerup] = useState<ShopItem | null>(null);
+  /**
+   * Something only this player is allowed to know — currently where their mine
+   * went. Kept out of room state on purpose: everyone in the room subscribes to
+   * that document, so anything put there is public by definition.
+   */
+  const [privateNotice, setPrivateNotice] = useState<string | null>(null);
   const [guestNameInput, setGuestNameInput] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -366,7 +372,18 @@ export default function GameRoomPage() {
       return;
     }
     audioSFX.playPowerUpZap();
-    roomStore.usePowerup(roomId, powerupId);
+    roomStore
+      .usePowerup(roomId, powerupId)
+      .then((res) => {
+        // Where a mine went is told to the planter alone, in the response —
+        // it is deliberately absent from room state, which every browser in the
+        // room can read. Without this the player who paid 130 coins would have
+        // no idea anything had happened.
+        if (typeof res?.minePlantedAt === 'number') {
+          setPrivateNotice(`💥 Mine buried on space ${res.minePlantedAt}. Only you know.`);
+        }
+      })
+      .catch((err) => setPrivateNotice(err?.message ?? 'That powerup did not work'));
   };
 
   const handlePickTarget = (target: Player) => {
@@ -1087,6 +1104,21 @@ export default function GameRoomPage() {
             dismissBriefing(opts);
           }}
         />
+      )}
+
+      {privateNotice && (
+        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] w-full max-w-xs px-4">
+          <button
+            onClick={() => setPrivateNotice(null)}
+            className="w-full text-left glass-card rounded-2xl border border-amber-400/50 bg-slate-900/95 px-4 py-3 shadow-2xl animate-fadeIn"
+          >
+            <p className="text-[10px] font-black uppercase tracking-wider text-amber-300">
+              For your eyes only
+            </p>
+            <p className="text-sm font-bold text-white mt-0.5">{privateNotice}</p>
+            <p className="text-[10px] text-gray-400 mt-1">Tap to dismiss</p>
+          </button>
+        </div>
       )}
 
       {/* Lets anyone pull the rules back up without waiting for the game to

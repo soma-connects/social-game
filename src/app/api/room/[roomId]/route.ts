@@ -33,6 +33,8 @@ import {
   BOMB_DAMAGE,
   FINISH_NODE,
   MINIGAME_FAIL_THRESHOLD,
+  MINE_PLANT_DISTANCE,
+  MINE_SETBACK,
   STARTING_LIVES,
   loseLife,
   respawnToStart,
@@ -61,6 +63,7 @@ import {
   readSecrets,
   writeRoom,
   writeSecrets,
+  type RoomSecrets,
 } from '@/lib/server/roomServer';
 import { isPlayableTheme } from '@/lib/themeConfig';
 import {
@@ -751,6 +754,144 @@ function expireStalledPhase(room: RoomState, now: number): void {
   });
   room.turnResult = null;
   advanceRoundOrOpenShop(room);
+}
+
+// ─── Buried Mines ───────────────────────────────────────────────────────────
+//
+// The shop has sold these from the start — 130 coins, with a description, and
+// two constants written for how far ahead one is laid and how far back its
+// blast throws you. None of it was ever wired up: there was no case for it in
+// use_powerup and nothing ever read the `mines` field on the room's secrets, so
+// a player bought a Buried Mine, used it, and nothing at all happened.
+//
+// Mines live in the room's secrets rather than on the room document, for the
+// same reason the Truth or Bluff answer does: every browser in the room
+// subscribes to the room, and a mine everyone can see is just a tile to walk
+// around.
+
+type PlantedMine = NonNullable<RoomSecrets['mines']>[number];
+
+/**
+ * Buries a mine up the road from the planter.
+ *
+ * Deliberately not aimed at a player. It sits on a space and takes a life from
+ * whoever stands on it — which, on a board where a Rewind can send you
+ * backwards, may well end up being the person who buried it.
+ *
+ * At a fork the first branch is followed, so a mine is only ever laid on one
+ * road; laying it on both would make a 130-coin item a guaranteed hit.
+ */
+function plantMine(secrets: RoomSecrets, planter: Player): PlantedMine | null {
+  const nodeId = walkForward(planter.boardPosition, MINE_PLANT_DISTANCE);
+  if (nodeId === planter.boardPosition) return null; // ran out of road
+  // walkForward stops *at* the finish, so close to the end this would bury one
+  // on the winning space — where it would go off after the win was declared and
+  // knock the winner back off it.
+  if (nodeId === FINISH_NODE) return null;
+
+  secrets.mines ??= [];
+  // One mine to a space. Stacking them would take several lives from one step
+  // and read as a bug rather than as bad luck.
+  if (secrets.mines.some((m) => m.nodeId === nodeId)) return null;
+
+  const mine = { nodeId, ownerId: planter.id, ownerName: planter.name };
+  secrets.mines.push(mine);
+  return mine;
+}
+
+/** Lifts the mine at a space, if one is buried there. */
+function takeMineAt(secrets: RoomSecrets, nodeId: number): PlantedMine | null {
+  const mines = secrets.mines ?? [];
+  const index = mines.findIndex((m) => m.nodeId === nodeId);
+  if (index === -1) return null;
+  const [mine] = mines.splice(index, 1);
+  secrets.mines = mines;
+  return mine;
+}
+
+/**
+ * Sets off a mine under whoever just landed on it.
+ *
+ * Costs a life and throws them back, and is announced to the whole room — the
+ * blast is the payoff for the coins somebody spent, so it has to be seen.
+ *
+ * A shield does not stop it. The shield is sold as blocking "the next asteroid,
+ * dare or freeze", and quietly having it swallow mines too would make the two
+ * items impossible to reason about from their own descriptions.
+ */
+function detonateMine(room: RoomState, victim: Player, mine: PlantedMine): void {
+  const from = victim.boardPosition;
+  victim.boardPosition = walkBack(from, MINE_SETBACK);
+
+  const { livesLeft, empty } = loseLife(victim);
+  if (empty) respawnToStart(victim);
+
+  const ownName = mine.ownerId === victim.id ? 'their own' : `${mine.ownerName}'s`;
+  pushEvent(
+    room,
+    empty
+      ? `💥 ${victim.name} walked into ${ownName} buried mine and ran out of lives — back to the launchpad!`
+      : `💥 ${victim.name} walked into ${ownName} buried mine — ${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left`,
+    'debuff'
+  );
+
+  pushBoardEvent(room, 'bomb', victim, {
+    banner: '💥 BURIED MINE!',
+    message:
+      mine.ownerId === victim.id
+        ? `${victim.name} stepped on the mine they buried themselves.`
+        : `${mine.ownerName} buried it. ${victim.name} found it.`,
+    fromNode: from,
+    toNode: victim.boardPosition,
+  });
+}
+
+/**
+ * Clears anything buried on the board.
+ *
+ * A mine outlives the round it was laid in by design, but not the match: a
+ * blast from a game two matches ago, charged against a player who never saw it
+ * bought, reads as the board being broken.
+ */
+async function clearMines(roomId: string): Promise<void> {
+  const secrets = await readSecrets(roomId);
+  if (!secrets.mines?.length) return;
+  secrets.mines = [];
+  await writeSecrets(roomId, secrets);
+}
+
+/**
+ * Sets off any mine under a player's final resting place.
+ *
+ * Called after applyLanding rather than inside it, because the tile itself may
+ * move you on again — a wormhole or an asteroid changes where you actually come
+ * to rest, and a mine is triggered by standing on it, not by passing over it.
+ *
+ * Kept out of applyLanding for a second reason: mines live in the room's
+ * secrets, which are async to read, and applyLanding is a synchronous helper
+ * shared with the heartbeat.
+ */
+async function resolveMineLanding(
+  roomId: string,
+  room: RoomState,
+  player: Player
+): Promise<() => Promise<void>> {
+  const noop = async () => {};
+  // A win is final. applyLanding may have just declared one, and a mine going
+  // off afterwards would take a life off the winner and shove them back down
+  // the road they had already finished.
+  if (room.phase === 'game_over') return noop;
+
+  const secrets = await readSecrets(roomId);
+  const mine = takeMineAt(secrets, player.boardPosition);
+  if (!mine) return noop;
+  detonateMine(room, player, mine);
+
+  // Handed back rather than written here. This action can still lose its write
+  // race and be replayed against fresh state, and a mine already lifted from
+  // the secrets would not be there to find on the second run — the player would
+  // walk over it and the coins that bought it would be gone for nothing.
+  return () => writeSecrets(roomId, secrets);
 }
 
 /**
@@ -2236,8 +2377,11 @@ async function applyAction(
 
       pushEvent(room, `🎲 ${active.name} rolled ${roll}`, 'system');
       const outcome = applyLanding(room, active, currentId);
+      const commitMine = await resolveMineLanding(roomId, room, active);
+      const rolled = await writeRoom(room);
+      await commitMine();
 
-      return NextResponse.json({ room: await writeRoom(room), roll, outcome });
+      return NextResponse.json({ room: rolled, roll, outcome });
     }
 
     case 'choose_branch': {
@@ -2278,8 +2422,11 @@ async function applyAction(
       // again if the tile starts a dare, a duel or the sudden-death trap.
       room.phase = 'roadmap_turn';
       const outcome = applyLanding(room, active, currentId);
+      const commitMine = await resolveMineLanding(roomId, room, active);
+      const branched = await writeRoom(room);
+      await commitMine();
 
-      return NextResponse.json({ room: await writeRoom(room), outcome });
+      return NextResponse.json({ room: branched, outcome });
     }
 
     case 'resolve_dare': {
@@ -2453,6 +2600,28 @@ async function applyAction(
             coins: -damage,
           });
           break;
+        }
+
+        case 'mine': {
+          const secrets = await readSecrets(roomId);
+          const mine = plantMine(secrets, active);
+          if (!mine) {
+            // Give the item back rather than charging for nothing — which is
+            // exactly what this powerup did in every case before today.
+            active.inventory.push(powerupId);
+            return NextResponse.json(
+              { error: 'No clear ground up the road to bury that in' },
+              { status: 409 }
+            );
+          }
+          await writeSecrets(roomId, secrets);
+
+          // The room is told a mine exists but never where. Half the value of
+          // the item is everyone walking the next few spaces nervously.
+          pushEvent(room, `💥 ${active.name} buried something up the road…`, 'debuff');
+          // The planter alone gets the space, in the response rather than in
+          // room state — the room document is readable by every browser in it.
+          return NextResponse.json({ room: await writeRoom(room), minePlantedAt: mine.nodeId });
         }
       }
 
@@ -2750,6 +2919,7 @@ async function applyAction(
     }
 
     case 'start_match': {
+      await clearMines(roomId);
       // Identifies this match in the permanent `matches` collection. Minted
       // here rather than at archive time so every row is traceable back to the
       // room and the moment it started, and so a match that ends twice cannot
@@ -2812,6 +2982,8 @@ async function applyAction(
       if (room.phase === 'lobby') {
         return NextResponse.json({ error: 'Already in the lobby' }, { status: 409 });
       }
+
+      await clearMines(roomId);
 
       // Before the wipe below, not after — the reset clears scores, positions
       // and the winner, which is most of what the record is made of. If this

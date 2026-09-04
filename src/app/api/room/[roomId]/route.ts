@@ -1495,7 +1495,6 @@ async function createRoom(
     selectedLanguages: ['english', 'spelling_bee'],
     mathEnabled: false,
     trapWords: [],
-    currentChallenge: null,
     turnTimeLimit: DEFAULT_TURN_SECONDS,
     currentDare: null,
     winner: null,
@@ -1898,7 +1897,10 @@ async function applyAction(
 
       room.truthBluffState = {
         performerId: body.playerId,
-        prompt: room.currentChallenge?.word || 'Truth or Bluff',
+        // `room.currentChallenge` used to be read here and was never assigned
+        // anywhere — it was null for the life of every room, so this line only
+        // ever produced its own fallback string.
+        prompt: String(body.prompt ?? '').trim() || 'Truth or Bluff',
         claims,
         votes: {},
         phase: 'voting',

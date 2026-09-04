@@ -1,0 +1,64 @@
+STYLE BIBLE — "Voice Party Arcade" (mobile-first multiplayer voice party game)
+
+Art direction: premium mobile game UI. Glossy semi-3D vector illustration with soft
+inner bevels, rim lighting and neon glow. Think Stickman Party / Fall Guys polish
+sitting on a dark cosmic glassmorphism interface. Playful and bold, never childish,
+never corporate-flat.
+
+Palette — use ONLY these:
+  Gold / primary accent   #FFD166  (also #FFD000 for hits)
+  Cosmic void background  #050814
+  Card / panel navy       #0B132B
+  Hot pink / danger       #FF4757
+  Cyan / electric         #00F0FF
+  Emerald / buff-success  #10B981
+  Terracotta / warm alert #FF5722
+
+Lighting: single top-left key light, cool cyan rim light from the lower right,
+soft outer glow in the object's own accent colour.
+Edges: thick clean silhouette, readable at 32x32 px.
+Finish: subtle noise-free gradients, gentle specular highlight, no drop-shadow text.
+Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
+      3D render turntables, busy background clutter.
+
+--------------------------------------------------------------------------
+
+TASK — Sheet 9 of 10: SOUNDBOARD, REACTIONS & AI MASTER ROUNDS
+Slices go to: public/social/*.png at 256x256
+Replaces the emoji in: src/components/RoastIntermission.tsx (SOUNDBOARD, REACTIONS)
+and src/components/AiMasterGame.tsx (round-type labels)
+
+Using the STYLE BIBLE above, generate ONE image: a 5-column x 3-row grid of fifteen
+small social-interaction icons on a single canvas, identical scale and lighting, each
+centred in its own invisible square cell.
+
+Row 1 — SOUNDBOARD (Nigerian street sounds):
+ 1. DANFO HORN      — a bus air-horn, chrome and gold, sound bursts from the mouth.
+ 2. GENERATOR REV   — a small portable generator, terracotta #FF5722 body, exhaust puff.
+ 3. VENDOR BELL     — a hand bell mid-swing, brass, motion arcs on both sides.
+ 4. NOLLYWOOD BRASS — a brass trumpet angled up, gold, three musical notes leaving it.
+ 5. CHOI CHIME      — a four-point sparkle with a small chime bar behind it, cyan.
+
+Row 2 — REACTIONS:
+ 6. LAUGH   — a rounded speech bubble with a wide laughing mouth and a tear of laughter.
+ 7. FIRE    — a clean stylised flame, hot pink #FF4757 into gold #FFD166.
+ 8. APPLAUD — two hands clapping with small impact lines, warm gold.
+ 9. DRAMA   — a single theatre mask tilted, gold face, navy features.
+10. ALARM   — a rotating warning beacon, red dome, light beams sweeping out.
+
+Row 3 — AI MASTER ROUNDS:
+11. TRUTH   — a hand over a mouth, wide eye above it, cyan #00F0FF accent.
+12. DARE    — twin theatre masks with a small lightning bolt between them.
+13. TRIVIA  — a stylised brain made of glowing circuit lines, cyan on navy.
+14. STORY   — an open book with a ribbon of light rising from the pages, gold.
+15. BRIBE   — two hands shaking, gold coin glinting above the handshake.
+
+Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
+black — no gradient, no vignette, no ground shadow.
+Must read at 28x28 px.
+No text, no letters, no numbers, no watermark, no border frame.
+Output 2560x1536.
+
+AFTER: slice into horn.png, gen.png, bell.png, brass.png, choi.png, laugh.png,
+fire.png, almost.png, drama.png, whaala.png, truth.png, dare.png, trivia.png,
+story.png, bribe.png

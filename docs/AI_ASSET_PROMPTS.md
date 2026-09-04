@@ -11,6 +11,11 @@ being "nice pictures we can't use".
 
 ---
 
+> **In a hurry? Skip this file.** `docs/prompts/` holds the same prompts already
+> assembled — one complete, paste-ready prompt per `.txt`, numbered in the order to run
+> them. Open one, select all, paste into Gemini. This document is the reasoning behind
+> them and the wiring-up instructions.
+
 ## 0. How to use this (read once, then skip)
 
 **Where:** Gemini app → ask for an image, or [aistudio.google.com](https://aistudio.google.com)

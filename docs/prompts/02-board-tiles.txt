@@ -1,0 +1,52 @@
+STYLE BIBLE — "Voice Party Arcade" (mobile-first multiplayer voice party game)
+
+Art direction: premium mobile game UI. Glossy semi-3D vector illustration with soft
+inner bevels, rim lighting and neon glow. Think Stickman Party / Fall Guys polish
+sitting on a dark cosmic glassmorphism interface. Playful and bold, never childish,
+never corporate-flat.
+
+Palette — use ONLY these:
+  Gold / primary accent   #FFD166  (also #FFD000 for hits)
+  Cosmic void background  #050814
+  Card / panel navy       #0B132B
+  Hot pink / danger       #FF4757
+  Cyan / electric         #00F0FF
+  Emerald / buff-success  #10B981
+  Terracotta / warm alert #FF5722
+
+Lighting: single top-left key light, cool cyan rim light from the lower right,
+soft outer glow in the object's own accent colour.
+Edges: thick clean silhouette, readable at 32x32 px.
+Finish: subtle noise-free gradients, gentle specular highlight, no drop-shadow text.
+Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
+      3D render turntables, busy background clutter.
+
+--------------------------------------------------------------------------
+
+TASK — Sheet 2 of 10: BOARD TILE TYPES
+Slices go to: public/tiles/*.png at 256x256
+Replaces the emoji in: src/lib/themeConfig.ts (nodeColors icons)
+
+Using the STYLE BIBLE above, generate ONE image: a 4-column x 2-row grid of eight
+game-board tile glyphs on a single canvas, identical scale and lighting, each centred in
+its own invisible square cell.
+These are SYMBOLS ONLY — do not draw a circle, disc, badge, ring or plate behind them.
+(The app already draws a coloured disc underneath; a second one would double up.)
+
+1. NORMAL  — a simple four-point sparkle star, soft white-gold #FFD166.
+2. BUFF    — an upward chevron with a speed-boost swoosh, emerald #10B981, glowing.
+3. DEBUFF  — a downward broken chevron, cracked, hot pink #FF4757.
+4. DARE    — a stage microphone with two sound-wave arcs, purple-magenta with cyan rim.
+5. MYSTERY — a bold question mark, glossy gold #FFD166, with a faint sparkle.
+6. BONUS   — a five-point star, thick gold, cyan #00F0FF inner glow.
+7. TRAP    — a bear-trap seen from above, jaws open, terracotta #FF5722 teeth, red glow.
+8. DUEL    — two crossed sabres, silver blades, gold hilts, magenta energy along the edges.
+
+Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
+black — no gradient, no vignette, no ground shadow.
+Bold silhouettes, must read at 24x24 px.
+No text, no letters, no numbers, no watermark, no border frame.
+Output 2048x1024.
+
+AFTER: slice into normal.png, buff.png, debuff.png, dare.png, mystery.png, bonus.png,
+trap.png, duel.png

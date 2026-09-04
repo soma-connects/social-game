@@ -1,0 +1,53 @@
+STYLE BIBLE — "Voice Party Arcade" (mobile-first multiplayer voice party game)
+
+Art direction: premium mobile game UI. Glossy semi-3D vector illustration with soft
+inner bevels, rim lighting and neon glow. Think Stickman Party / Fall Guys polish
+sitting on a dark cosmic glassmorphism interface. Playful and bold, never childish,
+never corporate-flat.
+
+Palette — use ONLY these:
+  Gold / primary accent   #FFD166  (also #FFD000 for hits)
+  Cosmic void background  #050814
+  Card / panel navy       #0B132B
+  Hot pink / danger       #FF4757
+  Cyan / electric         #00F0FF
+  Emerald / buff-success  #10B981
+  Terracotta / warm alert #FF5722
+
+Lighting: single top-left key light, cool cyan rim light from the lower right,
+soft outer glow in the object's own accent colour.
+Edges: thick clean silhouette, readable at 32x32 px.
+Finish: subtle noise-free gradients, gentle specular highlight, no drop-shadow text.
+Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
+      3D render turntables, busy background clutter.
+
+--------------------------------------------------------------------------
+
+TASK — Sheet 6 of 10: CHARACTER ROLE BADGES
+Slices go to: public/badges/*.png at 256x256
+Replaces the emoji in: src/lib/gameContent.ts (AVATARS role / emoji fields)
+
+FIRST: upload public/avatars/paul.jpg and say "match the small gold corner badge in
+this image".
+
+Using the STYLE BIBLE above, generate ONE image: a 3-column x 2-row grid of six
+circular character-role badges on a single canvas, identical size and lighting.
+Each is a gold #FFD166 circular medallion with a subtle raised rim and a dark navy
+#0B132B emblem inset in the centre — matching the badge in the reference image.
+(Unlike the tile sheets, these DO keep the round medallion.)
+
+1. LEADER      — a five-point crown.
+2. DEFENDER    — a kite shield.
+3. SPEEDSTER   — a rocket tilted 45 degrees.
+4. STRATEGIST  — a target with an arrow in the bullseye.
+5. SUPPORT     — a five-point star.
+6. PLAYMAKER   — a running figure in motion.
+
+Emblems must be simple, solid and readable at 20x20 px.
+Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
+black — no gradient, no vignette, no ground shadow.
+No text, no letters, no numbers, no watermark.
+Output 1536x1024.
+
+AFTER: slice into leader.png, defender.png, speedster.png, strategist.png,
+support.png, playmaker.png

@@ -1,0 +1,64 @@
+STYLE BIBLE — "Voice Party Arcade" (mobile-first multiplayer voice party game)
+
+Art direction: premium mobile game UI. Glossy semi-3D vector illustration with soft
+inner bevels, rim lighting and neon glow. Think Stickman Party / Fall Guys polish
+sitting on a dark cosmic glassmorphism interface. Playful and bold, never childish,
+never corporate-flat.
+
+Palette — use ONLY these:
+  Gold / primary accent   #FFD166  (also #FFD000 for hits)
+  Cosmic void background  #050814
+  Card / panel navy       #0B132B
+  Hot pink / danger       #FF4757
+  Cyan / electric         #00F0FF
+  Emerald / buff-success  #10B981
+  Terracotta / warm alert #FF5722
+
+Lighting: single top-left key light, cool cyan rim light from the lower right,
+soft outer glow in the object's own accent colour.
+Edges: thick clean silhouette, readable at 32x32 px.
+Finish: subtle noise-free gradients, gentle specular highlight, no drop-shadow text.
+Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
+      3D render turntables, busy background clutter.
+
+--------------------------------------------------------------------------
+
+TASK — Sheet 5 of 10: TILE EVENT BURSTS
+Slices go to: public/events/*.png at 512x512
+Replaces the emoji in: src/components/TileEventOverlay.tsx (EVENT_STYLES)
+
+Using the STYLE BIBLE above, generate ONE image: a 4-column x 3-row grid of twelve
+dramatic game-event icons on a single canvas, identical scale and lighting, each centred
+in its own invisible square cell. These fire as a full-screen overlay when a player
+lands on something — so give each one motion, energy and glow, but keep the silhouette
+clean.
+
+1.  WORMHOLE     — a violet-and-indigo spiral tunnel viewed head-on, receding rings,
+                   bright core.
+2.  ASTEROID     — a burning meteor streaking diagonally, terracotta #FF5722 fire trail.
+3.  SHIELD BLOCK — a gold kite shield with a cyan energy dome flaring on impact, small
+                   deflection sparks at the point of contact.
+4.  SHIELD GAIN  — a satellite with gold foil body and cyan solar panels, beaming a soft
+                   protective cone of light downward.
+5.  SHIELD UP    — the same gold kite shield rising, calm steady emerald #10B981 aura,
+                   no impact sparks.
+6.  SUPPLY DROP  — a wooden crate under a small gold parachute, drifting down.
+7.  DARE         — a stage microphone in a hot pink #FF4757 spotlight cone, sound rings
+                   radiating outward.
+8.  DUEL         — two crossed sabres clashing, spark burst at the crossing point,
+                   terracotta and gold.
+9.  FINISH       — a gold trophy erupting with confetti and light rays.
+10. BOOST        — a rocket climbing steeply, cyan #00F0FF flame, speed streaks behind.
+11. FREEZE       — a large crystalline snowflake with ice shards spreading from it,
+                   cyan #00F0FF, cold vapour.
+12. BOMB         — a black cartoon bomb mid-detonation, hot pink #FF4757 blast ring
+                   bursting outward from it.
+
+Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
+black — no gradient, no vignette, no ground shadow.
+No text, no letters, no numbers, no watermark, no border frame.
+Output 2048x1536.
+
+AFTER: slice into wormhole.png, asteroid.png, shield_block.png, shield_gain.png,
+shield_up.png, supply_drop.png, dare.png, duel.png, finish.png, boost.png, freeze.png,
+bomb.png

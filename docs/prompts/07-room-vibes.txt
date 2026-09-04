@@ -1,0 +1,51 @@
+STYLE BIBLE — "Voice Party Arcade" (mobile-first multiplayer voice party game)
+
+Art direction: premium mobile game UI. Glossy semi-3D vector illustration with soft
+inner bevels, rim lighting and neon glow. Think Stickman Party / Fall Guys polish
+sitting on a dark cosmic glassmorphism interface. Playful and bold, never childish,
+never corporate-flat.
+
+Palette — use ONLY these:
+  Gold / primary accent   #FFD166  (also #FFD000 for hits)
+  Cosmic void background  #050814
+  Card / panel navy       #0B132B
+  Hot pink / danger       #FF4757
+  Cyan / electric         #00F0FF
+  Emerald / buff-success  #10B981
+  Terracotta / warm alert #FF5722
+
+Lighting: single top-left key light, cool cyan rim light from the lower right,
+soft outer glow in the object's own accent colour.
+Edges: thick clean silhouette, readable at 32x32 px.
+Finish: subtle noise-free gradients, gentle specular highlight, no drop-shadow text.
+Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
+      3D render turntables, busy background clutter.
+
+--------------------------------------------------------------------------
+
+TASK — Sheet 7 of 10: ROOM VIBES
+Slices go to: public/vibes/*.png at 512x512
+Replaces the emoji in: src/lib/roomVibes.ts (ROOM_VIBES)
+
+Using the STYLE BIBLE above, generate ONE image: a 5-column x 1-row strip of five
+room-mood badges on a single canvas, identical scale and lighting, each centred in its
+own invisible square cell. Each is a small glossy emblem, richer than a flat icon but
+still a single clear shape.
+
+1. CLASSIC PARTY       — a party popper bursting with gold #FFD166 and cyan confetti.
+2. GETTING TO KNOW YOU — two overlapping speech bubbles with a small warm gold heart
+                         where they meet.
+3. BROS HANGOUT        — two beer bottles clinking, amber glass, gold highlights, small
+                         impact sparkle.
+4. ANIME SQUAD         — a stylised narutomaki fish-cake swirl, pink and white, with two
+                         small anime-style sparkle stars beside it.
+5. FLIRTY & WILD       — a stylised flame with a subtle heart shape inside it, hot pink
+                         #FF4757 into gold gradient.
+
+Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
+black — no gradient, no vignette, no ground shadow.
+No text, no letters, no numbers, no watermark, no border frame.
+Output 2560x512.
+
+AFTER: slice into classic_party.png, getting_to_know.png, bros_hangout.png,
+anime_squad.png, flirty_wild.png

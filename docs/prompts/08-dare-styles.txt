@@ -1,0 +1,58 @@
+STYLE BIBLE — "Voice Party Arcade" (mobile-first multiplayer voice party game)
+
+Art direction: premium mobile game UI. Glossy semi-3D vector illustration with soft
+inner bevels, rim lighting and neon glow. Think Stickman Party / Fall Guys polish
+sitting on a dark cosmic glassmorphism interface. Playful and bold, never childish,
+never corporate-flat.
+
+Palette — use ONLY these:
+  Gold / primary accent   #FFD166  (also #FFD000 for hits)
+  Cosmic void background  #050814
+  Card / panel navy       #0B132B
+  Hot pink / danger       #FF4757
+  Cyan / electric         #00F0FF
+  Emerald / buff-success  #10B981
+  Terracotta / warm alert #FF5722
+
+Lighting: single top-left key light, cool cyan rim light from the lower right,
+soft outer glow in the object's own accent colour.
+Edges: thick clean silhouette, readable at 32x32 px.
+Finish: subtle noise-free gradients, gentle specular highlight, no drop-shadow text.
+Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
+      3D render turntables, busy background clutter.
+
+--------------------------------------------------------------------------
+
+TASK — Sheet 8 of 10: DARE PERFORMANCE STYLES
+Slices go to: public/dares/*.png at 256x256
+Replaces the emoji in: src/lib/gameContent.ts (DARE_STYLES)
+
+Using the STYLE BIBLE above, generate ONE image: a 4-column x 2-row grid of eight
+comedic performance-style icons on a single canvas, identical scale and lighting, each
+centred in its own invisible square cell. Playful and expressive, slightly exaggerated,
+like party-game category badges.
+
+1. SING IT              — a microphone with musical notes spiralling up out of it, gold
+                          and cyan.
+2. ACCENT CHALLENGE     — a speech bubble with a mouth and stylised sound waves inside,
+                          hot pink #FF4757 outline.
+3. DRAMATIC READING     — twin theatre masks, one gold, one navy, slightly overlapping.
+4. WHISPER MODE         — a hand cupped beside an open mouth, tiny quiet sound wisps,
+                          muted cyan.
+5. TONGUE TWISTER       — a lightning bolt striking through a curled tongue shape, gold
+                          #FFD166 bolt, pink tongue.
+6. ANGRY MARKET WOMAN   — a woven market basket with produce, an emphatic pointing hand
+                          beside it, warm terracotta #FF5722.
+7. NEWS REPORTER        — a boxy retro TV set with a handheld reporter's mic in front of
+                          it, cyan screen glow.
+8. NOLLYWOOD CRYING     — a single dramatic teardrop with a film-clapperboard corner
+                          behind it, deep navy and gold.
+
+Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
+black — no gradient, no vignette, no ground shadow.
+Must read at 32x32 px.
+No text, no letters, no numbers, no realistic faces, no watermark, no border frame.
+Output 2048x1024.
+
+AFTER: slice into sing.png, accent.png, dramatic.png, whisper.png, twister.png,
+market.png, news.png, crying.png

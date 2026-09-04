@@ -1,0 +1,56 @@
+STYLE BIBLE — "Voice Party Arcade" (mobile-first multiplayer voice party game)
+
+Art direction: premium mobile game UI. Glossy semi-3D vector illustration with soft
+inner bevels, rim lighting and neon glow. Think Stickman Party / Fall Guys polish
+sitting on a dark cosmic glassmorphism interface. Playful and bold, never childish,
+never corporate-flat.
+
+Palette — use ONLY these:
+  Gold / primary accent   #FFD166  (also #FFD000 for hits)
+  Cosmic void background  #050814
+  Card / panel navy       #0B132B
+  Hot pink / danger       #FF4757
+  Cyan / electric         #00F0FF
+  Emerald / buff-success  #10B981
+  Terracotta / warm alert #FF5722
+
+Lighting: single top-left key light, cool cyan rim light from the lower right,
+soft outer glow in the object's own accent colour.
+Edges: thick clean silhouette, readable at 32x32 px.
+Finish: subtle noise-free gradients, gentle specular highlight, no drop-shadow text.
+Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
+      3D render turntables, busy background clutter.
+
+--------------------------------------------------------------------------
+
+TASK — Sheet 4 of 10: POWER-UPS
+Slices go to: public/powerups/*.png at 512x512
+Replaces the emoji in: src/lib/gameRules.ts (POWERUP_SHOP)
+
+Using the STYLE BIBLE above, generate ONE image: a 4-column x 2-row grid of seven game
+power-up icons on a single canvas, evenly spaced, each in its own invisible square cell,
+identical lighting, identical scale, identical 3/4 view. Leave the 8th cell empty.
+
+1. ROCKET NITRO — a chunky cartoon rocket tilted 45 degrees up-right, emerald #10B981
+   body, gold #FFD166 fins, cyan flame trail.
+2. REWIND TRAP — a glossy double-left-arrow rewind symbol inside a rounded square
+   button, cyan #00F0FF on navy #0B132B, motion streaks trailing right.
+3. MAGIC SHIELD — a heraldic kite shield, gold #FFD166 rim, deep navy face, a soft
+   cyan energy dome shimmering over it.
+4. DARE GUN — a retro chrome stage microphone re-imagined as a toy blaster, gold body,
+   hot pink #FF4757 trigger and muzzle glow.
+5. ICE FREEZE — a six-point crystal snowflake, thick faceted ice, cyan #00F0FF core,
+   white frost highlights, cold vapour at the tips.
+6. POINT BOMB — a classic round black cartoon bomb, glossy highlight, gold fuse cap,
+   a lit sparking fuse in hot pink #FF4757.
+7. BURIED MINE — a spiked naval sea-mine half-buried in glowing cracked ground,
+   terracotta #FF5722 spikes, red warning light on top.
+
+Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
+black — no gradient, no vignette, no ground shadow.
+Each icon must read clearly at 40x40 px.
+No text, no letters, no numbers, no labels, no captions, no border frame.
+Output 2048x1024.
+
+AFTER: slice into boost.png, rewind.png, shield.png, dare_gun.png, freeze.png,
+bomb.png, mine.png

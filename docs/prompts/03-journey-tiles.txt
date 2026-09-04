@@ -1,0 +1,60 @@
+STYLE BIBLE — "Voice Party Arcade" (mobile-first multiplayer voice party game)
+
+Art direction: premium mobile game UI. Glossy semi-3D vector illustration with soft
+inner bevels, rim lighting and neon glow. Think Stickman Party / Fall Guys polish
+sitting on a dark cosmic glassmorphism interface. Playful and bold, never childish,
+never corporate-flat.
+
+Palette — use ONLY these:
+  Gold / primary accent   #FFD166  (also #FFD000 for hits)
+  Cosmic void background  #050814
+  Card / panel navy       #0B132B
+  Hot pink / danger       #FF4757
+  Cyan / electric         #00F0FF
+  Emerald / buff-success  #10B981
+  Terracotta / warm alert #FF5722
+
+Lighting: single top-left key light, cool cyan rim light from the lower right,
+soft outer glow in the object's own accent colour.
+Edges: thick clean silhouette, readable at 32x32 px.
+Finish: subtle noise-free gradients, gentle specular highlight, no drop-shadow text.
+Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
+      3D render turntables, busy background clutter.
+
+--------------------------------------------------------------------------
+
+TASK — Sheet 3 of 10: JOURNEY TILES
+Slices go to: public/tiles/journey/*.png at 256x256
+Replaces the emoji in: src/lib/boardGraph.ts (TILE_ICONS)
+
+Using the STYLE BIBLE above, generate ONE image: a 5-column x 2-row grid of ten
+game-board space markers on a single canvas, evenly spaced, identical scale, identical
+lighting, each centred in its own invisible square cell.
+SYMBOLS ONLY — do not draw a circle, disc, plate or badge behind any of them.
+
+1.  MINIGAME    — a stage microphone with two curved sound waves, gold #FFD166 body,
+                  cyan #00F0FF waves.
+2.  AI CHALLENGE— a friendly robot head, rounded navy #0B132B casing, single wide cyan
+                  #00F0FF visor, small gold antenna.
+3.  TREASURE    — a cut gemstone, brilliant facets, cyan #00F0FF core with gold rim light.
+4.  TRAP        — a steel bear-trap seen from above, jaws sprung open, terracotta
+                  #FF5722 teeth, faint red danger glow.
+5.  MYSTERY     — a bold rounded question mark, glossy gold #FFD166, one small sparkle.
+6.  SHOP        — a market stall awning with gold and navy stripes above a small counter,
+                  warm gold light underneath.
+7.  SPLIT ROUTE — a road forking into two glowing paths, seen in perspective, emerald
+                  #10B981 left branch and hot pink #FF4757 right branch.
+8.  TELEPORT    — a swirling spiral vortex seen face-on, cyan #00F0FF outer arms winding
+                  into a bright white core.
+9.  VOLCANO     — a small erupting volcano cone, terracotta #FF5722 lava, ember sparks.
+10. FINISH      — a victory trophy cup with handles, thick gold #FFD166, star on the bowl,
+                  soft golden glow.
+
+Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
+black — no gradient, no vignette, no ground shadow.
+Bold silhouettes, must read at 24x24 px.
+No text, no letters, no numbers, no watermark, no border frame.
+Output 2560x1024.
+
+AFTER: slice into minigame.png, ai_challenge.png, treasure.png, trap.png, mystery.png,
+shop.png, split_route.png, teleport.png, volcano.png, finish.png

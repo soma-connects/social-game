@@ -1,0 +1,54 @@
+STYLE BIBLE — "Voice Party Arcade" (mobile-first multiplayer voice party game)
+
+Art direction: premium mobile game UI. Glossy semi-3D vector illustration with soft
+inner bevels, rim lighting and neon glow. Think Stickman Party / Fall Guys polish
+sitting on a dark cosmic glassmorphism interface. Playful and bold, never childish,
+never corporate-flat.
+
+Palette — use ONLY these:
+  Gold / primary accent   #FFD166  (also #FFD000 for hits)
+  Cosmic void background  #050814
+  Card / panel navy       #0B132B
+  Hot pink / danger       #FF4757
+  Cyan / electric         #00F0FF
+  Emerald / buff-success  #10B981
+  Terracotta / warm alert #FF5722
+
+Lighting: single top-left key light, cool cyan rim light from the lower right,
+soft outer glow in the object's own accent colour.
+Edges: thick clean silhouette, readable at 32x32 px.
+Finish: subtle noise-free gradients, gentle specular highlight, no drop-shadow text.
+Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
+      3D render turntables, busy background clutter.
+
+--------------------------------------------------------------------------
+
+TASK — Sheet 1 of 10: GAME MODE CARDS
+Slices go to: public/modes/*.png at 512x512
+Replaces the emoji in: src/components/RoomLobby.tsx (lines ~480-710)
+
+Using the STYLE BIBLE above, generate ONE image: a 4-column x 2-row grid of seven bold
+game-mode emblems on a single canvas, evenly spaced, identical scale, identical
+lighting, each centred in its own invisible square cell. Leave the 8th cell empty.
+These are large hero icons for big tappable menu cards — chunky, confident, high
+contrast.
+
+1. ROADMAP BOARD  — a pair of gold #FFD166 dice resting on a winding neon board path
+                    that recedes into the distance.
+2. VOICE ARENA    — a gold stage microphone inside a ring of cyan #00F0FF sound waves.
+3. PARTY MODE     — two beer bottles clinking amid gold confetti and a burst of light.
+4. AI MASTER      — a robot head with a cyan #00F0FF visor wearing a small gold crown.
+5. TEAM BATTLE    — two crossed sabres over a split shield, one half red #EF4444, the
+                    other half sky blue #38BDF8.
+6. CHESS          — a chess knight in profile, glossy navy #0B132B with gold rim light.
+7. LUDO           — four ludo tokens in red, blue, emerald and gold arranged around a
+                    single die.
+
+Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
+black — no gradient, no vignette, no ground shadow.
+Each emblem must read clearly at 64x64 px.
+No text, no letters, no numbers, no watermark, no border frame.
+Output 2048x1024.
+
+AFTER: slice into board.png, voice.png, party.png, ai_master.png, team_battle.png,
+chess.png, ludo.png

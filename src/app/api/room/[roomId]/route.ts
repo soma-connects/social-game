@@ -555,6 +555,11 @@ const ACTIVE_PLAYER_ACTIONS = new Set([
   'complete_truth_bluff',
   'complete_trap',
   'trivia_answer',
+  // Buzzing was open to anyone while answering was not, so a spectator who
+  // buzzed moved the round to 'answering' and was then refused permission to
+  // answer it — nobody could act and the round was stuck. The two now agree on
+  // whose round it is.
+  'trivia_buzz',
 ]);
 
 /**
@@ -2105,15 +2110,25 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room), isCorrect, answer: target });
     }
 
+    /**
+     * Locks the performer in before they answer.
+     *
+     * The round used to let them read the question and answer at leisure. This
+     * is the commitment step: buzz, and the clock drops to the short answer
+     * window. Nothing sent this action at all before — the phase it moves the
+     * round into was unreachable, which is why 'answering' was read by nothing.
+     */
     case 'trivia_buzz': {
-      if (room.triviaState && room.triviaState.phase === 'asking') {
-        room.triviaState.buzzedPlayerId = body.playerId;
-        room.triviaState.phase = 'answering';
-        const buzzer = room.players.find(p => p.id === body.playerId);
-        if (buzzer) {
-          pushEvent(room, `🚨 ${buzzer.name} buzzed in!`, 'system');
-        }
+      const state = room.triviaState;
+      if (!state || state.phase !== 'asking') {
+        return NextResponse.json({ error: 'Nothing to buzz in on' }, { status: 409 });
       }
+
+      state.buzzedPlayerId = body.playerId;
+      state.phase = 'answering';
+      const buzzer = room.players.find((p) => p.id === body.playerId);
+      if (buzzer) pushEvent(room, `🚨 ${buzzer.name} buzzed in!`, 'system');
+
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

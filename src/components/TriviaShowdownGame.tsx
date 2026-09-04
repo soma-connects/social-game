@@ -30,6 +30,11 @@ function formatTime(seconds: number): string {
   return `00:${String(Math.max(0, seconds)).padStart(2, '0')}`;
 }
 
+/** Long enough to read the question and decide whether you know it. */
+const READING_SECONDS = 18;
+/** The window after buzzing. Short on purpose — buzzing is a commitment. */
+const ANSWER_SECONDS = 8;
+
 export default function TriviaShowdownGame({
   room,
   activePlayer,
@@ -37,10 +42,12 @@ export default function TriviaShowdownGame({
 }: TriviaShowdownGameProps) {
   const triviaState = room.triviaState as TriviaState | null | undefined;
 
-  const [status, setStatus] = useState<'loading' | 'asking' | 'listening' | 'evaluating' | 'correct' | 'wrong'>('loading');
+  const [status, setStatus] = useState<
+    'loading' | 'asking' | 'buzzed' | 'listening' | 'evaluating' | 'correct' | 'wrong'
+  >('loading');
   const [transcript, setTranscript] = useState<string>('');
   const [textInput, setTextInput] = useState<string>('');
-  const [timeLeft, setTimeLeft] = useState<number>(20);
+  const [timeLeft, setTimeLeft] = useState<number>(READING_SECONDS);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [caps, setCaps] = useState<MicCapabilities | null>(null);
 
@@ -130,14 +137,14 @@ export default function TriviaShowdownGame({
   // Same fix the roast countdown and the voice arena already use: the effect
   // depends on `status` alone, and everything that changes underneath it is
   // read through a ref.
-  const timeLeftRef = useRef(20);
+  const timeLeftRef = useRef(READING_SECONDS);
   const answerRef = useRef('');
   answerRef.current = transcript || textInput;
   const evaluateRef = useRef(handleEvaluate);
   evaluateRef.current = handleEvaluate;
 
   useEffect(() => {
-    if (status !== 'asking' && status !== 'listening') return;
+    if (status !== 'asking' && status !== 'buzzed' && status !== 'listening') return;
 
     timerRef.current = setInterval(() => {
       const next = timeLeftRef.current - 1;
@@ -153,6 +160,54 @@ export default function TriviaShowdownGame({
     };
   }, [status]);
 
+  /**
+   * Keep the room in the loop.
+   *
+   * Trivia was the one mini-game that never reported anything, so everyone not
+   * answering sat on a waiting screen with no idea what the question even was —
+   * and a buzzer nobody can see somebody hit is not worth pressing.
+   */
+  useEffect(() => {
+    if (!triviaState || status === 'loading') return;
+    const total = status === 'asking' ? READING_SECONDS : ANSWER_SECONDS;
+    roomStore.pushLiveState(room.roomId, activePlayer.id, {
+      prompt: triviaState.question,
+      detail: status === 'asking' ? 'Reading the question…' : 'Buzzed in — answering',
+      progress: 1 - Math.max(0, timeLeft) / total,
+      status:
+        status === 'correct'
+          ? 'CORRECT!'
+          : status === 'wrong'
+          ? 'Wrong answer'
+          : transcript || textInput
+          ? `heard: "${transcript || textInput}"`
+          : status === 'asking'
+          ? 'deciding whether to buzz…'
+          : '🚨 BUZZED IN',
+      good: status === 'correct' ? true : status === 'wrong' ? false : undefined,
+    });
+  }, [triviaState, status, timeLeft, transcript, textInput, room.roomId, activePlayer.id]);
+
+  /**
+   * Commits to answering.
+   *
+   * The mic and the text box stay shut until this happens — the whole point of
+   * a buzzer is that you say you know it before you find out whether you do.
+   */
+  const handleBuzz = async () => {
+    if (status !== 'asking') return;
+    audioSFX.playStreetVendorBell();
+    setStatus('buzzed');
+    timeLeftRef.current = ANSWER_SECONDS;
+    setTimeLeft(ANSWER_SECONDS);
+    try {
+      await roomStore.buzzTrivia(room.roomId, activePlayer.id);
+    } catch {
+      // The clock is already running locally; a failed announcement to the room
+      // is not worth handing the question back.
+    }
+  };
+
   // Listen via Mic
   const startListening = async () => {
     if (status === 'listening') return;
@@ -164,7 +219,10 @@ export default function TriviaShowdownGame({
       beginListening();
     } catch (err) {
       console.error('Speech recognition error:', err);
-      setStatus('asking');
+      // Back to buzzed, not asking: they have already committed and the short
+      // clock is running. Dropping them to 'asking' would offer the buzzer a
+      // second time and quietly restore the long one.
+      setStatus('buzzed');
     }
   };
 
@@ -260,11 +318,30 @@ export default function TriviaShowdownGame({
             </div>
           )}
 
+          {/* The commitment step. Nothing below is usable until it is taken. */}
+          {status === 'asking' && (
+            <button
+              onClick={handleBuzz}
+              className="w-full py-5 px-6 rounded-2xl font-black text-lg bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 shadow-xl shadow-orange-900/40 transition-all active:scale-95 flex items-center justify-center gap-3"
+            >
+              🚨 BUZZ IN
+              <span className="text-xs font-bold opacity-80">
+                {ANSWER_SECONDS}s to answer
+              </span>
+            </button>
+          )}
+
+          {status === 'buzzed' && (
+            <p className="text-center text-sm font-black text-amber-300 animate-pulse">
+              You're in — answer now!
+            </p>
+          )}
+
           {/* Voice Input Controls */}
-          <div className="flex flex-col sm:flex-row items-center gap-3">
+          <div className={`flex flex-col sm:flex-row items-center gap-3 transition-opacity ${status === 'asking' ? 'opacity-40 pointer-events-none' : ''}`}>
             <button
               onClick={startListening}
-              disabled={status === 'listening' || status === 'evaluating'}
+              disabled={status === 'asking' || status === 'listening' || status === 'evaluating'}
               className={`w-full sm:flex-1 py-4 px-6 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all duration-300 shadow-lg ${
                 status === 'listening'
                   ? 'bg-purple-600 text-white animate-pulse border border-purple-300'
@@ -291,10 +368,11 @@ export default function TriviaShowdownGame({
           <MicContentionNotice active={status === 'listening'} onClaimPriority={restartWithMicPriority} />
 
           {/* Fallback Text Input */}
-          <div className="flex items-center gap-2 pt-2">
+          <div className={`flex items-center gap-2 pt-2 transition-opacity ${status === 'asking' ? 'opacity-40 pointer-events-none' : ''}`}>
             <input
               type="text"
               placeholder="Or type answer here..."
+              disabled={status === 'asking'}
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
               onKeyDown={(e) => {

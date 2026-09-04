@@ -444,6 +444,11 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'truth_bluff_submit_claims', playerId, claims, lieIndex });
   }
 
+  /** Locks the performer in before they answer a trivia question. */
+  public buzzTrivia(roomId: string, playerId: string) {
+    return this.post(roomId, { action: 'trivia_buzz', playerId });
+  }
+
   public voteTruthBluff(roomId: string, playerId: string, voteIndex: number) {
     return this.post(roomId, { action: 'truth_bluff_vote', playerId, voteIndex });
   }

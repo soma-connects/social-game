@@ -140,13 +140,73 @@ export const PRESET_TRAPS: PresetTrap[] = [
  * parked rather than shipped as rounds nobody can win. Their tone marks and
  * vowel set come back as noise through an English model.
  */
+/**
+ * What the Voice Arena actually asks people to say.
+ *
+ * Only the languages the speech engine can genuinely hear belong here. The
+ * Nigerian languages were dropped deliberately — no browser recogniser
+ * supports ha-NG, ig-NG or yo-NG, so a round in them could only ever be graded
+ * by luck — and the four kept are the ones LOCALE_MAP can hand a real locale.
+ *
+ * For Japanese and Korean the prompt is in the native script, because that is
+ * what the recogniser returns and therefore what the answer is matched
+ * against; the romanisation goes in `phonetic`, where the arena shows it to
+ * whoever is reading the screen.
+ *
+ * Spanish and French are written with their accents. The matcher folds those
+ * away, so "rápido" and "rapido" both count — nobody should lose a party game
+ * to a diacritic.
+ */
 export const LANGUAGE_DECKS: Record<string, ChallengeWord[]> = {
+  // Tongue twisters throughout: the challenge in your own language has to be
+  // the saying of it, not the knowing of it.
   english: [
-    { id: 'e1', word: 'She sells seashells by the seashore', phonetic: 'SH IY S EH L Z S IY SH EH L Z', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
-    { id: 'e2', word: 'How much wood would a woodchuck chuck', phonetic: 'H AW M AH CH W UH D W UH D', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
-    { id: 'e3', word: 'Peter Piper picked a peck of pickled peppers', phonetic: 'P IY T ER P AY P ER P IH K T', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
-    { id: 'e4', word: 'I saw a kitten eating chicken in the kitchen', phonetic: 'AY S AO AH K IH T AH N IY T IH NG', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e1', word: 'She sells seashells by the seashore', phonetic: 'shee SELLZ SEE-shellz by the SEE-shor', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e2', word: 'How much wood would a woodchuck chuck', phonetic: 'how much WUUD would a WUUD-chuck chuck', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e3', word: 'Peter Piper picked a peck of pickled peppers', phonetic: 'PEE-ter PY-per pikt a pek of PIK-uld PEP-erz', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e4', word: 'I saw a kitten eating chicken in the kitchen', phonetic: 'eye saw a KIT-un EE-ting CHIK-un in the KITCH-un', translation: 'Say it fast without stumbling!', language: 'english', type: 'language', difficulty: 'hard' },
+    { id: 'e5', word: 'Fresh fried fish', phonetic: 'fresh fryd fish', translation: 'Short, but try saying it three times', language: 'english', type: 'language', difficulty: 'easy' },
+    { id: 'e6', word: 'Red lorry yellow lorry', phonetic: 'red LOR-ee YEL-oh LOR-ee', translation: 'The classic that breaks everybody', language: 'english', type: 'language', difficulty: 'medium' },
+    { id: 'e7', word: 'Unique New York', phonetic: 'yoo-NEEK noo YORK', translation: 'Three words. How hard can it be?', language: 'english', type: 'language', difficulty: 'medium' },
+    { id: 'e8', word: 'Six slick slim sycamore saplings', phonetic: 'siks slik slim SIK-a-mor SAP-lingz', translation: 'Good luck with this one', language: 'english', type: 'language', difficulty: 'hard' },
   ],
+
+  spanish: [
+    { id: 'es1', word: 'Buenos días', phonetic: 'BWEH-nohs DEE-ahs', translation: 'Good morning', language: 'spanish', type: 'language', difficulty: 'easy' },
+    { id: 'es2', word: 'Muchas gracias', phonetic: 'MOO-chahs GRAH-syahs', translation: 'Thank you very much', language: 'spanish', type: 'language', difficulty: 'easy' },
+    { id: 'es3', word: 'Me gusta la música', phonetic: 'meh GOOS-tah lah MOO-see-kah', translation: 'I like music', language: 'spanish', type: 'language', difficulty: 'medium' },
+    { id: 'es4', word: 'El perro corre rápido', phonetic: 'el PEH-rroh KOH-rreh RAH-pee-doh', translation: 'The dog runs fast', language: 'spanish', type: 'language', difficulty: 'medium' },
+    { id: 'es5', word: '¿Dónde está la playa?', phonetic: 'DOHN-deh es-TAH lah PLAH-yah', translation: 'Where is the beach?', language: 'spanish', type: 'language', difficulty: 'medium' },
+    { id: 'es6', word: 'Tres tristes tigres', phonetic: 'trehs TREES-tehs TEE-grehs', translation: 'Three sad tigers — the classic Spanish tongue twister', language: 'spanish', type: 'language', difficulty: 'hard' },
+  ],
+
+  french: [
+    { id: 'fr1', word: 'Merci beaucoup', phonetic: 'mehr-SEE boh-KOO', translation: 'Thank you very much', language: 'french', type: 'language', difficulty: 'easy' },
+    { id: 'fr2', word: 'Bonjour tout le monde', phonetic: 'bon-ZHOOR too luh MOND', translation: 'Hello everyone', language: 'french', type: 'language', difficulty: 'easy' },
+    { id: 'fr3', word: 'Un chat gris', phonetic: 'uhn shah GREE', translation: 'A grey cat', language: 'french', type: 'language', difficulty: 'medium' },
+    { id: 'fr4', word: 'Je voudrais un café', phonetic: 'zhuh voo-DREH uhn kah-FEH', translation: 'I would like a coffee', language: 'french', type: 'language', difficulty: 'medium' },
+    { id: 'fr5', word: 'À demain, bonne nuit', phonetic: 'ah duh-MAN, bun NWEE', translation: 'See you tomorrow, good night', language: 'french', type: 'language', difficulty: 'medium' },
+    { id: 'fr6', word: 'Les chaussettes de l\'archiduchesse', phonetic: 'lay shoh-SET duh lar-shee-doo-SHESS', translation: 'The archduchess\'s socks — a French tongue twister', language: 'french', type: 'language', difficulty: 'hard' },
+  ],
+
+  japanese: [
+    { id: 'ja1', word: 'ありがとう', phonetic: 'a-ri-ga-tou', translation: 'Thank you', language: 'japanese', type: 'language', difficulty: 'easy' },
+    { id: 'ja2', word: 'こんにちは', phonetic: 'kon-ni-chi-wa', translation: 'Hello / good afternoon', language: 'japanese', type: 'language', difficulty: 'easy' },
+    { id: 'ja3', word: 'すみません', phonetic: 'su-mi-ma-sen', translation: 'Excuse me / sorry', language: 'japanese', type: 'language', difficulty: 'medium' },
+    { id: 'ja4', word: 'いただきます', phonetic: 'i-ta-da-ki-ma-su', translation: 'Said before eating', language: 'japanese', type: 'language', difficulty: 'medium' },
+    { id: 'ja5', word: 'おはようございます', phonetic: 'o-ha-you go-za-i-ma-su', translation: 'Good morning (polite)', language: 'japanese', type: 'language', difficulty: 'medium' },
+    { id: 'ja6', word: '日本語を勉強しています', phonetic: 'ni-hon-go o ben-kyou shi-te i-ma-su', translation: 'I am studying Japanese', language: 'japanese', type: 'language', difficulty: 'hard' },
+  ],
+
+  korean: [
+    { id: 'ko1', word: '안녕하세요', phonetic: 'an-nyeong-ha-se-yo', translation: 'Hello', language: 'korean', type: 'language', difficulty: 'easy' },
+    { id: 'ko2', word: '감사합니다', phonetic: 'gam-sa-ham-ni-da', translation: 'Thank you', language: 'korean', type: 'language', difficulty: 'easy' },
+    { id: 'ko3', word: '맛있어요', phonetic: 'ma-si-sseo-yo', translation: 'It is delicious', language: 'korean', type: 'language', difficulty: 'medium' },
+    { id: 'ko4', word: '죄송합니다', phonetic: 'joe-song-ham-ni-da', translation: 'I am sorry', language: 'korean', type: 'language', difficulty: 'medium' },
+    { id: 'ko5', word: '만나서 반갑습니다', phonetic: 'man-na-seo ban-gap-seum-ni-da', translation: 'Nice to meet you', language: 'korean', type: 'language', difficulty: 'medium' },
+    { id: 'ko6', word: '한국어를 배우고 있어요', phonetic: 'han-gu-geo-reul bae-u-go i-sseo-yo', translation: 'I am learning Korean', language: 'korean', type: 'language', difficulty: 'hard' },
+  ],
+
   spelling_bee: [
     { id: 's1', word: 'ACCOMMODATE', phonetic: 'A C C O M M O D A T E', translation: 'To provide lodging or sufficient space for', language: 'english', type: 'language', difficulty: 'hard' },
     { id: 's2', word: 'EMBARRASS', phonetic: 'E M B A R R A S S', translation: 'To cause someone to feel awkward or ashamed', language: 'english', type: 'language', difficulty: 'hard' },

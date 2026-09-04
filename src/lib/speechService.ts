@@ -537,12 +537,24 @@ class SpeechRecognitionService {
   public evaluateMatch(transcript: string, target: string): { isMatch: boolean; score: number } {
     if (!transcript || !target) return { isMatch: false, score: 0 };
 
+    // Keeps letters and digits from every script, not just the Latin ones.
+    //
+    // This used to strip anything outside [a-z0-9\s], which quietly made two of
+    // the four offered languages unwinnable: Japanese and Korean reduce to an
+    // empty string under that rule, on the target *and* the transcript, and the
+    // next line then returns no-match. A perfect answer scored zero.
+    //
+    // Accents still go, via the NFD pass above: "rápido" and "rapido" should
+    // count as the same word from someone playing a party game on a phone.
+    // Marks are kept here because that pass has already removed the Latin ones;
+    // what is left is the likes of the Japanese dakuten, and dropping it turns
+    // が into か and makes the game deaf to voicing.
     const clean = (str: string) =>
       str
         .toLowerCase()
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '') // strip decomposed tone marks, e.g. E ku aale
-        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/[^\p{L}\p{N}\p{M}\s]/gu, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 

@@ -130,8 +130,8 @@ export default function BoardRoad({ width = 5.2, quiet = false }: BoardRoadProps
             the tiles standing on it — the colour belongs to the tiles, and the
             road only has to say "you may walk here". */}
         <linearGradient id="roadSurface" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#243056" />
-          <stop offset="100%" stopColor="#141c3a" />
+          <stop offset="0%" stopColor="#2f3d6b" />
+          <stop offset="100%" stopColor="#1b2549" />
         </linearGradient>
         <filter id="roadGlow" x="-30%" y="-30%" width="160%" height="160%">
           <feGaussianBlur stdDeviation="0.7" />

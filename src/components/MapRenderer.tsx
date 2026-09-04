@@ -10,6 +10,7 @@ import PlayerToken from './PlayerToken';
 import BoardCamera from './board/BoardCamera';
 import BoardProps from './board/BoardProps';
 import BoardRoad from './board/BoardRoad';
+import StepTile from './board/StepTile';
 import SpaceBackdrop from './board/SpaceBackdrop';
 
 /**
@@ -43,7 +44,7 @@ const WORLD_SIZE = 1500;
 
 /** Tile diameters as a fraction of the world, so zoom scales them with the road. */
 const EVENT_TILE = 0.046;
-const STEP_TILE = 0.0125;
+const STEP_TILE = 0.033;
 
 export default function MapRenderer({
   theme,
@@ -85,7 +86,7 @@ export default function MapRenderer({
       {/* Under the road on purpose: scenery frames the board, it never
           competes with the thing you are trying to read. */}
       <BoardProps quiet={peek} />
-      <BoardRoad width={peek ? 4.4 : 5.2} quiet={peek} />
+      <BoardRoad width={peek ? 4.4 : 5.6} quiet={peek} />
 
       {Object.values(BOARD_GRAPH).map((node) => {
         const isStep = node.type === 'empty';
@@ -96,17 +97,15 @@ export default function MapRenderer({
         return (
           <div
             key={node.id}
-            className="absolute -translate-x-1/2 -translate-y-1/2 z-10"
+            // Event tiles sit above plain spaces. Nodes render in id order and
+            // the steps are numbered after the tiles, so at equal depth every
+            // plain space painted over the coloured tile beside it — invisible
+            // while these were studs, obvious once they are full size.
+            className={`absolute -translate-x-1/2 -translate-y-1/2 ${isStep ? 'z-10' : 'z-20'}`}
             style={{ left: `${node.x}%`, top: `${node.y}%` }}
           >
             {isStep ? (
-              // A stepping pad, not a dot. These are real squares you can land
-              // on, and drawing them as 2px specks made the road look like a
-              // string of beads with the tiles floating off it.
-              <div
-                className="rounded-full bg-slate-300/55 border border-white/25 shadow-[0_1px_3px_rgba(0,0,0,0.45)]"
-                style={{ width: stepSize, height: stepSize }}
-              />
+              <StepTile size={stepSize} />
             ) : (
               <TileNode
                 index={node.id}

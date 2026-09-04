@@ -27,10 +27,56 @@ export type Landmark = {
   feather: number;
 };
 
+/**
+ * A prop that belongs to a *place* on the board rather than to the sky.
+ *
+ * Everything else in this file lives in the parallax backdrop, which drifts
+ * against the road by design — good for distance, useless for anything that has
+ * to stay put. The finish could never be more than a tile with a trophy on it
+ * while the station behind it slid away whenever the camera moved.
+ *
+ * These are positioned in the same 0..100 coordinates as the tiles and drawn
+ * inside the world, so they hold their ground next to the road.
+ */
+export type PropKind = 'rock' | 'crystal' | 'beacon' | 'shard';
+
+export type WorldProp = {
+  kind: PropKind;
+  x: number;
+  y: number;
+  /** Diameter in world units. */
+  size: number;
+  rot: number;
+  /** Deterministic shape variation, 0..1. */
+  seed: number;
+};
+
+/**
+ * A streak that crosses the sky now and then.
+ *
+ * Long durations and staggered delays on purpose: a comet every few seconds is
+ * a screensaver, and the board is something people have to read. These should
+ * be the thing you catch out of the corner of your eye while somebody else is
+ * taking their turn.
+ */
+export type Comet = {
+  /** Start point, in the same bled coordinates as the stars. */
+  x: number;
+  y: number;
+  /** Travel angle in degrees. */
+  angle: number;
+  /** Tail length in world units. */
+  length: number;
+  duration: number;
+  delay: number;
+  layer: Parallax;
+};
+
 export type Scenery = {
   stars: Star[];
   nebulae: Nebula[];
   debris: Debris[];
+  comets: Comet[];
   landmarks: Landmark[];
 };
 
@@ -112,6 +158,18 @@ export function buildSpaceScenery(seed = 20260903): Scenery {
     layer: r() > 0.6 ? 'near' : 'mid',
   }));
 
+  const comets: Comet[] = Array.from({ length: 5 }, (_, i) => ({
+    x: spread(r),
+    y: -SCENERY_BLEED + r() * 40,
+    // A narrow fan rather than any direction: comets that cross each other at
+    // random angles read as bugs rather than weather.
+    angle: 24 + r() * 26,
+    length: 9 + r() * 12,
+    duration: 16 + r() * 16,
+    delay: i * 7 + r() * 9,
+    layer: r() > 0.55 ? 'mid' : 'far',
+  }));
+
   // The painted assets. Positioned by hand around the road rather than
   // scattered, because these are the things the eye actually lands on — and the
   // old layout buried the finish tile under the space station.
@@ -122,14 +180,75 @@ export function buildSpaceScenery(seed = 20260903): Scenery {
     { src: '/images/asteroids.jpg',      x: 108, y: 78,  size: 24, rotate: 140, opacity: 0.6,  layer: 'mid',  feather: 54 },
     { src: '/images/satellite.jpg',      x: 4,   y: 24,  size: 15, rotate: -14, opacity: 0.85, layer: 'near', feather: 50 },
     { src: '/images/satellite.jpg',      x: 96,  y: 96,  size: 12, rotate: 165, opacity: 0.6,  layer: 'near', feather: 50 },
-    // Sits in open sky above the far turn. It used to be a 34-unit disc parked
-    // in the middle of the board, which washed straight over the tiles the
-    // inner fork runs through.
-    { src: '/images/space_station.jpg',  x: 70,  y: 6,   size: 21, rotate: 0,   opacity: 0.42, layer: 'mid',  feather: 55 },
   ];
 
-  return { stars, nebulae, debris, landmarks };
+  return { stars, nebulae, debris, comets, landmarks };
 }
+
+/**
+ * Scatters props over the board without burying the road.
+ *
+ * Rejection sampling against the graph itself: a candidate is thrown away if it
+ * lands near any node or too close to a prop already placed. Hand-placing them
+ * would mean re-placing them every time the layout is regenerated, and a plain
+ * random scatter drops rocks on top of the tiles.
+ */
+export function buildWorldProps(
+  nodes: { x: number; y: number }[],
+  seed = 991,
+  target = 46
+): WorldProp[] {
+  const r = rng(seed);
+  const props: WorldProp[] = [];
+
+  /** Clear of the road, and of the tiles' own glow. */
+  const ROAD_CLEARANCE = 7.5;
+  const PROP_CLEARANCE = 6;
+
+  const kinds: PropKind[] = ['rock', 'rock', 'crystal', 'shard', 'beacon'];
+
+  // Bounded rather than while(true): a board with nowhere left to stand should
+  // place fewer props, not spin.
+  for (let attempt = 0; attempt < target * 40 && props.length < target; attempt++) {
+    const x = -6 + r() * 112;
+    const y = -6 + r() * 112;
+
+    if (nodes.some((n) => Math.hypot(n.x - x, n.y - y) < ROAD_CLEARANCE)) continue;
+    if (props.some((p) => Math.hypot(p.x - x, p.y - y) < PROP_CLEARANCE)) continue;
+
+    const kind = kinds[Math.floor(r() * kinds.length)];
+    props.push({
+      kind,
+      x,
+      y,
+      // Kept well under a tile. Scenery the same size as the things you have
+      // to read pulls the eye off the board.
+      size: kind === 'beacon' ? 1.8 + r() * 0.9 : 1.6 + r() * 2.2,
+      rot: r() * 360,
+      seed: r(),
+    });
+  }
+
+  return props;
+}
+
+/**
+ * The two ends of the journey, anchored to the tiles they belong to.
+ *
+ * The station used to float in the backdrop at whatever coordinates kept it off
+ * the tiles, which meant the finish line and the thing you were travelling to
+ * were unrelated objects that happened to share a screen.
+ */
+export type WorldLandmark = {
+  src: string;
+  /** Board coordinates — usually a tile's. */
+  x: number;
+  y: number;
+  size: number;
+  opacity: number;
+  feather: number;
+  spin?: number;
+};
 
 /** How much each depth lags the camera. 1 = pinned to the road. */
 export const PARALLAX_FACTOR: Record<Parallax, number> = {

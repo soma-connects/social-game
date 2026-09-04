@@ -114,6 +114,30 @@ export default function SpaceBackdrop({ x, y, zoom, worldSize }: SpaceBackdropPr
               />
             ))}
 
+          {scenery.comets
+            .filter((c) => c.layer === layer)
+            .map((c, i) => (
+              <div
+                key={`comet-${layer}-${i}`}
+                className="absolute board-comet"
+                style={{
+                  left: `${pos(c.x)}%`,
+                  top: `${pos(c.y)}%`,
+                  width: `${(c.length / span) * 100}%`,
+                  height: 2,
+                  transformOrigin: 'left center',
+                  background:
+                    'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(186,230,253,0.7) 70%, rgba(255,255,255,0.95) 100%)',
+                  borderRadius: 999,
+                  // Rotation lives here and the keyframes only translate, so the
+                  // animation never has to know which way this one is pointing.
+                  ['--comet-angle' as string]: `${c.angle}deg`,
+                  animationDuration: `${c.duration}s`,
+                  animationDelay: `${c.delay}s`,
+                }}
+              />
+            ))}
+
           {scenery.debris
             .filter((d) => d.layer === layer)
             .map((d, i) => (

@@ -8,6 +8,7 @@ import { BOARD_GRAPH, FINISH_NODE, TOTAL_TILES } from '@/lib/gameRules';
 import TileNode from './TileNode';
 import PlayerToken from './PlayerToken';
 import BoardCamera from './board/BoardCamera';
+import BoardProps from './board/BoardProps';
 import BoardRoad from './board/BoardRoad';
 import SpaceBackdrop from './board/SpaceBackdrop';
 
@@ -81,6 +82,9 @@ export default function MapRenderer({
 
   const world = (
     <>
+      {/* Under the road on purpose: scenery frames the board, it never
+          competes with the thing you are trying to read. */}
+      <BoardProps quiet={peek} />
       <BoardRoad width={peek ? 4.4 : 5.2} quiet={peek} />
 
       {Object.values(BOARD_GRAPH).map((node) => {

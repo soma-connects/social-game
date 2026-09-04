@@ -146,3 +146,23 @@ body {
     animation: none;
   }
 }
+
+/* A comet crosses, then the track sits empty for most of the cycle — the pause
+   is what keeps this from reading as a screensaver behind the board. */
+@keyframes boardComet {
+  0%        { opacity: 0; transform: rotate(var(--comet-angle, 30deg)) translateX(0); }
+  4%        { opacity: 0.9; }
+  16%       { opacity: 0; transform: rotate(var(--comet-angle, 30deg)) translateX(360px); }
+  100%      { opacity: 0; transform: rotate(var(--comet-angle, 30deg)) translateX(360px); }
+}
+
+.board-comet {
+  animation-name: boardComet;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.9, 0.6);
+  animation-iteration-count: infinite;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-comet { animation: none; }
+}

@@ -672,6 +672,13 @@ export type RoomState = {
    * snapshot must not be able to disagree about who won Crowd Favourite.
    */
   awards?: import('./gameRules').Award[] | null;
+  /**
+   * Trivia questions already asked this room, newest last.
+   *
+   * The picker used to index at random into five questions with no memory, so a
+   * repeat was a one-in-five event every single round.
+   */
+  recentTrivia?: string[];
   /** Session memory — small structured events for Who Said It? and AI callbacks. */
   sessionMemory?: SessionMemoryEvent[];
 };

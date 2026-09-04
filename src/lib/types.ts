@@ -543,6 +543,13 @@ export type RoomState = {
   ludoState?: import('./ludo/ludoTypes').LudoRoomState | null;
   /** AI Master game state. */
   aiMasterState?: AiMasterState | null;
+  /**
+   * Trivia questions already asked this room, newest last.
+   *
+   * The picker used to index at random into five questions with no memory, so a
+   * repeat was a one-in-five event every single round.
+   */
+  recentTrivia?: string[];
   /** Session memory — small structured events for Who Said It? and AI callbacks. */
   sessionMemory?: SessionMemoryEvent[];
 };

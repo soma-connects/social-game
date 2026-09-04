@@ -144,6 +144,13 @@ export type RoomSecrets = {
   tokens: Record<string, string>;
   /** The trivia answer, kept back so the room cannot read it off the wire. */
   triviaAnswer?: string;
+  /**
+   * Every spoken form that counts, lowercased.
+   *
+   * Grading compared against a single string, so a question answered "1960"
+   * was marked wrong for anyone whose phone transcribed "nineteen sixty".
+   */
+  triviaAccepted?: string[];
   triviaFunFact?: string;
   /** Which Truth or Bluff claim was the lie, until the reveal. */
   lieIndex?: number | null;

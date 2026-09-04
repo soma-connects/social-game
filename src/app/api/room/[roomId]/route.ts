@@ -66,6 +66,8 @@ import {
   type RoomSecrets,
 } from '@/lib/server/roomServer';
 import { isPlayableTheme } from '@/lib/themeConfig';
+import { acceptedAnswers, pickTriviaQuestion, rememberTrivia } from '@/lib/triviaBank';
+import { generateTriviaFromAi } from '@/lib/server/aiHost';
 import {
   PERFORMER_PHASES,
   clearPhaseDeadline,
@@ -2038,20 +2040,45 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    /**
+     * Draws the next trivia question.
+     *
+     * Gemini first, the bank underneath. The bank never fails, costs nothing
+     * and works with no key configured, so it is the floor rather than the
+     * fallback of last resort; the model earns its place on the questions a
+     * committed file cannot hold, which is anything current.
+     *
+     * This used to call a function with five questions hardcoded in it behind a
+     * comment saying a real app would ask an AI, and a one-second sleep
+     * pretending one had been asked.
+     */
     case 'trivia_generate': {
       if (!room.triviaState) {
-        const trivia = await aiGameMaster.generateTriviaQuestion(room.theme);
+        const fromAi = await generateTriviaFromAi(roomVibeOf(room));
+
+        const banked = fromAi ? null : pickTriviaQuestion(room.recentTrivia);
+        const question = fromAi?.question ?? banked!.question;
+        const answer = fromAi?.answer ?? banked!.answer;
+        const accepted = fromAi
+          ? [answer, ...fromAi.accept].map((a) => a.toLowerCase().trim()).filter(Boolean)
+          : acceptedAnswers(banked!);
+        const funFact = fromAi?.funFact ?? banked!.funFact ?? '';
+
+        // Only what the room may see is remembered as asked. A Gemini question
+        // has no bank id and cannot repeat anyway.
+        if (banked) room.recentTrivia = rememberTrivia(room.recentTrivia, banked.id);
 
         // Only the question goes out. The answer stays server-side and grading
         // happens in `trivia_answer`, so it is never on the wire before the
         // reveal — it used to ride along in the same document as the question.
         const secrets = await readSecrets(roomId);
-        secrets.triviaAnswer = trivia.answer;
-        secrets.triviaFunFact = trivia.funFact;
+        secrets.triviaAnswer = answer;
+        secrets.triviaAccepted = accepted;
+        secrets.triviaFunFact = funFact;
         await writeSecrets(roomId, secrets);
 
         room.triviaState = {
-          question: trivia.question,
+          question,
           buzzedPlayerId: null,
           phase: 'asking',
           winnerId: null,
@@ -2074,6 +2101,8 @@ async function applyAction(
 
       const secrets = await readSecrets(roomId);
       const target = secrets.triviaAnswer ?? '';
+      // Older rooms stored only the one form; fall back to it.
+      const accepted = secrets.triviaAccepted?.length ? secrets.triviaAccepted : [target];
       const spoken = String(body.answerText ?? '');
 
       // Speech recognition hands back a whole sentence ("uh, I think it's
@@ -2083,12 +2112,17 @@ async function applyAction(
       const normalize = (text: string) =>
         text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
       const cleanSpoken = normalize(spoken);
-      const cleanTarget = normalize(target);
+      // Any accepted form counts. Grading compared against a single string, so
+      // a question whose answer is "1960" marked everyone wrong whose phone
+      // transcribed "nineteen sixty" — the same answer, said out loud.
       const isCorrect =
         cleanSpoken.length > 0 &&
-        cleanTarget.length > 0 &&
-        (cleanSpoken === cleanTarget ||
-          new RegExp(`\\b${cleanTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(cleanSpoken));
+        accepted.some((candidate) => {
+          const cleanTarget = normalize(candidate);
+          if (!cleanTarget) return false;
+          if (cleanSpoken === cleanTarget) return true;
+          return new RegExp(`\\b${cleanTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(cleanSpoken);
+        });
 
       state.phase = 'reveal';
       state.revealedAt = Date.now();

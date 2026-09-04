@@ -143,3 +143,68 @@ export async function generateChallenge(
     challenge: fallbackChallenge(category),
   };
 }
+
+
+/**
+ * Asks Gemini for a fresh trivia question.
+ *
+ * The bank in triviaBank.ts is the floor: it never fails, never costs an API
+ * call and works with no key configured. This is the layer on top, and it earns
+ * its place on exactly the questions a file cannot hold — anything current.
+ * A question about this year's events is out of date the week after it is
+ * committed, so those are asked at the moment of play or not at all.
+ *
+ * Returns null on anything unexpected, like askHost: a missing key, a rate
+ * limit, or a model that answers with prose instead of JSON should cost the
+ * room a question from the bank, never the round.
+ */
+export async function generateTriviaFromAi(
+  vibe: RoomVibeId,
+  topicHint?: string
+): Promise<{ question: string; answer: string; accept: string[]; funFact: string } | null> {
+  const topic = topicHint?.trim()
+    ? `The question must be about: ${topicHint.trim()}.`
+    : 'Pick any widely known topic. Favour Nigerian and West African general knowledge about half the time.';
+
+  const raw = await askHost(
+    vibe,
+    `Write ONE trivia question for a voice party game, and reply with nothing but JSON.
+
+${topic}
+
+The answer is SPOKEN into a phone and graded by fuzzy text match, so:
+- the answer must be at most three words
+- no multiple choice, no "all of the above"
+- include every form somebody might say it as, especially for years and numbers
+  (a recogniser returns "1960" from one phone and "nineteen sixty" from another)
+- nothing whose spelling a recogniser would have to guess at
+
+Reply exactly:
+{"question":"...","answer":"...","accept":["...","..."],"funFact":"..."}`
+  );
+  if (!raw) return null;
+
+  try {
+    // Models like to wrap JSON in a fenced block however firmly you ask.
+    const json = raw.replace(/```(?:json)?/gi, '').trim();
+    const start = json.indexOf('{');
+    const end = json.lastIndexOf('}');
+    if (start === -1 || end <= start) return null;
+
+    const parsed = JSON.parse(json.slice(start, end + 1));
+    const question = String(parsed.question ?? '').trim();
+    const answer = String(parsed.answer ?? '').trim();
+    if (!question || !answer) return null;
+    // A long answer cannot be said and matched reliably, whatever it was asked
+    // for — better to fall back to the bank than serve an unwinnable round.
+    if (answer.split(/\s+/).length > 4) return null;
+
+    const accept = Array.isArray(parsed.accept)
+      ? parsed.accept.map((a: unknown) => String(a).trim()).filter(Boolean).slice(0, 8)
+      : [];
+
+    return { question, answer, accept, funFact: String(parsed.funFact ?? '').trim() };
+  } catch {
+    return null;
+  }
+}

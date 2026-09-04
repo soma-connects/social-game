@@ -156,18 +156,38 @@ export const LANGUAGE_DECKS: Record<string, ChallengeWord[]> = {
   ],
 };
 
+/**
+ * A mental-arithmetic challenge for the Voice Arena.
+ *
+ * The prompt is the sum and the answer is kept separate. It used to put the
+ * whole equation in `word` — "37 + 12 = 49" — and the arena prints `word` on
+ * screen, so the player was shown the answer and asked to read it out. The
+ * `translation` line then said "Say the answer clearly: 49" underneath, in case
+ * they missed it.
+ *
+ * Subtraction never goes negative: "say minus fourteen" is a speech-recognition
+ * problem, not a maths one.
+ */
 export function getRandomMathProblem(): ChallengeWord {
-  const num1 = Math.floor(Math.random() * 50) + 10;
-  const num2 = Math.floor(Math.random() * 40) + 5;
   const isPlus = Math.random() > 0.5;
+  const num1 = Math.floor(Math.random() * 50) + 10;
+  let num2 = isPlus
+    ? Math.floor(Math.random() * 40) + 5
+    : Math.floor(Math.random() * (num1 - 1)) + 1;
+
+  // An exact halving prints its own answer: "56 − 28" already has 28 on screen,
+  // and a player who spots the pattern never has to do the sum. About one in a
+  // hundred otherwise.
+  if (!isPlus && num1 === num2 * 2) num2 -= 1;
+
   const ans = isPlus ? num1 + num2 : num1 - num2;
-  const expr = isPlus ? `${num1} + ${num2}` : `${num1} - ${num2}`;
+  const expr = `${num1} ${isPlus ? '+' : '−'} ${num2}`;
 
   return {
-    id: `math_${Date.now()}`,
-    word: `${expr} = ${ans}`,
-    phonetic: `Calculate ${expr}`,
-    translation: `Say the answer clearly: ${ans}`,
+    id: `math_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    word: expr,
+    answer: String(ans),
+    phonetic: 'Say the answer out loud',
     language: 'math',
     type: 'math',
     difficulty: 'medium',

@@ -83,7 +83,16 @@ export type ChallengeType = 'language' | 'math' | 'trap';
 
 export type ChallengeWord = {
   id: string;
+  /** What the player is shown and asked to say. */
   word: string;
+  /**
+   * What counts as a correct spoken response, when that is not the prompt.
+   *
+   * A pronunciation challenge is its own answer — you are shown a word and you
+   * say it. A maths problem is not: showing "37 + 12 = 49" and asking for the
+   * answer prints the answer on screen, which is the state maths was left in.
+   */
+  answer?: string;
   phonetic?: string;
   translation?: string;
   language: LanguageCode | 'math' | 'trap';
@@ -141,7 +150,6 @@ export type GamePhase =
   | 'powerup_shop'
   | 'roadmap_turn'
   | 'branch_choice'
-  | 'duel_challenge'
   | 'peer_dare'
   | 'pitch_bird'
   | 'solfege'
@@ -432,7 +440,6 @@ export type RoomState = {
   selectedLanguages: LanguageCode[];
   mathEnabled: boolean;
   trapWords: TrapWord[];
-  currentChallenge: ChallengeWord | null;
   turnTimeLimit: number;
   currentDare: {
     dareText: string;

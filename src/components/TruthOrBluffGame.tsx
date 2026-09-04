@@ -172,7 +172,11 @@ export default function TruthOrBluffGame({
           action: 'truth_bluff_submit_claims',
           playerId: myPlayer.id,
           claims: [claim1, claim2],
-          lieIndex: selectedLieIndex
+          lieIndex: selectedLieIndex,
+          // Sent because the round reads it back out of room state to show the
+          // whole room. It never was, so every round displayed the literal
+          // words "Truth or Bluff" instead of the prompt just drawn.
+          prompt: promptText,
         });
     } catch (e) {
       console.error(e);

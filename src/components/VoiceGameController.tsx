@@ -11,8 +11,8 @@ import {
   ArrowRight,
   Gavel,
 } from 'lucide-react';
-import { ChallengeWord, Player, RoomState } from '@/lib/types';
-import { LANGUAGE_DECKS, PIDGIN_FEEDBACK } from '@/lib/gameContent';
+import { ChallengeWord, LanguageCode, Player, RoomState } from '@/lib/types';
+import { LANGUAGE_DECKS, PIDGIN_FEEDBACK, getRandomMathProblem } from '@/lib/gameContent';
 import { audioSFX } from '@/lib/audioFeedback';
 import {
   speechEngine,
@@ -92,15 +92,32 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
       return;
     }
 
-    // Only languages we actually have a deck for â€” a selection can still name
+    // Only languages we actually have a deck for — a selection can still name
     // one that has been parked (Hausa, Yoruba) or has no deck at all.
     const playable = room.selectedLanguages.filter((lang) => LANGUAGE_DECKS[lang]?.length);
     const availableLangs = playable.length > 0 ? playable : ['english'];
-    const chosenLang = availableLangs[Math.floor(Math.random() * availableLangs.length)];
-    const deck = LANGUAGE_DECKS[chosenLang] ?? LANGUAGE_DECKS.english;
+
+    // Maths is drawn against the languages rather than layered on top of them,
+    // so the host's toggle behaves like one more thing in the pot rather than
+    // taking over the arena.
+    //
+    // Until now nothing read `mathEnabled` at all: the lobby wrote it to the
+    // room and the picker never looked, so switching Maths on changed nothing
+    // and getRandomMathProblem was never called from anywhere.
+    const sources: ('math' | LanguageCode)[] = room.mathEnabled
+      ? ['math', ...(availableLangs as LanguageCode[])]
+      : (availableLangs as LanguageCode[]);
+    const chosen = sources[Math.floor(Math.random() * sources.length)];
+
+    if (chosen === 'math') {
+      setChallenge(getRandomMathProblem());
+      return;
+    }
+
+    const deck = LANGUAGE_DECKS[chosen] ?? LANGUAGE_DECKS.english;
     setChallenge(deck[Math.floor(Math.random() * deck.length)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room.roomId]);
+  }, [room.roomId, room.mathEnabled]);
 
   // New turn: reset the arena completely.
   useEffect(() => {
@@ -165,7 +182,9 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
       return;
     }
 
-    const target = challenge.type === 'math' ? challenge.word.split('=')[1].trim() : challenge.word;
+    // A pronunciation challenge is its own answer; maths carries a separate
+    // one, so the prompt on screen is the sum rather than the sum and its result.
+    const target = challenge.answer ?? challenge.word;
 
     let startFailed = false;
     const session = speechEngine.listenForSpeech({
@@ -220,7 +239,9 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     if (!challenge || status !== 'listening') return;
     micStream.setSpeechPriority(true);
     sessionRef.current?.stop();
-    const target = challenge.type === 'math' ? challenge.word.split('=')[1].trim() : challenge.word;
+    // A pronunciation challenge is its own answer; maths carries a separate
+    // one, so the prompt on screen is the sum rather than the sum and its result.
+    const target = challenge.answer ?? challenge.word;
     sessionRef.current = speechEngine.listenForSpeech({
       targetWord: target,
       language: challenge.language,
@@ -362,7 +383,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
               </p>
             )}
 
-            {challenge.translation && (
+            {challenge.translation && challenge.type !== 'math' && (
               <p className="text-xs sm:text-sm text-gray-400">Meaning: {challenge.translation}</p>
             )}
 

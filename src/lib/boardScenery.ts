@@ -232,24 +232,6 @@ export function buildWorldProps(
   return props;
 }
 
-/**
- * The two ends of the journey, anchored to the tiles they belong to.
- *
- * The station used to float in the backdrop at whatever coordinates kept it off
- * the tiles, which meant the finish line and the thing you were travelling to
- * were unrelated objects that happened to share a screen.
- */
-export type WorldLandmark = {
-  src: string;
-  /** Board coordinates — usually a tile's. */
-  x: number;
-  y: number;
-  size: number;
-  opacity: number;
-  feather: number;
-  spin?: number;
-};
-
 /** How much each depth lags the camera. 1 = pinned to the road. */
 export const PARALLAX_FACTOR: Record<Parallax, number> = {
   far: 0.25,

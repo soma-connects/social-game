@@ -420,3 +420,450 @@ Worth knowing before you start generating:
 - **Every tile and power-up icon is an emoji string.** They render differently on
   Android, iOS and Windows — the game looks like a different product on each. §A and §B
   are the fix, and step 4.5 above is how to land it without a big-bang rewrite.
+
+---
+
+# PART TWO — Emoji → real art: the complete replacement set
+
+An audit of `src/` found **114 distinct emoji in 405 places**. They are not all the
+same kind of thing, and that decides how each one gets replaced:
+
+| Group | What it is | How to replace it | Count |
+| --- | --- | --- | --- |
+| **A. Game iconography** | Data-driven icons in arrays — tiles, power-ups, modes, vibes, dares | **Generated PNG art** — §6 below | ~90 slots |
+| **B. UI chrome** | Functional controls — mic, mute, settings, lock, tick, cross, back | **A vector icon library, not AI art** — §7 | ~20 slots |
+| **C. Inline text** | Emoji inside sentences: event-log lines, AI-host chatter, coaching labels | **Leave as emoji** — §8 | ~250 uses |
+
+Getting this split right matters more than the art itself. Generating a raster
+"settings gear" is strictly worse than an SVG one — it blurs when scaled, it can't
+inherit colour on hover, and it costs a network request. And turning
+`"🔥 Sammy is on a roll!"` into an image breaks screen readers and copy-paste for no
+gain. **Generate art for things that carry game identity; use vectors for controls;
+leave prose alone.**
+
+---
+
+## 6. Group A — the generation sheets
+
+Nine sheets, ~90 icons. Each one is a single Gemini prompt producing a grid you slice.
+Prompts assume the Style Block from §1 is pasted above them — that's what keeps sheet 9
+looking like sheet 1.
+
+Sheets 1 and 2 are already written up as **§A (power-ups)** and **§B (board tile types)**
+above. Here are the other seven.
+
+---
+
+### Sheet 3 — Journey tiles  →  `public/tiles/journey/*.png`, 256×256
+
+Source: `TILE_ICONS` in `src/lib/boardGraph.ts` (10 icons). These mark what a space on
+the road *does*, so each needs an instantly readable silhouette. Glyph only — the CSS
+draws the coloured disc behind it.
+
+```
+[STYLE BLOCK]
+
+Generate ONE image: a 5-column × 2-row grid of ten game-board space markers on a single
+canvas, evenly spaced, identical scale, identical lighting, each centred in its own
+invisible square cell. SYMBOLS ONLY — do not draw a circle, disc, plate or badge behind
+any of them.
+
+1.  MINIGAME    — a stage microphone with two curved sound waves, gold #FFD166 body,
+                  cyan #00F0FF waves.
+2.  AI CHALLENGE— a friendly robot head, rounded navy #0B132B casing, single wide cyan
+                  #00F0FF visor, small gold antenna.
+3.  TREASURE    — a cut gemstone, brilliant facets, cyan #00F0FF core with gold rim light.
+4.  TRAP        — a steel bear-trap seen from above, jaws sprung open, terracotta
+                  #FF5722 teeth, faint red danger glow.
+5.  MYSTERY     — a bold rounded question mark, glossy gold #FFD166, one small sparkle.
+6.  SHOP        — a market stall awning with gold and navy stripes above a small counter,
+                  warm gold light underneath.
+7.  SPLIT ROUTE — a road forking into two glowing paths, seen in perspective, emerald
+                  #10B981 left branch and hot pink #FF4757 right branch.
+8.  TELEPORT    — a swirling spiral vortex seen face-on, cyan #00F0FF outer arms winding
+                  into a bright white core.
+9.  VOLCANO     — a small erupting volcano cone, terracotta #FF5722 lava, ember sparks.
+10. FINISH      — a victory trophy cup with handles, thick gold #FFD166, star on the bowl,
+                  soft golden glow.
+
+Background: transparent, or pure #000000 flat black.
+Bold silhouettes, must read at 24×24 px. No text, no letters, no numbers.
+Output 2560×1024.
+```
+
+Slice → `minigame.png`, `ai_challenge.png`, `treasure.png`, `trap.png`, `mystery.png`,
+`shop.png`, `split_route.png`, `teleport.png`, `volcano.png`, `finish.png`.
+
+---
+
+### Sheet 4 — Tile event bursts  →  `public/events/*.png`, 512×512
+
+Source: `EVENT_STYLES` in `src/components/TileEventOverlay.tsx` (12 icons). These fire
+as a big animated overlay when you land on something, so unlike the tile glyphs they
+**should** be dramatic — energy, motion, impact.
+
+```
+[STYLE BLOCK]
+
+Generate ONE image: a 4-column × 3-row grid of twelve dramatic game-event icons on a
+single canvas, identical scale and lighting, each centred in its own invisible square
+cell. These are impact moments — give each one motion, energy and glow, but keep the
+silhouette clean.
+
+1.  WORMHOLE     — a violet-and-indigo spiral tunnel viewed head-on, receding rings,
+                   bright core.
+2.  ASTEROID     — a burning meteor streaking diagonally, terracotta #FF5722 fire trail.
+3.  SHIELD BLOCK — a gold kite shield with a cyan energy dome flaring on impact, small
+                   deflection sparks at the point of contact.
+4.  SHIELD GAIN  — a satellite with gold foil body and cyan solar panels, beaming a soft
+                   protective cone of light downward.
+5.  SHIELD UP    — the same gold kite shield rising, calm steady emerald #10B981 aura,
+                   no impact sparks.
+6.  SUPPLY DROP  — a wooden crate under a small gold parachute, drifting down.
+7.  DARE         — a stage microphone in a hot pink #FF4757 spotlight cone, sound rings
+                   radiating outward.
+8.  DUEL         — two crossed sabres clashing, spark burst at the crossing point,
+                   terracotta and gold.
+9.  FINISH       — a gold trophy erupting with confetti and light rays.
+10. BOOST        — a rocket climbing steeply, cyan #00F0FF flame, speed streaks behind.
+11. FREEZE       — a large crystalline snowflake with ice shards spreading from it,
+                   cyan #00F0FF, cold vapour.
+12. BOMB         — a black cartoon bomb mid-detonation, hot pink #FF4757 blast ring
+                   bursting outward from it.
+
+Background: transparent, or pure #000000 flat black.
+No text, no letters, no numbers. Output 2048×1536.
+```
+
+Slice → `wormhole.png`, `asteroid.png`, `shield_block.png`, `shield_gain.png`,
+`shield_up.png`, `supply_drop.png`, `dare.png`, `duel.png`, `finish.png`, `boost.png`,
+`freeze.png`, `bomb.png`.
+
+---
+
+### Sheet 5 — Dare styles  →  `public/dares/*.png`, 256×256
+
+Source: `DARE_STYLES` in `src/lib/gameContent.ts` (8 icons). These are the performance
+styles a player can be forced into — the funniest part of the game, so let the art be
+funny too.
+
+```
+[STYLE BLOCK]
+
+Generate ONE image: a 4×2 grid of eight comedic performance-style icons on a single
+canvas, identical scale and lighting, each centred in its own invisible square cell.
+Playful and expressive, slightly exaggerated, like party-game category badges.
+
+1. SING IT              — a microphone with musical notes spiralling up out of it, gold
+                          and cyan.
+2. ACCENT CHALLENGE     — a speech bubble with a mouth and stylised sound waves inside,
+                          hot pink #FF4757 outline.
+3. DRAMATIC READING     — twin theatre masks, one gold, one navy, slightly overlapping.
+4. WHISPER MODE         — a hand cupped beside an open mouth, tiny quiet sound wisps,
+                          muted cyan.
+5. TONGUE TWISTER       — a lightning bolt striking through a curled tongue shape, gold
+                          #FFD166 bolt, pink tongue.
+6. ANGRY MARKET WOMAN   — a woven market basket with produce, an emphatic pointing hand
+                          beside it, warm terracotta #FF5722.
+7. NEWS REPORTER        — a boxy retro TV set with a handheld reporter's mic in front of
+                          it, cyan screen glow.
+8. NOLLYWOOD CRYING     — a single dramatic teardrop with a film-clapperboard corner
+                          behind it, deep navy and gold.
+
+Background: transparent, or pure #000000 flat black.
+Must read at 32×32 px. No text, no letters, no numbers, no faces with realistic detail.
+Output 2048×1024.
+```
+
+Slice → `sing.png`, `accent.png`, `dramatic.png`, `whisper.png`, `twister.png`,
+`market.png`, `news.png`, `crying.png`.
+
+---
+
+### Sheet 6 — Room vibes  →  `public/vibes/*.png`, 512×512
+
+Source: `ROOM_VIBES` in `src/lib/roomVibes.ts` (5). These set the tone of a whole room,
+so they can be richer than a flat glyph — small scenes, badge-like.
+
+```
+[STYLE BLOCK]
+
+Generate ONE image: a 5-column × 1-row strip of five room-mood badges on a single
+canvas, identical scale and lighting, each centred in its own invisible square cell.
+Each is a small glossy emblem, richer than a flat icon but still a single clear shape.
+
+1. CLASSIC PARTY       — a party popper bursting with gold #FFD166 and cyan confetti.
+2. GETTING TO KNOW YOU — two overlapping speech bubbles with a small warm gold heart
+                         where they meet.
+3. BROS HANGOUT        — two beer bottles clinking, amber glass, gold highlights, small
+                         impact sparkle.
+4. ANIME SQUAD         — a stylised narutomaki fish-cake swirl, pink and white, with two
+                         small anime-style sparkle stars beside it.
+5. FLIRTY & WILD       — a stylised flame with a subtle heart shape inside it, hot pink
+                         #FF4757 into gold gradient.
+
+Background: transparent, or pure #000000 flat black.
+No text, no letters, no numbers. Output 2560×512.
+```
+
+Slice → `classic_party.png`, `getting_to_know.png`, `bros_hangout.png`,
+`anime_squad.png`, `flirty_wild.png`.
+
+---
+
+### Sheet 7 — Role badges  →  `public/badges/*.png`, 256×256
+
+Source: the `role` / `emoji` fields on `AVATARS` in `src/lib/gameContent.ts` (6 distinct
+roles across 8 characters). These sit on the avatar card's gold corner disc — so this
+time, **do** draw the disc, matching the badge already on `public/avatars/paul.jpg`.
+
+```
+[STYLE BLOCK]
+[UPLOAD public/avatars/paul.jpg — "match the small gold corner badge in this image"]
+
+Generate ONE image: a 3×2 grid of six circular character-role badges on a single canvas,
+identical size and lighting. Each is a gold #FFD166 circular medallion with a subtle
+raised rim and a dark navy #0B132B emblem inset in the centre — matching the badge in
+the reference image.
+
+1. LEADER      — a five-point crown.
+2. DEFENDER    — a kite shield.
+3. SPEEDSTER   — a rocket tilted 45°.
+4. STRATEGIST  — a target with an arrow in the bullseye.
+5. SUPPORT     — a five-point star.
+6. PLAYMAKER   — a running figure in motion.
+
+Emblems must be simple, solid and readable at 20×20 px.
+Background: transparent, or pure #000000 flat black.
+No text, no letters, no numbers. Output 1536×1024.
+```
+
+Slice → `leader.png`, `defender.png`, `speedster.png`, `strategist.png`, `support.png`,
+`playmaker.png`.
+
+---
+
+### Sheet 8 — Game mode cards  →  `public/modes/*.png`, 512×512
+
+Source: the mode tiles in `src/components/RoomLobby.tsx` (lines ~480–710). These are the
+biggest buttons on the lobby screen — the first thing a new player sees — so they get
+the most visual weight of any icon in the game.
+
+```
+[STYLE BLOCK]
+
+Generate ONE image: a 4-column × 2-row grid of seven bold game-mode emblems on a single
+canvas, identical scale and lighting, each centred in its own invisible square cell.
+Leave the 8th cell empty. These are large hero icons for big tappable menu cards —
+chunky, confident, high contrast.
+
+1. ROADMAP BOARD  — a pair of gold #FFD166 dice resting on a winding neon board path
+                    that recedes into the distance.
+2. VOICE ARENA    — a gold stage microphone inside a ring of cyan #00F0FF sound waves.
+3. PARTY MODE     — two beer bottles clinking amid gold confetti and a burst of light.
+4. AI MASTER      — a robot head with a cyan #00F0FF visor wearing a small gold crown.
+5. TEAM BATTLE    — two crossed sabres over a split shield, one half red #EF4444, the
+                    other half sky blue #38BDF8.
+6. CHESS          — a chess knight in profile, glossy navy #0B132B with gold rim light.
+7. LUDO           — four ludo tokens in red, blue, emerald and gold arranged around a
+                    single die.
+
+Background: transparent, or pure #000000 flat black.
+Must read at 64×64 px. No text, no letters, no numbers. Output 2048×1024.
+```
+
+Slice → `board.png`, `voice.png`, `party.png`, `ai_master.png`, `team_battle.png`,
+`chess.png`, `ludo.png`.
+
+---
+
+### Sheet 9 — Soundboard, reactions & AI Master rounds  →  `public/social/*.png`, 256×256
+
+Sources: `SOUNDBOARD` + `REACTIONS` in `src/components/RoastIntermission.tsx` and the
+round-type labels in `src/components/AiMasterGame.tsx` (15 icons). The soundboard six
+are deliberately Nigerian — keep that; it's the personality of the room.
+
+```
+[STYLE BLOCK]
+
+Generate ONE image: a 5-column × 3-row grid of fifteen small social-interaction icons on
+a single canvas, identical scale and lighting, each centred in its own invisible square
+cell.
+
+Row 1 — SOUNDBOARD (Nigerian street sounds):
+ 1. DANFO HORN      — a bus air-horn, chrome and gold, sound bursts from the mouth.
+ 2. GENERATOR REV   — a small portable generator, terracotta #FF5722 body, exhaust puff.
+ 3. VENDOR BELL     — a hand bell mid-swing, brass, motion arcs on both sides.
+ 4. NOLLYWOOD BRASS — a brass trumpet angled up, gold, three musical notes leaving it.
+ 5. CHOI CHIME      — a four-point sparkle with a small chime bar behind it, cyan.
+
+Row 2 — REACTIONS:
+ 6. LAUGH   — a rounded speech bubble with a wide laughing mouth and a tear of laughter.
+ 7. FIRE    — a clean stylised flame, hot pink #FF4757 into gold #FFD166.
+ 8. APPLAUD — two hands clapping with small impact lines, warm gold.
+ 9. DRAMA   — a single theatre mask tilted, gold face, navy features.
+10. ALARM   — a rotating warning beacon, red dome, light beams sweeping out.
+
+Row 3 — AI MASTER ROUNDS:
+11. TRUTH   — a hand over a mouth, wide eye above it, cyan #00F0FF accent.
+12. DARE    — twin theatre masks with a small lightning bolt between them.
+13. TRIVIA  — a stylised brain made of glowing circuit lines, cyan on navy.
+14. STORY   — an open book with a ribbon of light rising from the pages, gold.
+15. BRIBE   — two hands shaking, gold coin glinting above the handshake.
+
+Background: transparent, or pure #000000 flat black.
+Must read at 28×28 px. No text, no letters, no numbers. Output 2560×1536.
+```
+
+Slice → `horn.png`, `gen.png`, `bell.png`, `brass.png`, `choi.png`, `laugh.png`,
+`fire.png`, `almost.png`, `drama.png`, `whaala.png`, `truth.png`, `dare.png`,
+`trivia.png`, `story.png`, `bribe.png`.
+
+---
+
+### Sheet 10 — Theme selector icons  →  `public/themes/icons/*.png`, 256×256
+
+Source: the `icon` field on each theme in `src/lib/themeConfig.ts` (7). Small circular
+world-emblems for the theme picker.
+
+```
+[STYLE BLOCK]
+
+Generate ONE image: a 4×2 grid of seven circular world emblems on a single canvas,
+identical size and lighting. Leave the 8th cell empty. Each is a small round scene
+medallion — a landscape vignette inside a soft circular vignette, no hard border ring.
+
+1. MAGIC FOREST    — glowing emerald pines with a floating firefly.
+2. NAIJA VILLAGE   — a thatched round hut beside a palm tree at golden dusk.
+3. SAHARA DESERT   — moonlit dunes with a lone cactus silhouette.
+4. ARCTIC SNOW     — a snow-capped peak under a cyan aurora ribbon.
+5. VOLCANO LAVA    — an erupting cone with glowing terracotta #FF5722 lava.
+6. GALACTIC VOYAGE — a ringed planet against a starfield.
+7. NEON CYBERPUNK  — a neon city skyline in hot pink #FF4757 and cyan #00F0FF.
+
+Background: transparent, or pure #000000 flat black.
+Must read at 32×32 px. No text, no letters, no numbers. Output 2048×1024.
+```
+
+Slice → `forest.png`, `village.png`, `desert.png`, `snow.png`, `volcano.png`,
+`space.png`, `cyberpunk.png`.
+
+---
+
+### Sheet 11 (optional) — Per-theme landmark scatter  →  `public/themes/<theme>/*.png`
+
+Source: the `landmarks` object per theme in `themeConfig.ts` — `trees`, `water`,
+`hills`, `special`, scattered as decoration across the board. Six themes × 4 = 24 pieces.
+Lowest priority: they're background dressing, and the `space` theme already uses real
+images for this. Run this once per theme, substituting the four subjects:
+
+```
+[STYLE BLOCK]
+
+Generate ONE image: a 4×1 strip of four board-decoration props for the [THEME NAME]
+theme, identical scale and lighting, each centred in its own invisible square cell.
+Small isometric 3/4 scenery pieces that will be scattered across a game board.
+
+Subjects: [TREES], [WATER], [HILLS], [SPECIAL]
+
+  forest    → glowing pine tree | a rushing stream bend | a mossy rock outcrop | a cluster of glowing mushrooms
+  village   → a tall palm tree  | a reed-lined river bend | a thatched round hut | a gold chief's crown on a cushion
+  desert    → a saguaro cactus  | a resting camel        | a sand dune ridge     | a blazing low sun
+  snow      → a snow-laden pine | a floating ice floe    | a jagged ice peak     | a snowman with a scarf
+  volcano   → a charred bare tree | a lava flow bend     | a cracked basalt boulder | an ember burst
+  cyberpunk → a neon signage tower | an electric arc conduit | a rooftop block cluster | a small service robot
+
+Background: transparent, or pure #000000 flat black.
+No text, no letters, no numbers. Output 2048×512.
+```
+
+---
+
+## 7. Group B — UI chrome: use vectors, do NOT generate these
+
+These emoji are **controls**, not art: mic on/off, mute, settings, lock, tick, cross,
+back, leave, copy, search, user, users, flag, refresh, plug, bell, lightbulb, coin,
+compass, medal. Found across `GameHeader.tsx`, `VoiceCallBar.tsx`, `LeftSidebar.tsx`,
+`RoomLobby.tsx`, `AiMasterGame.tsx`, `ChessGame.tsx`, `page.tsx`.
+
+Generating them as PNGs would be a mistake: a control icon has to stay razor-sharp at
+16 px, flip colour on hover and focus, respond to `currentColor`, and never cost an HTTP
+request. Raster art does none of that. Install a vector set instead:
+
+```bash
+npm install lucide-react
+```
+
+Then the mapping is direct:
+
+| Emoji | Where | lucide-react |
+| --- | --- | --- |
+| 🎙️ 🎤 | mic button, header | `Mic` |
+| 📴 🚫 | muted state | `MicOff` |
+| 🔊 | soundboard / volume | `Volume2` |
+| 🔒 | locked mode card | `Lock` |
+| ✅ | survived / confirm | `Check` / `CircleCheck` |
+| ❌ | failed / dismiss | `X` / `CircleX` |
+| 🔄 | rematch / retry | `RotateCw` |
+| 👋 | leave room | `LogOut` |
+| 🔌 | disconnected | `Unplug` |
+| 👤 👥 | player / team count | `User` / `Users` |
+| 🏳️ | resign | `Flag` |
+| 🥇 🏆 | winner (in UI chrome) | `Trophy` |
+| 🧭 | navigation / map legend | `Compass` |
+| 💡 | tip line | `Lightbulb` |
+| 💬 | chat | `MessageCircle` |
+| 🔍 | search / spectate | `Search` |
+| 💸 | cost / price | `Coins` |
+| 🔔 | notification | `Bell` |
+| → ↑ ⬆ ⬇ | arrows in labels | `ArrowRight` / `ArrowUp` / `ArrowDown` |
+
+They inherit Tailwind colour classes directly: `<Mic className="w-5 h-5 text-partyYellow" />`.
+
+---
+
+## 8. Group C — leave these alone
+
+Roughly 250 of the 405 uses are emoji **inside sentences**:
+
+- `src/app/api/room/[roomId]/route.ts` (87) — event-log lines like
+  `🔥 ${name} is on a roll!`
+- `src/lib/aiGameMaster.ts` (26) — AI host banter
+- `src/components/PitchBirdCanvas.tsx` (16) — canvas coaching labels
+  (`RAISE VOICE ⬆️`), drawn with `ctx.fillText`
+- WhatsApp invite text, section headings, mode blurbs
+
+Converting these to images would cost you: screen readers lose them, users can't copy
+the text, WhatsApp invites break, and `ctx.fillText` can't draw a PNG anyway. Emoji are
+the right tool for text-flow decoration. **Leave them.**
+
+---
+
+## 9. Suggested order of work
+
+You do not need all nine sheets before shipping anything. Highest visual return first:
+
+1. **Sheet 8 — mode cards.** Biggest elements on the first screen a new player sees.
+2. **§B — tile types** and **Sheet 3 — journey tiles.** The board is the game; this is
+   where cross-platform emoji drift is most obvious.
+3. **§A — power-ups.** Shown large in the shop and the inventory rail.
+4. **Sheet 4 — event bursts.** Full-screen moments, so a low-quality emoji reads worst here.
+5. **Sheet 7 — role badges** and **Sheet 6 — vibes.** Small, but they sell the identity.
+6. **Sheets 5, 9, 10, 11.** Polish.
+
+Do Group B (§7 lucide) in one pass whenever you like — it's a dependency install and a
+find-replace, no art needed, and it makes the interface look tidier on its own.
+
+---
+
+## 10. Two inconsistencies worth fixing while you're in there
+
+- **`solfege` is called two different things.** `RoomLobby.tsx` labels it *"Karaoke"*,
+  `TeamBattleGameSelect.tsx` labels it *"Solfege"*, and the two files keep separate
+  hard-coded game lists that have already drifted apart (the lobby list is missing
+  `story_builder`, `debate` and `guess_the_voice`). One shared `MINI_GAMES` array in
+  `src/lib/gameContent.ts` — id, label, blurb, icon, image — would fix the drift and give
+  every sheet above a single place to land.
+- **Two `🎯 STRATEGIST`s and two shield-badge roles.** Samuel and Chibuzor share
+  Strategist; Chibuike is `🛡️ DEFENDER` while Emeka is `🛡️ PLAYMAKER` (mismatched emoji
+  and label). Worth deciding whether roles are unique before art is drawn for them.

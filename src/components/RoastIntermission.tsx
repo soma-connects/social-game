@@ -23,7 +23,7 @@ import {
 import { Player, RoomState, SocialReactionId } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
-import { MINIGAME_FAIL_THRESHOLD, STARTING_LIVES, heatTier } from '@/lib/gameRules';
+import { HEAT_TIERS, MINIGAME_FAIL_THRESHOLD, STARTING_LIVES, heatTier } from '@/lib/gameRules';
 import { VoiceClip } from '@/hooks/useVoiceRecorder';
 import AvatarIllustration from './AvatarIllustration';
 import VoiceReplay from './VoiceReplay';
@@ -113,6 +113,28 @@ export default function RoastIntermission({
 
     return () => clearInterval(interval);
   }, [activePlayer.id, isPerformer]);
+
+  // Punctuate the streak, once per performer.
+  //
+  // Plays for the whole room rather than only the performer: a streak is
+  // something the others are watching build, and the moment it breaks is worth
+  // more with everybody hearing it at once. Keyed on the performer so a
+  // re-render, or a snapshot arriving on the poll, cannot retrigger it.
+  const streakSoundKey = useRef<string | null>(null);
+  useEffect(() => {
+    const streak = activePlayer.streak ?? 0;
+    const key = `${activePlayer.id}:${streak}`;
+    if (streakSoundKey.current === key) return;
+    streakSoundKey.current = key;
+
+    const tier = heatTier(streak);
+    if (tier.multiplier > 1) {
+      // 1-based index over the paying tiers, so each one sounds a step bigger.
+      audioSFX.playStreakUp(HEAT_TIERS.filter((t) => t.multiplier > 1).indexOf(tier) + 1);
+    } else if (streak === 0 && (activePlayer.bestStreak ?? 0) >= 2) {
+      audioSFX.playStreakLost();
+    }
+  }, [activePlayer.id, activePlayer.streak, activePlayer.bestStreak]);
 
   const triggerSound = (action: () => void) => {
     action();

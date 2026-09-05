@@ -290,6 +290,18 @@ export type AiMasterState = {
   grudgeId?: string | null;
   bribes?: AiMasterBribe[];
   revealedAt?: number;
+  /**
+   * Epoch ms by which this beat of the round has to have moved on.
+   *
+   * The AI Master had no clock anywhere — not on the client, not on the server,
+   * and its phase was not covered by the board's phase deadline either. A target
+   * who put their phone down while still heartbeating stopped the match, and the
+   * only way out was the host forcing a verdict. When the host *was* the target,
+   * there was no way out at all.
+   */
+  deadline?: number | null;
+  /** Which beat the deadline was armed for, as round and phase. */
+  deadlineFor?: string | null;
 };
 
 /** A small structured event for the Session Memory Service (powers Who Said It? later). */

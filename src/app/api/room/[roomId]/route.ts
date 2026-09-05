@@ -1139,6 +1139,100 @@ function pickTarget(room: RoomState, state: AiMasterState | null | undefined): P
   return draw[Math.floor(Math.random() * draw.length)];
 }
 
+// ─── The AI Master's clock ──────────────────────────────────────────────────
+//
+// This game had no clock at all: nothing on the client, nothing on the server,
+// and its phase sits outside the board's phase deadline. Every beat waits on
+// somebody, so a player who put their phone down while still heartbeating
+// stopped the match — and the only escape was the host forcing a verdict, which
+// is no escape at all when the host is the one being asked.
+
+/** Long enough to actually perform a challenge into a microphone. */
+const AI_MASTER_RESPOND_MS = 90_000;
+/** The room deciding. Shorter — they only have to press one of two buttons. */
+const AI_MASTER_VOTE_MS = 45_000;
+/** Reading the verdict before the next round is called. */
+const AI_MASTER_VERDICT_MS = 25_000;
+
+function aiMasterWaitMs(phase: AiMasterState['phase']): number {
+  if (phase === 'voting') return AI_MASTER_VOTE_MS;
+  if (phase === 'verdict') return AI_MASTER_VERDICT_MS;
+  return AI_MASTER_RESPOND_MS;
+}
+
+/** Identifies one beat, so the next one never inherits a spent clock. */
+function aiMasterBeat(state: AiMasterState): string {
+  return `${state.round}:${state.phase}`;
+}
+
+/**
+ * Arms the clock for whatever the round is waiting on.
+ *
+ * Lazy rather than set at each transition, for the same reason the board's is:
+ * hand-listing transitions is how a case gets missed, and a missed case here is
+ * a match that stops.
+ */
+function syncAiMasterDeadline(room: RoomState, now: number): void {
+  const state = room.aiMasterState;
+  if (!state || room.phase !== 'ai_master_round') return;
+
+  const beat = aiMasterBeat(state);
+  if (state.deadlineFor !== beat || !state.deadline) {
+    state.deadline = now + aiMasterWaitMs(state.phase);
+    state.deadlineFor = beat;
+  }
+}
+
+function aiMasterHasStalled(room: RoomState, now: number): boolean {
+  const state = room.aiMasterState;
+  if (!state || room.phase !== 'ai_master_round') return false;
+  if (state.deadlineFor !== aiMasterBeat(state)) return false;
+  return !!state.deadline && now >= state.deadline;
+}
+
+/**
+ * Moves the round on when whoever it was waiting for never showed up.
+ *
+ * Ridden on the heartbeat, like the board's, so it needs no timer of its own
+ * and no client willing to send anything.
+ */
+async function expireStalledAiMaster(room: RoomState, now: number): Promise<void> {
+  const state = room.aiMasterState;
+  if (!state || !aiMasterHasStalled(room, now)) return;
+
+  const target = room.players.find((p) => p.id === state.targetId);
+
+  if (state.phase === 'announcing') {
+    // Silence is an answer the room is entitled to judge, so this hands them
+    // the vote rather than deciding it. Failing them outright here would take a
+    // life for a dropped connection.
+    state.response = '';
+    state.phase = 'voting';
+    state.hostLine = `${target?.name ?? 'They'} said nothing at all. Room — your call.`;
+    pushEvent(room, `⏳ ${target?.name ?? 'The target'} ran out of time to answer`, 'system');
+    return;
+  }
+
+  if (state.phase === 'voting') {
+    // resolveAiMasterRound reads passes > fails, so an empty tally fails the
+    // target — which would punish somebody for a room that had already gone
+    // home. Nobody objecting counts as nobody objecting.
+    pushEvent(
+      room,
+      Object.keys(state.votes ?? {}).length === 0
+        ? `⏳ Nobody voted — ${target?.name ?? 'the target'} gets the benefit of the doubt`
+        : `⏳ Voting closed with the votes that were in`,
+      'system'
+    );
+    await resolveAiMasterRound(room);
+    return;
+  }
+
+  if (state.phase === 'verdict') {
+    await startAiMasterRound(room);
+  }
+}
+
 /** Occasionally re-rolls who the host likes and who it is out to get. */
 function rerollBias(room: RoomState, state: AiMasterState): void {
   const pool = survivors(room);
@@ -1214,7 +1308,11 @@ async function resolveAiMasterRound(room: RoomState): Promise<void> {
   const verdicts = Object.values(state.votes ?? {});
   const passes = verdicts.filter((v) => v === 'pass').length;
   const fails = verdicts.filter((v) => v === 'fail').length;
-  const passed = passes > fails;
+  // Nobody objecting counts as nobody objecting. A bare `passes > fails` fails
+  // the target on an empty tally, which takes a life off somebody because the
+  // room wandered off — reachable both from a timed-out vote and from the host
+  // forcing a verdict before anyone had pressed anything.
+  const passed = verdicts.length === 0 ? true : passes > fails;
 
   state.phase = 'verdict';
   state.passed = passed;
@@ -3123,8 +3221,9 @@ async function applyAction(
       // only noticed on whichever beat happens to also be due a refresh leaves
       // the room sitting there for up to PRESENCE_TIMEOUT_MS/3 longer.
       const phaseStalled = phaseHasStalled(room, now);
+      const aiStalled = aiMasterHasStalled(room, now);
 
-      if (!wasAway && !needsRefresh && !rollStalled && !phaseStalled) {
+      if (!wasAway && !needsRefresh && !rollStalled && !phaseStalled && !aiStalled) {
         return NextResponse.json({ ok: true });
       }
 
@@ -3136,10 +3235,12 @@ async function applyAction(
       prunePresence(room);
       expireStalledRoll(room, now);
       expireStalledPhase(room, now);
+      await expireStalledAiMaster(room, now);
       // Arm the clock for whatever the room is waiting on now. Last, so it sees
-      // the phase the two expiries above may have just moved it into, and so a
+      // the phase the expiries above may have just moved it into, and so a
       // fresh wait is never handed a deadline that has already passed.
       syncPhaseDeadline(room, now);
+      syncAiMasterDeadline(room, now);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

@@ -6,6 +6,7 @@ import { Bot, Heart, Mic, Send, ThumbsDown, ThumbsUp, Coins, Sparkles, Skull } f
 import { AiMasterState, Player, RoomState } from '@/lib/types';
 import { STARTING_LIVES } from '@/lib/gameRules';
 import { aiGameMaster } from '@/lib/aiGameMaster';
+import { useCountdown } from '@/hooks/useCountdown';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
 import { speechEngine } from '@/lib/speechService';
@@ -44,6 +45,15 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
   const [showBribe, setShowBribe] = useState(false);
   const [bribeAmount, setBribeAmount] = useState(50);
   const sessionRef = useRef<{ stop: () => void } | null>(null);
+
+  /**
+   * How long this beat has left.
+   *
+   * The game had no clock anywhere, so a room waiting on somebody could not
+   * tell a player thinking from a player gone. Shown from thirty seconds out —
+   * before that it is pressure nobody needs.
+   */
+  const secondsLeft = useCountdown(state?.deadline, 30_000);
 
   /**
    * Speak each new host line exactly once.
@@ -157,6 +167,17 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
               <span className="bg-partyPink/20 text-partyPink text-[9px] px-2 py-0.5 rounded-full font-extrabold border border-partyPink/30">
                 {CATEGORY_LABEL[state.category]}
               </span>
+              {secondsLeft !== null && (
+                <span
+                  className={`text-[9px] px-2 py-0.5 rounded-full font-black border ${
+                    secondsLeft <= 10
+                      ? 'bg-red-500/25 text-red-200 border-red-400/40 animate-pulse'
+                      : 'bg-amber-500/20 text-amber-200 border-amber-400/30'
+                  }`}
+                >
+                  ⏳ {secondsLeft}s
+                </span>
+              )}
             </div>
             <p className="text-sm sm:text-base font-bold text-white mt-1">
               &quot;{state.hostLine ?? `${target?.name ?? 'Someone'}, you are up.`}&quot;
@@ -188,6 +209,32 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
                     {player.name}
                     {player.id === myPlayer.id && (
                       <span className="bg-partyCyan text-partyDark text-[8px] px-1 rounded font-black">YOU</span>
+                    )}
+                    {/*
+                      The host's bias, made visible.
+
+                      It was already real — the grudged player is drawn twice as
+                      often and the favoured one less — and it was already
+                      documented as being public. It just was not shown
+                      anywhere, so a player picked on three rounds running had
+                      no way to read it as the host having a personality rather
+                      than the game being broken.
+                    */}
+                    {player.id === state.favorId && !out && (
+                      <span
+                        title="The host has taken a liking to them — they come up less often"
+                        className="bg-emerald-400/25 text-emerald-200 text-[8px] px-1 rounded font-black border border-emerald-300/30"
+                      >
+                        ★ PET
+                      </span>
+                    )}
+                    {player.id === state.grudgeId && !out && (
+                      <span
+                        title="The host has it in for them — they come up twice as often"
+                        className="bg-rose-500/25 text-rose-200 text-[8px] px-1 rounded font-black border border-rose-300/30"
+                      >
+                        ☠ MARKED
+                      </span>
                     )}
                   </p>
                   {out ? (

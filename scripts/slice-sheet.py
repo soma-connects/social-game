@@ -161,6 +161,22 @@ def find_cells(content: np.ndarray, min_frac: float = 0.03) -> list:
     return cells
 
 
+def drop_specks(cells: list) -> tuple:
+    """Discard fragments far smaller than the real icons.
+
+    A baked-in text label breaks into a few letter-sized blobs, which otherwise
+    come out as extra "icons" and shift every name after them onto the wrong
+    file. Real icons on one sheet are drawn at one scale, so anything under a
+    fraction of the median area is not one of them.
+    """
+    if len(cells) < 3:
+        return cells, []
+    areas = [(x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in cells]
+    floor = float(np.median(areas)) * 0.15
+    keep = [c for c, a in zip(cells, areas) if a >= floor]
+    return keep, [c for c, a in zip(cells, areas) if a < floor]
+
+
 def grid_cells(content: np.ndarray, rows: int, cols: int) -> list:
     """Fixed grid, then trim each cell to whatever content it holds."""
     h, w = content.shape
@@ -209,6 +225,12 @@ def export(rgba: np.ndarray, bg: np.ndarray, box, size: int, pad: float,
     rx1, ry1 = min(rgba.shape[1], sx0 + side), min(rgba.shape[0], sy0 + side)
     patch = rgba[ry0:ry1, rx0:rx1].copy()
     patch[..., 3] = np.where(bg[ry0:ry1, rx0:rx1], 0, 255)
+    # Squaring the crop reaches past the icon's own bounds, so it can pull in a
+    # neighbour or a baked-in caption sitting just below. Anything outside this
+    # icon's content box is not this icon: drop it.
+    outside = np.ones(patch.shape[:2], dtype=bool)
+    outside[max(0, y0 - ry0):max(0, y1 - ry0), max(0, x0 - rx0):max(0, x1 - rx0)] = False
+    patch[..., 3][outside] = 0
     if soft:
         soften(patch)
     out[ry0 - sy0:ry1 - sy0, rx0 - sx0:rx1 - sx0] = patch
@@ -251,6 +273,11 @@ def main() -> int:
         cells = grid_cells(content, rows, cols)
     else:
         cells = find_cells(content)
+
+    cells, specks = drop_specks(cells)
+    if specks:
+        print(f"  ignored {len(specks)} fragment(s) far below icon size "
+              f"— usually a baked-in text label")
 
     if args.drop_bottom:
         trimmed = []

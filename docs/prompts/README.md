@@ -70,3 +70,29 @@ sheet. If the model drew each icon on its own dark panel, or scattered a starfie
 behind them, that is artwork as far as any tool is concerned — it comes out attached to
 the icon. That is what the Background block in every prompt is defending against, and
 if a sheet comes back that way the fix is to regenerate it, not to fight the crop.
+
+### Save the PNG, not a screenshot
+
+This is the single biggest quality difference in the whole pipeline, and it has
+nothing to do with the prompt.
+
+If the file you hand the slicer has a **grey checkerboard** background, the alpha
+channel is already gone. A checkerboard is how an editor *draws* transparency on
+screen; once that view is flattened to a JPEG, every soft pixel — glow, shadow,
+antialiased edge — is permanently mixed with two greys. Keying can remove the flat
+squares, but the blended fringe around each icon stays, and no tool recovers it.
+
+Measured across the first batch of sheets:
+
+| What arrived | Result |
+| --- | --- |
+| PNG with a real alpha channel | clean |
+| JPEG on flat `#000000` black (use `--soft`) | clean |
+| JPEG showing a grey checkerboard | grey fringes, unusable |
+
+So: use the generator's **download** button and keep the `.png`. Don't screenshot the
+preview, don't re-export as JPEG, don't paste it through anything that flattens it.
+The slicer warns when it sees a checkerboard, before it writes any files.
+
+If a PNG isn't available, the fallback that works is flat black — the Background block
+in every prompt already asks for exactly that.

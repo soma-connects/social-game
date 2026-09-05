@@ -12,10 +12,13 @@ empty cells and strips all work.
     python3 scripts/slice-sheet.py sheet.png -o public/modes \
         -n board,voice,party,ai_master,team_battle,chess,ludo
 
-Backgrounds handled automatically:
-  * real alpha (a transparent PNG)          -> used as-is
-  * flat black / near-black                 -> keyed out
-  * the grey checkerboard some tools bake in -> keyed out
+Backgrounds, best to worst:
+  * real alpha (a transparent PNG)  -> used as-is. Ask for this.
+  * flat black / near-black         -> keyed out; add --soft so glows fade properly
+  * a grey checkerboard             -> WARNED ABOUT, and the result will have grey
+                                       fringes. A checkerboard is a picture OF
+                                       transparency: the soft edges are already
+                                       blended into it and cannot be recovered.
 
 Only background CONNECTED TO THE EDGE is removed, so a black bomb or a navy
 chess knight keeps its own dark pixels.
@@ -46,6 +49,37 @@ except ImportError:
 
 
 # ---------------------------------------------------------------- background
+
+def checkerboard_warning(rgba: np.ndarray) -> str:
+    """Detect the grey transparency checkerboard, which means a lost alpha channel.
+
+    A checkerboard in the pixels is a picture OF transparency, not transparency.
+    Everything soft — glows, shadows, antialiased edges — got blended into two
+    greys on the way, and no keying can pull them apart again. Worth saying
+    loudly, because the fix is upstream and takes ten seconds.
+    """
+    if (rgba[..., 3] < 250).mean() > 0.02:
+        return ""                                    # real alpha, nothing to warn about
+
+    strip = rgba[:60, :, :3].astype(np.int16)
+    grey = strip[(strip.max(axis=2) - strip.min(axis=2)) <= 12]
+    if len(grey) < strip.shape[0] * strip.shape[1] * 0.5:
+        return ""
+
+    level = grey.mean(axis=1)
+    lo, hi = np.percentile(level, 10), np.percentile(level, 90)
+    if hi - lo < 25 or lo < 40:
+        return ""                                    # flat background, or plain black — fine
+    near = ((np.abs(level - lo) < 12) | (np.abs(level - hi) < 12)).mean()
+    if near < 0.8:
+        return ""
+    return (f"the background is a grey checkerboard ({lo:.0f}/{hi:.0f}), so this file is a "
+            "flattened picture of transparency, not a transparent image.\n"
+            "  Every glow and soft edge is already blended into those greys and cannot be "
+            "recovered — expect grey fringes.\n"
+            "  Fix upstream: download the generator's PNG rather than a screenshot or JPEG "
+            "export, or re-generate on flat #000000 and slice with --soft.")
+
 
 def background_mask(rgba: np.ndarray, dark: int = 55, tol: int = 26) -> np.ndarray:
     """True where the pixel is sheet background rather than artwork.
@@ -206,6 +240,9 @@ def main() -> int:
     args = ap.parse_args()
 
     rgba = np.array(Image.open(args.sheet).convert("RGBA"))
+    warning = checkerboard_warning(rgba)
+    if warning:
+        print(f"WARNING: {warning}\n")
     bg = edge_connected(background_mask(rgba))
     content = ~bg
 

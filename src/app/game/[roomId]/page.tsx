@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import AwardsCeremony from '@/components/AwardsCeremony';
 import GameHeader from '@/components/GameHeader';
 import LeftSidebar from '@/components/LeftSidebar';
 import RightSidebar from '@/components/RightSidebar';
@@ -799,6 +800,15 @@ export default function GameRoomPage() {
                       Final score: {room.winner.score} points
                     </p>
                   </>
+                )}
+
+                {/* The bit people stay for. Everything here was already being
+                    tracked during the match and used to be discarded at the
+                    whistle along with the reason to argue about it. */}
+                {(room.awards ?? []).length > 0 && (
+                  <div className="pt-2 border-t border-white/10">
+                    <AwardsCeremony awards={room.awards ?? []} players={room.players} />
+                  </div>
                 )}
 
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-3">

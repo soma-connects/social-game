@@ -66,6 +66,41 @@ export type Player = {
    * one out means sitting out the evening.
    */
   eliminated?: boolean;
+  /**
+   * Consecutive mini-game rounds at or above STREAK_KEEP_THRESHOLD.
+   *
+   * Reset to 0 by any round that falls short, which is the whole point — the
+   * multiplier it pays is worth less than having something to lose.
+   */
+  streak?: number;
+  /** Highest streak reached this match, kept for the closing awards. */
+  bestStreak?: number;
+  /**
+   * Match-long mini-game record, accumulated because `roundResults` is wiped at
+   * the top of every round and the awards need the whole match to look back on.
+   *
+   * Deliberately a running total rather than a list of rounds: the awards only
+   * ever ask for an average, a best and a count, and a per-round array on every
+   * player would be copied into every one of the ~1.5s room snapshots.
+   */
+  roundsPlayed?: number;
+  /** Sum of every round's 0..1 performance. Divided by roundsPlayed for the mean. */
+  performanceTotal?: number;
+  /** Rounds that came in at or below MINIGAME_FAIL_THRESHOLD. */
+  bombs?: number;
+  /** The single best round of the match, for the highlight award. */
+  bestRound?: { game: MiniGameId; performance: number; points: number };
+  /**
+   * The largest gap, in board steps, this player has ever been behind the
+   * leader during the match.
+   *
+   * Tracked rather than derived because a comeback is about a deficit that was
+   * recovered, and by the final whistle the deficit is gone — the board only
+   * ever stores where everyone is now. Note this cannot be "lowest board
+   * position": everybody starts on the launchpad, so that number is 0 for the
+   * whole room and would hand Comeback Kid to whoever simply went furthest.
+   */
+  worstDeficit?: number;
   /** Set when a player is paused at a branching node with remaining dice steps */
   remainingSteps?: number;
   hasShield?: boolean;
@@ -476,6 +511,27 @@ export type RoomState = {
   socialRound?: SocialRound | null;
   /** What the performer is doing right now, for spectators. */
   liveState?: LiveMiniGameState | null;
+  /**
+   * Where the active player's last move came from, broken into its parts.
+   *
+   * The dice is a reveal of what the mini-game earned rather than a random
+   * number, so the room has to be able to see the arithmetic — a token that
+   * travels fifteen spaces with no explanation reads as a bug. Server-computed
+   * and shipped whole so the board cannot show a different sum than the one
+   * that was actually walked.
+   */
+  lastMove?: {
+    playerId: string;
+    playerName: string;
+    /** Steps the mini-game performance bought. */
+    base: number;
+    /** Extra steps from the player's streak. */
+    heat: number;
+    /** Extra steps for trailing the leader. */
+    slipstream: number;
+    total: number;
+    at: number;
+  } | null;
   /** The last thing the board did to somebody, for the whole room to watch. */
   boardEvent?: BoardEvent | null;
   /**
@@ -516,6 +572,13 @@ export type RoomState = {
   ludoState?: import('./ludo/ludoTypes').LudoRoomState | null;
   /** AI Master game state. */
   aiMasterState?: AiMasterState | null;
+  /**
+   * The closing awards, computed once when the match ends.
+   *
+   * Server-side rather than derived per client: six people reading the same
+   * snapshot must not be able to disagree about who won Crowd Favourite.
+   */
+  awards?: import('./gameRules').Award[] | null;
   /** Session memory — small structured events for Who Said It? and AI callbacks. */
   sessionMemory?: SessionMemoryEvent[];
 };

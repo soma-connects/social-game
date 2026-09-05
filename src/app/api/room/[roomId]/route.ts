@@ -34,6 +34,12 @@ import {
   FINISH_NODE,
   MINIGAME_FAIL_THRESHOLD,
   STARTING_LIVES,
+  STREAK_KEEP_THRESHOLD,
+  applyHeat,
+  computeAwards,
+  heatTier,
+  slipstreamLabel,
+  slipstreamSteps,
   loseLife,
   respawnToStart,
   TileOutcome,
@@ -687,6 +693,9 @@ function applyLanding(room: RoomState, player: Player, node: number): TileOutcom
   const outcome = resolveTile(node, player.hasShield);
 
   player.boardPosition = outcome.position;
+  // Every board move lands here, so this is the one place the closing awards
+  // need in order to see a deficit while it still exists.
+  trackDeficits(room);
   if (outcome.grantsShield) player.hasShield = true;
   if (outcome.breaksShield) player.hasShield = false;
   if (outcome.coins) player.score = Math.max(0, player.score + outcome.coins);
@@ -801,6 +810,101 @@ const TRAP_DEBATE_SETBACK = 2;
 
 /** How far a failed dare drags you back — enough to undo a typical roll. */
 const DARE_FAIL_SETBACK = 6;
+
+/**
+ * Clears the per-match record a player carries.
+ *
+ * Deliberately does NOT touch level, vibeScore or badges: those are progression
+ * earned by the person and survive the match, while everything below describes
+ * one match only and would otherwise leak a streak or a bomb count into the
+ * next one.
+ */
+function resetMatchStats(player: Player): void {
+  delete player.streak;
+  delete player.bestStreak;
+  delete player.roundsPlayed;
+  delete player.performanceTotal;
+  delete player.bombs;
+  delete player.bestRound;
+  delete player.worstDeficit;
+}
+
+/**
+ * Books one finished mini-game round against the player.
+ *
+ * Both completion handlers ran the same half-dozen lines inline, and they had
+ * already drifted from each other. Everything that has to happen exactly once
+ * per round — the streak, the match-long stats the closing awards read, and the
+ * heat multiplier on the coins — now happens here, so a new mini-game gets all
+ * of it by calling one function.
+ *
+ * Returns the coins actually earned, which is the raw figure with the streak
+ * multiplier applied.
+ */
+function recordRound(
+  room: RoomState,
+  player: Player,
+  game: MiniGameId,
+  rawCoins: number,
+  performance: number
+): { coins: number; streak: number; heatBonus: number; brokeStreak: boolean } {
+  const previousStreak = player.streak ?? 0;
+  const kept = performance >= STREAK_KEEP_THRESHOLD;
+
+  // A streak is only worth having if it can be lost, so anything short of a
+  // decent round drops it to zero rather than merely failing to extend it.
+  const streak = kept ? previousStreak + 1 : 0;
+  const brokeStreak = !kept && previousStreak >= 2;
+  player.streak = streak;
+  player.bestStreak = Math.max(player.bestStreak ?? 0, streak);
+
+  const coins = applyHeat(rawCoins, streak);
+
+  player.roundsPlayed = (player.roundsPlayed ?? 0) + 1;
+  player.performanceTotal = (player.performanceTotal ?? 0) + performance;
+  if (performance <= MINIGAME_FAIL_THRESHOLD) player.bombs = (player.bombs ?? 0) + 1;
+  if (performance > (player.bestRound?.performance ?? -1)) {
+    player.bestRound = { game, performance, points: coins };
+  }
+
+  if (brokeStreak) {
+    pushEvent(room, `💧 ${player.name} lost a ${previousStreak}-round streak`, 'debuff');
+  }
+
+  const tier = heatTier(streak);
+  if (tier.multiplier > 1) {
+    pushEvent(
+      room,
+      `${tier.icon} ${player.name} is ${tier.label.toUpperCase()} — ${streak} in a row, x${tier.multiplier} coins`,
+      'buff'
+    );
+  }
+
+  return { coins, streak, heatBonus: tier.stepBonus, brokeStreak };
+}
+
+/** Board depth of whoever is furthest along, for the slipstream gap. */
+function leaderProgress(room: RoomState): number {
+  return activePlayers(room).reduce(
+    (best, player) => Math.max(best, boardProgress(player.boardPosition)),
+    0
+  );
+}
+
+/**
+ * Records how far behind the leader everyone currently is, keeping the worst.
+ *
+ * The Comeback Kid award needs a deficit that was actually recovered, and by
+ * the final whistle the deficit is gone — the board only stores where everyone
+ * is now. Cheap enough to run after every board mutation.
+ */
+function trackDeficits(room: RoomState): void {
+  const leader = leaderProgress(room);
+  for (const player of room.players) {
+    const deficit = Math.max(0, leader - boardProgress(player.boardPosition));
+    player.worstDeficit = Math.max(player.worstDeficit ?? 0, deficit);
+  }
+}
 
 /**
  * Charges a life for bombing the task the room just watched you attempt.
@@ -1042,6 +1146,13 @@ function judgeBribe(state: AiMasterState, player: Player, amount: number): boole
 function declareWinner(room: RoomState, player: Player, reason: 'finish' | 'last_standing' = 'finish'): void {
   room.winner = player;
   room.phase = 'game_over';
+
+  // Worked out once, here, rather than in the client. Every player's stats are
+  // about to stop changing, and the alternative — each of six clients deriving
+  // its own award list from a snapshot — lets two people in the same room read
+  // out different winners.
+  trackDeficits(room);
+  room.awards = computeAwards(room.players);
   if (room.roomType === 'team_battle' && player.teamId) {
     room.winningTeam = player.teamId;
     const team = getTeam(player.teamId);
@@ -1926,7 +2037,15 @@ async function applyAction(
       const points = basePoints + bluffBonus + reactionBonus + judgeBonus;
       const performance = scoreToPerformance(game, points);
       const steps = performanceToSteps(performance);
-      const coinsEarned = Math.floor(performance * 100);
+      // Streak, match stats and the heat multiplier all land in one place, so
+      // the coins banked below are already the boosted figure.
+      const { coins: coinsEarned } = recordRound(
+        room,
+        active,
+        game,
+        Math.floor(performance * 100),
+        performance
+      );
 
       active.score += coinsEarned;
       // In Team Battle the same points also feed the crew total, which is what
@@ -2022,7 +2141,15 @@ async function applyAction(
       const points = basePoints + reactionBonus + judgeBonus;
       const performance = scoreToPerformance(game, points);
       const steps = performanceToSteps(performance);
-      const coinsEarned = Math.floor(performance * 100);
+      // Streak, match stats and the heat multiplier all land in one place, so
+      // the coins banked below are already the boosted figure.
+      const { coins: coinsEarned } = recordRound(
+        room,
+        active,
+        game,
+        Math.floor(performance * 100),
+        performance
+      );
 
       active.score += coinsEarned;
       // In Team Battle the same points also feed the crew total, which is what
@@ -2130,7 +2257,7 @@ async function applyAction(
       const active = room.players[room.activePlayerIndex];
       if (!active) return NextResponse.json({ error: 'No active player' }, { status: 409 });
 
-      // The mini-game decides roll order; the dice movement itself stays random.
+      // The mini-game decides both the roll order and the distance travelled.
       const entry = (room.roundResults ?? []).find((r) => r.playerId === active.id);
       if (entry) {
         if (entry.rolled) {
@@ -2139,9 +2266,46 @@ async function applyAction(
         entry.rolled = true;
       }
 
-      const die1 = Math.floor(Math.random() * 6) + 1;
-      const die2 = Math.floor(Math.random() * 6) + 1;
-      const roll = die1 + die2;
+      // The dice reveals what the mini-game earned — it is not a fresh random
+      // number. See the turn-loop note at the top of gameRules: "play badly and
+      // you shuffle forward, play well and you get the full six."
+      //
+      // Rolling 2d6 here instead quietly severed the game's core loop. A player
+      // could bomb every single mini-game and still outrun a player who aced
+      // them, which left the voice rounds deciding nothing but coins and roll
+      // order — and the `steps` figure the room was shown after every round was
+      // never actually spent.
+      //
+      // A player with no banked result (joined mid-round, or their result was
+      // dropped with them) falls back to a genuine roll rather than being stuck
+      // on the spot.
+      const earned = entry?.steps ?? Math.floor(Math.random() * 11) + 2;
+      const heatBonus = heatTier(active.streak ?? 0).stepBonus;
+      const slipstream = slipstreamSteps(boardProgress(active.boardPosition), leaderProgress(room));
+      const roll = earned + heatBonus + slipstream;
+
+      // Announced, never silent. A catch-up bonus the room cannot see reads as
+      // the board being broken rather than as the game keeping somebody in it.
+      if (heatBonus > 0) {
+        pushEvent(room, `🔥 ${active.name}'s streak adds +${heatBonus} step`, 'buff');
+      }
+      if (slipstream > 0) {
+        pushEvent(
+          room,
+          `${slipstreamLabel(slipstream)} — ${active.name} catches +${slipstream} step${slipstream === 1 ? '' : 's'}`,
+          'buff'
+        );
+      }
+
+      room.lastMove = {
+        playerId: active.id,
+        playerName: active.name,
+        base: earned,
+        heat: heatBonus,
+        slipstream,
+        total: roll,
+        at: Date.now(),
+      };
 
       let currentId = active.boardPosition;
       let remaining = roll;
@@ -2155,17 +2319,17 @@ async function applyAction(
           active.boardPosition = currentId;
           active.remainingSteps = remaining;
           room.phase = 'branch_choice';
-          pushEvent(room, `🎲 ${active.name} rolled ${roll} and reached a fork in the road!`, 'system');
-          return NextResponse.json({ room: await writeRoom(room), roll, waitingForBranch: true });
+          pushEvent(room, `🎲 ${active.name} earned ${roll} and reached a fork in the road!`, 'system');
+          return NextResponse.json({ room: await writeRoom(room), roll, move: room.lastMove, waitingForBranch: true });
         }
         currentId = node.next[0];
         remaining--;
       }
 
-      pushEvent(room, `🎲 ${active.name} rolled ${roll}`, 'system');
+      pushEvent(room, `🎲 ${active.name} moves ${roll} step${roll === 1 ? '' : 's'}`, 'system');
       const outcome = applyLanding(room, active, currentId);
 
-      return NextResponse.json({ room: await writeRoom(room), roll, outcome });
+      return NextResponse.json({ room: await writeRoom(room), roll, move: room.lastMove, outcome });
     }
 
     case 'choose_branch': {
@@ -2537,6 +2701,7 @@ async function applyAction(
       for (const player of room.players) {
         player.lives = STARTING_LIVES;
         delete player.eliminated;
+        resetMatchStats(player);
       }
       pushEvent(room, `🤖 The AI Master takes the stage — ${ROOM_VIBES[roomVibeOf(room)].label}`, 'system');
       await startAiMasterRound(room);
@@ -2698,9 +2863,12 @@ async function applyAction(
       room.rollIndex = 0;
       room.shopReady = [];
       room.turnResult = null;
+      room.lastMove = null;
+      room.awards = null;
       for (const player of room.players) {
         player.lives = STARTING_LIVES;
         delete player.eliminated;
+        resetMatchStats(player);
       }
 
       if (room.enabledMiniGames?.includes('story_builder')) {
@@ -2756,6 +2924,7 @@ async function applyAction(
         delete player.skipNextTurn;
         delete player.remainingSteps;
         delete player.eliminated;
+        resetMatchStats(player);
       }
 
       room.phase = 'lobby';
@@ -2773,6 +2942,8 @@ async function applyAction(
       room.shopReady = [];
       room.turnResult = null;
       room.boardEvent = null;
+      room.lastMove = null;
+      room.awards = null;
       room.rollDeadline = null;
       room.currentDare = null;
       room.socialRound = null;

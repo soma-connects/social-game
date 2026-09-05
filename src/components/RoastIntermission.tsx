@@ -23,7 +23,7 @@ import {
 import { Player, RoomState, SocialReactionId } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
-import { MINIGAME_FAIL_THRESHOLD, STARTING_LIVES } from '@/lib/gameRules';
+import { MINIGAME_FAIL_THRESHOLD, STARTING_LIVES, heatTier } from '@/lib/gameRules';
 import { VoiceClip } from '@/hooks/useVoiceRecorder';
 import AvatarIllustration from './AvatarIllustration';
 import VoiceReplay from './VoiceReplay';
@@ -216,6 +216,34 @@ export default function RoastIntermission({
         <p className="text-xs text-gray-300 font-bold bg-white/5 py-2 px-4 rounded-xl border border-white/10 inline-block">
           🎙️ Live mics stay open! Laugh at each other&apos;s flaws, tease the accent, and blast the soundboard!
         </p>
+
+        {/* Where the streak stands after that round.
+            This is the beat where momentum is won or lost, so it gets its own
+            line rather than being buried in the event feed the room is not
+            reading mid-roast. */}
+        {(() => {
+          const streak = activePlayer.streak ?? 0;
+          if (streak >= 2) {
+            const tier = heatTier(streak);
+            return (
+              <div
+                className="rounded-2xl px-4 py-2.5 border-2 font-black text-sm inline-flex items-center gap-2 animate-pulse"
+                style={{ color: tier.color, borderColor: tier.color, backgroundColor: `${tier.color}1A` }}
+              >
+                {tier.icon} {tier.label.toUpperCase()} — {streak} IN A ROW · x{tier.multiplier} COINS
+              </div>
+            );
+          }
+          // Only worth calling out a break where there was something to break.
+          if (streak === 0 && (activePlayer.bestStreak ?? 0) >= 2) {
+            return (
+              <div className="rounded-2xl px-4 py-2.5 border-2 border-sky-400/60 bg-sky-500/10 text-sky-300 font-black text-sm inline-flex items-center gap-2">
+                💧 STREAK BROKEN — back to zero
+              </div>
+            );
+          }
+          return null;
+        })()}
 
         {/* Turn Performance & Badges Card */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-left pt-2">

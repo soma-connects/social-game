@@ -642,7 +642,15 @@ class RoomStoreManager {
   public async rollDice(roomId: string) {
     const data = await this.post(roomId, { action: 'roll_dice' });
     return {
+      /** Total steps travelled — what the token actually walks. */
       roll: typeof data.roll === 'number' ? data.roll : null,
+      /**
+       * The same number split into what earned it. Returned by the roll rather
+       * than read from the room snapshot: snapshots arrive on a ~1.5s poll, so
+       * at the moment the dice is thrown the snapshot still describes the
+       * previous player's move.
+       */
+      move: (data.move as RoomState['lastMove']) ?? null,
       outcome: (data.outcome as { banner: string | null; message: string; triggersDare: boolean }) ?? null,
       waitingForBranch: !!data.waitingForBranch,
       error: data.error,

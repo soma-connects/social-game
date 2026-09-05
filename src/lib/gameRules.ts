@@ -223,6 +223,76 @@ export function respawnToStart(player: Player): void {
 }
 
 /** Coins a Supply Drop tile pays out. */
+// ─── Heat: momentum across rounds ───────────────────────────────────────────
+//
+// Every round used to be scored in isolation: you played, you banked coins, and
+// nothing at all carried into the next one. That makes a long match feel like a
+// series of unrelated auditions rather than a run — there is never a moment
+// where a player has something to protect.
+//
+// Heat is that something. Consecutive decent rounds build a streak, the streak
+// pays a rising multiplier on coins, and one bad round takes it all away. The
+// reward for a hot streak is real but bounded, because the point is the tension
+// of holding one, not the arithmetic.
+
+/**
+ * Performance a round needs to keep a streak alive.
+ *
+ * Set at the "Decent effort" tier in describePerformance rather than at
+ * MINIGAME_FAIL_THRESHOLD. Surviving on rounds you barely scraped would let a
+ * streak run for an entire match without the player ever playing well, which
+ * makes the multiplier meaningless.
+ */
+export const STREAK_KEEP_THRESHOLD = 0.4;
+
+export type HeatTier = {
+  /** Consecutive qualifying rounds needed to reach this tier. */
+  min: number;
+  label: string;
+  icon: string;
+  /** Multiplier applied to coins earned this round. */
+  multiplier: number;
+  /** Extra board steps the tier is worth, on top of what performance earned. */
+  stepBonus: number;
+  color: string;
+};
+
+/**
+ * Ordered coldest first. Deliberately shallow at the bottom — a player on a
+ * two-round streak gets a small nudge and a label, not a runaway lead — and it
+ * tops out at five so the ceiling is reachable inside one evening.
+ */
+export const HEAT_TIERS: HeatTier[] = [
+  { min: 0, label: 'Cold', icon: '', multiplier: 1, stepBonus: 0, color: '#94A3B8' },
+  { min: 2, label: 'Warmed Up', icon: '✨', multiplier: 1.15, stepBonus: 0, color: '#FACC15' },
+  { min: 3, label: 'Heating Up', icon: '🔥', multiplier: 1.3, stepBonus: 0, color: '#FB923C' },
+  { min: 4, label: 'On Fire', icon: '🔥', multiplier: 1.5, stepBonus: 1, color: '#F87171' },
+  { min: 5, label: 'Unstoppable', icon: '⚡', multiplier: 1.75, stepBonus: 1, color: '#E879F9' },
+];
+
+export function heatTier(streak: number): HeatTier {
+  let tier = HEAT_TIERS[0];
+  for (const candidate of HEAT_TIERS) {
+    if (streak >= candidate.min) tier = candidate;
+  }
+  return tier;
+}
+
+/** Whether a streak is high enough to be worth showing off. */
+export function isHot(streak: number): boolean {
+  return heatTier(streak).multiplier > 1;
+}
+
+/**
+ * Applies the streak multiplier to a round's coins.
+ *
+ * Takes the streak *including* the round being scored, so the first qualifying
+ * round pays flat and the bonus only appears once a run actually exists.
+ */
+export function applyHeat(coins: number, streak: number): number {
+  return Math.round(coins * heatTier(streak).multiplier);
+}
+
 export const SUPPLY_DROP_COINS = 75;
 
 /** Coins the Point Bomb strips from the leader. */
@@ -582,6 +652,93 @@ export function boardProgress(position: number): number {
   return BOARD_DEPTH[position] ?? 0;
 }
 
+// ─── Slipstream: staying in the race ────────────────────────────────────────
+//
+// The board is ~24 nodes deep and every player moves on their own merit, so a
+// player who has a bad opening two rounds is, in practice, out of it — while
+// still being required to sit through another twenty minutes of the match.
+// That is the single fastest way to lose a room's attention.
+//
+// Slipstream is the standard party-game answer: the further behind the leader
+// you are, the more steps you get. It is capped low enough that it never
+// overtakes playing well — a hot player still outruns it — and it is announced
+// out loud, because a catch-up bonus that happens silently reads as the board
+// being buggy rather than as the game keeping you in it.
+
+/**
+ * Steps of deficit that buy one bonus step.
+ *
+ * Proportional to the gap rather than a few fixed bands, and this matters more
+ * than it looks. The board is only about five turns long for a strong player,
+ * so a catch-up bonus has very few turns in which to do anything: a flat "+1 if
+ * you are a long way behind" is spent long before it closes a gap that is still
+ * growing. Scaling with the deficit makes the bonus self-correcting — it grows
+ * while a player keeps losing ground and disappears the moment they stop.
+ *
+ * Simulated over the full match loop, this is what holds a room together: the
+ * last-placed player finishes around 60% of the leader's distance with it and
+ * around 43% without, across realistic spreads of per-mini-game aptitude.
+ */
+export const SLIPSTREAM_STEPS_PER_GAP = 3;
+
+/** Most steps slipstream will ever hand out in one roll. */
+export const SLIPSTREAM_MAX_STEPS = 6;
+
+/**
+ * Bonus steps for trailing the leader, as a function of the gap.
+ *
+ * Measured in board depth (steps walked from the launchpad), not node ids —
+ * ids are identifiers rather than distances, so subtracting them is nonsense.
+ *
+ * Capped deliberately below the spread of the step ladder, so it never inverts
+ * the result of a round: a player who aces the mini-game still out-runs a
+ * player who bombed it and is being carried by the deficit bonus.
+ */
+export function slipstreamSteps(progress: number, leaderProgress: number): number {
+  const gap = leaderProgress - progress;
+  if (gap <= 0) return 0;
+  return Math.min(SLIPSTREAM_MAX_STEPS, Math.floor(gap / SLIPSTREAM_STEPS_PER_GAP));
+}
+
+/** The line the room sees when slipstream fires. */
+export function slipstreamLabel(steps: number): string {
+  if (steps >= 3) return '🌪️ FULL SLIPSTREAM';
+  if (steps === 2) return '💨 SLIPSTREAM';
+  return '💨 DRAFTING';
+}
+
+/**
+ * Everything that decides how far one player moves this turn.
+ *
+ * Kept as one function returning its own breakdown so the server and the UI
+ * cannot disagree about the number: the board shows exactly the components the
+ * server added up, which is what makes an unexpected roll feel earned rather
+ * than arbitrary.
+ */
+export type MoveBreakdown = {
+  /** Steps the mini-game performance bought. */
+  base: number;
+  /** Extra steps from the player's heat tier. */
+  heat: number;
+  /** Extra steps for trailing the leader. */
+  slipstream: number;
+  /** What the dice actually shows. */
+  total: number;
+};
+
+export function computeMove(
+  performance: number,
+  streak: number,
+  progress: number,
+  leaderProgress: number
+): MoveBreakdown {
+  const base = performanceToSteps(performance);
+  const heat = heatTier(streak).stepBonus;
+  const slipstream = slipstreamSteps(progress, leaderProgress);
+  return { base, heat, slipstream, total: base + heat + slipstream };
+}
+
+
 /**
  * Walks `steps` nodes along the road, stopping early at the finish.
  *
@@ -770,4 +927,205 @@ export function resolveTile(position: number, playerHasShield: boolean = false):
     triggersTrap: false,
     isFinish: false,
   };
+}
+
+// ─── Closing awards ─────────────────────────────────────────────────────────
+//
+// A match already collects far more than it ever shows: every player's average
+// performance, their best single round, how often they bombed, how hot they got
+// and how much of the board they clawed back. All of it was thrown away at the
+// final whistle, which showed one name and one number.
+//
+// That is a waste of the most valuable minute in a party game. The argument
+// after the match — who was actually funniest, who choked, who nearly had it —
+// is the part people stay for, and it only happens if the game hands the room
+// something to argue about.
+//
+// Every award below is derived from state the match was already tracking, so
+// this costs nothing at play time.
+
+export type Award = {
+  id: string;
+  title: string;
+  icon: string;
+  playerId: string;
+  playerName: string;
+  /** One line saying what they actually did to earn it. */
+  detail: string;
+  color: string;
+};
+
+/** Mean performance across the rounds a player actually took. */
+export function averagePerformance(player: Player): number {
+  const rounds = player.roundsPlayed ?? 0;
+  if (rounds <= 0) return 0;
+  return (player.performanceTotal ?? 0) / rounds;
+}
+
+/**
+ * How much of their worst deficit a player clawed back by the final whistle.
+ *
+ * Worst gap behind the leader, minus the gap they finished on. Someone who fell
+ * twelve steps behind and finished level scores 12; someone who led wire to
+ * wire scores 0, which is the distinction the award exists to make.
+ */
+export function comebackDistance(player: Player, leaderProgress: number): number {
+  const finalDeficit = Math.max(0, leaderProgress - boardProgress(player.boardPosition));
+  return Math.max(0, (player.worstDeficit ?? 0) - finalDeficit);
+}
+
+/**
+ * One award category: how to score it, and how to phrase it once won.
+ *
+ * `score` returns null for a player who does not qualify at all, which is what
+ * keeps the ceremony honest — nobody is handed "Comeback Kid" for a match they
+ * led wire to wire.
+ */
+type AwardContext = {
+  /** Board depth of whoever finished furthest along. */
+  leaderProgress: number;
+};
+
+type AwardSpec = {
+  id: string;
+  title: string;
+  icon: string;
+  color: string;
+  score: (player: Player, ctx: AwardContext) => number | null;
+  detail: (player: Player, ctx: AwardContext) => string;
+};
+
+const AWARD_SPECS: AwardSpec[] = [
+  {
+    id: 'mvp',
+    title: 'MVP',
+    icon: '👑',
+    color: '#FFD000',
+    score: (p) => p.score,
+    detail: (p) => `${p.score} coins banked`,
+  },
+  {
+    id: 'hottest',
+    title: 'Hot Streak',
+    icon: '🔥',
+    color: '#FB923C',
+    // Three in a row is the first streak that took real holding.
+    score: (p) => ((p.bestStreak ?? 0) >= 3 ? p.bestStreak! : null),
+    detail: (p) => `${p.bestStreak} strong rounds back to back`,
+  },
+  {
+    id: 'crowd',
+    title: 'Crowd Favourite',
+    icon: '😂',
+    color: '#F472B6',
+    score: (p) => ((p.vibeScore ?? 0) > 0 ? p.vibeScore! : null),
+    detail: (p) => `${p.vibeScore} vibe from the room`,
+  },
+  {
+    id: 'consistent',
+    title: 'Mr/Ms Reliable',
+    icon: '🎯',
+    color: '#38BDF8',
+    // Needs a real sample — one lucky round is not consistency — and a real
+    // average, because an award called Reliable has to mean it.
+    score: (p) =>
+      (p.roundsPlayed ?? 0) >= 3 && averagePerformance(p) >= 0.5 ? averagePerformance(p) : null,
+    detail: (p) => `${Math.round(averagePerformance(p) * 100)}% average across ${p.roundsPlayed} rounds`,
+  },
+  {
+    id: 'highlight',
+    title: 'Highlight of the Night',
+    icon: '🌟',
+    color: '#A78BFA',
+    // A highlight has to actually be one.
+    score: (p) => ((p.bestRound?.performance ?? 0) >= 0.6 ? p.bestRound!.performance : null),
+    detail: (p) =>
+      p.bestRound
+        ? `${Math.round(p.bestRound.performance * 100)}% in ${MINIGAME_LABELS[p.bestRound.game]}`
+        : '',
+  },
+  {
+    id: 'comeback',
+    title: 'Comeback Kid',
+    icon: '🚀',
+    color: '#34D399',
+    // A fifth of the board recovered, or it was not a comeback.
+    score: (p, ctx) => {
+      const recovered = comebackDistance(p, ctx.leaderProgress);
+      return recovered >= BOARD_LENGTH * 0.2 ? recovered : null;
+    },
+    detail: (p, ctx) => `pulled back ${comebackDistance(p, ctx.leaderProgress)} spaces on the leader`,
+  },
+  {
+    id: 'wahala',
+    title: 'Wahala Merchant',
+    icon: '💥',
+    color: '#F87171',
+    // Affectionate, not a punishment: in a party game the person who bombed
+    // loudest is usually the reason the evening was funny.
+    score: (p) => ((p.bombs ?? 0) >= 2 ? p.bombs! : null),
+    detail: (p) => `bombed ${p.bombs} rounds and survived anyway`,
+  },
+];
+
+/**
+ * How close to the leading candidate a player must be before the spreading rule
+ * will hand them the award instead.
+ *
+ * Without this guard, "prefer someone who has not won yet" quietly becomes
+ * "give it to whoever is left", which is how an award named Reliable ends up on
+ * the least reliable player in the room. Variety is only worth having while the
+ * award still tells the truth.
+ */
+export const AWARD_SPREAD_FLOOR = 0.6;
+
+/**
+ * Picks the closing awards, spreading them across the room where it can.
+ *
+ * Awards are resolved in the order above, and each one prefers a player who has
+ * not won anything yet — provided they are within AWARD_SPREAD_FLOOR of the
+ * outright best. Without the preference one strong player sweeps every category
+ * and the ceremony says nothing the scoreboard did not; without the floor the
+ * ceremony starts lying. Where no fresh candidate is close enough, the honest
+ * winner keeps it and takes a second award.
+ *
+ * MVP is exempt from spreading entirely: it goes to the top scorer whatever
+ * else they won, because an MVP handed to the runner-up for variety is a lie.
+ */
+export function computeAwards(players: Player[]): Award[] {
+  if (players.length === 0) return [];
+
+  const awards: Award[] = [];
+  const alreadyWon = new Set<string>();
+  const ctx: AwardContext = {
+    leaderProgress: players.reduce((best, p) => Math.max(best, boardProgress(p.boardPosition)), 0),
+  };
+
+  for (const spec of AWARD_SPECS) {
+    const candidates = players
+      .map((player) => ({ player, value: spec.score(player, ctx) }))
+      .filter((entry): entry is { player: Player; value: number } => entry.value !== null)
+      .sort((a, b) => b.value - a.value);
+
+    if (candidates.length === 0) continue;
+
+    const best = candidates[0];
+    const fresh = candidates.find(
+      (entry) => !alreadyWon.has(entry.player.id) && entry.value >= best.value * AWARD_SPREAD_FLOOR
+    );
+    const winner = spec.id === 'mvp' ? best : (fresh ?? best);
+
+    alreadyWon.add(winner.player.id);
+    awards.push({
+      id: spec.id,
+      title: spec.title,
+      icon: spec.icon,
+      color: spec.color,
+      playerId: winner.player.id,
+      playerName: winner.player.name,
+      detail: spec.detail(winner.player, ctx),
+    });
+  }
+
+  return awards;
 }

@@ -5,6 +5,7 @@ import { Mic, Users, Trophy, MapPin, UserMinus, WifiOff, Heart } from 'lucide-re
 import { Player } from '@/lib/types';
 import { BOARD_LENGTH, MAX_PLAYERS, STARTING_LIVES, TEAMS, boardProgress, getTeam } from '@/lib/gameRules';
 import AvatarIllustration from './AvatarIllustration';
+import HeatBadge from './HeatBadge';
 
 interface LeftSidebarProps {
   roomId: string;
@@ -108,6 +109,7 @@ export default function LeftSidebar({
                           {getTeam(player.teamId).icon}
                         </span>
                       )}
+                      <HeatBadge streak={player.streak} />
                     </div>
                     <p className="text-[10px] text-partyCyan font-bold flex items-center gap-1">
                       <Trophy className="w-2.5 h-2.5" /> {player.score} pts

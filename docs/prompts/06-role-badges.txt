@@ -44,9 +44,16 @@ Each is a gold #FFD166 circular medallion with a subtle raised rim and a dark na
 6. PLAYMAKER   — a running figure in motion.
 
 Emblems must be simple, solid and readable at 20x20 px.
-Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
-black — no gradient, no vignette, no ground shadow.
-No text, no letters, no numbers, no watermark.
+Background — READ CAREFULLY, this is where this prompt usually goes wrong:
+Every icon must sit directly on ONE single shared background covering the whole canvas.
+  - Do NOT give any icon its own panel, card, tile, rounded rectangle, frame, border,
+    vignette, spotlight or backing shape.
+  - Do NOT paint a starfield, nebula, stars, sparkle dust or texture behind the icons.
+  - Do NOT draw a grey-and-white checkerboard pattern. If the output cannot be truly
+    transparent, the background must be flat #000000 black across the entire canvas.
+  - Do NOT draw grid lines, separators or borders between the icons.
+  - Do NOT write any text, label, caption, title or letterform anywhere on the canvas.
+Preferred output: transparent PNG. Fallback: flat #000000 black.
 Output 1536x1024.
 
 AFTER: slice into leader.png, defender.png, speedster.png, strategist.png,

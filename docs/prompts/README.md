@@ -32,3 +32,41 @@ emoji — see §8.
 
 Background removal, resizing and wiring the files into the code: §4 of
 `../AI_ASSET_PROMPTS.md`.
+
+---
+
+## Cropping: don't do it by hand
+
+`scripts/slice-sheet.py` cuts a sheet into individual square PNGs with the background
+keyed out. It finds each icon by its own content bounds rather than assuming an even
+grid, so uneven spacing, empty cells and single-row strips all work.
+
+```bash
+pip install pillow numpy scipy      # once
+
+python3 scripts/slice-sheet.py ~/Downloads/sheet.png -o public/modes --size 512 \
+  -n board,voice,party,ai_master,team_battle,chess,ludo
+```
+
+Names are applied in reading order — left to right, top to bottom — and each prompt's
+`AFTER:` line already lists them in that order, ready to paste after `-n`.
+
+Add `--dry-run` first: it prints what it found and where, and writes nothing. If the
+count it reports doesn't match your names, the sheet is the problem, not the tool —
+check it before writing 15 mislabelled files.
+
+Flags worth knowing:
+
+| Flag | When |
+| --- | --- |
+| `--soft` | art generated on a **black** background — fades outer glows into alpha instead of cutting them off, which is what removes the dark ring around glowing icons |
+| `--grid RxC` | auto-detection merged or split icons; forces an even grid instead |
+| `--drop-bottom PX` | the model baked a text label under each icon; cuts that strip off first |
+| `--size N` | output size, default 512 (use 256 for tile and badge sheets) |
+| `--dry-run` | report only |
+
+**What it cannot fix.** Keying only removes background that touches the edge of the
+sheet. If the model drew each icon on its own dark panel, or scattered a starfield
+behind them, that is artwork as far as any tool is concerned — it comes out attached to
+the icon. That is what the Background block in every prompt is defending against, and
+if a sheet comes back that way the fix is to regenerate it, not to fight the crop.

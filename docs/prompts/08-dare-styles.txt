@@ -48,10 +48,18 @@ like party-game category badges.
 8. NOLLYWOOD CRYING     — a single dramatic teardrop with a film-clapperboard corner
                           behind it, deep navy and gold.
 
-Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
-black — no gradient, no vignette, no ground shadow.
+Background — READ CAREFULLY, this is where this prompt usually goes wrong:
+Every icon must sit directly on ONE single shared background covering the whole canvas.
+  - Do NOT give any icon its own panel, card, tile, rounded rectangle, frame, border,
+    vignette, spotlight or backing shape.
+  - Do NOT paint a starfield, nebula, stars, sparkle dust or texture behind the icons.
+  - Do NOT draw a grey-and-white checkerboard pattern. If the output cannot be truly
+    transparent, the background must be flat #000000 black across the entire canvas.
+  - Do NOT draw grid lines, separators or borders between the icons.
+  - Do NOT write any text, label, caption, title or letterform anywhere on the canvas.
+Preferred output: transparent PNG. Fallback: flat #000000 black.
 Must read at 32x32 px.
-No text, no letters, no numbers, no realistic faces, no watermark, no border frame.
+No realistic human faces.
 Output 2048x1024.
 
 AFTER: slice into sing.png, accent.png, dramatic.png, whisper.png, twister.png,

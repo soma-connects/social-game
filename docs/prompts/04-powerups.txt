@@ -46,10 +46,17 @@ identical lighting, identical scale, identical 3/4 view. Leave the 8th cell empt
 7. BURIED MINE — a spiked naval sea-mine half-buried in glowing cracked ground,
    terracotta #FF5722 spikes, red warning light on top.
 
-Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
-black — no gradient, no vignette, no ground shadow.
+Background — READ CAREFULLY, this is where this prompt usually goes wrong:
+Every icon must sit directly on ONE single shared background covering the whole canvas.
+  - Do NOT give any icon its own panel, card, tile, rounded rectangle, frame, border,
+    vignette, spotlight or backing shape.
+  - Do NOT paint a starfield, nebula, stars, sparkle dust or texture behind the icons.
+  - Do NOT draw a grey-and-white checkerboard pattern. If the output cannot be truly
+    transparent, the background must be flat #000000 black across the entire canvas.
+  - Do NOT draw grid lines, separators or borders between the icons.
+  - Do NOT write any text, label, caption, title or letterform anywhere on the canvas.
+Preferred output: transparent PNG. Fallback: flat #000000 black.
 Each icon must read clearly at 40x40 px.
-No text, no letters, no numbers, no labels, no captions, no border frame.
 Output 2048x1024.
 
 AFTER: slice into boost.png, rewind.png, shield.png, dare_gun.png, freeze.png,

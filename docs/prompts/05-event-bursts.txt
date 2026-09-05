@@ -54,9 +54,16 @@ clean.
 12. BOMB         — a black cartoon bomb mid-detonation, hot pink #FF4757 blast ring
                    bursting outward from it.
 
-Background: transparent PNG. If transparency is unavailable, use pure #000000 flat
-black — no gradient, no vignette, no ground shadow.
-No text, no letters, no numbers, no watermark, no border frame.
+Background — READ CAREFULLY, this is where this prompt usually goes wrong:
+Every icon must sit directly on ONE single shared background covering the whole canvas.
+  - Do NOT give any icon its own panel, card, tile, rounded rectangle, frame, border,
+    vignette, spotlight or backing shape.
+  - Do NOT paint a starfield, nebula, stars, sparkle dust or texture behind the icons.
+  - Do NOT draw a grey-and-white checkerboard pattern. If the output cannot be truly
+    transparent, the background must be flat #000000 black across the entire canvas.
+  - Do NOT draw grid lines, separators or borders between the icons.
+  - Do NOT write any text, label, caption, title or letterform anywhere on the canvas.
+Preferred output: transparent PNG. Fallback: flat #000000 black.
 Output 2048x1536.
 
 AFTER: slice into wormhole.png, asteroid.png, shield_block.png, shield_gain.png,

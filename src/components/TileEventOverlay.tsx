@@ -3,6 +3,17 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BoardEvent, BoardEventKind } from '@/lib/types';
+import { eventArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
+
+/**
+ * Events a player caused by spending an item, rather than ones the board dealt
+ * them. These get the cast animation: somebody chose this, and on an offensive
+ * item somebody else is about to wear it.
+ */
+const CAST_KINDS = new Set<BoardEventKind>([
+  'boost', 'rewind', 'freeze', 'bomb', 'shield_up', 'shield_block', 'dare',
+]);
 
 interface TileEventOverlayProps {
   /** The event to play. Null shows nothing. */
@@ -56,6 +67,7 @@ export default function TileEventOverlay({ event, onComplete }: TileEventOverlay
   if (!event) return null;
 
   const look = LOOKS[event.kind] ?? LOOKS.wormhole;
+  const isCast = CAST_KINDS.has(event.kind);
   const cleanBanner = event.banner.replace(/^[^\w\s]+\s*/, '');
 
   return (
@@ -76,19 +88,53 @@ export default function TileEventOverlay({ event, onComplete }: TileEventOverlay
           >
             <div className="absolute inset-0 bg-black/25" />
 
+            {/* Two layers: the outer one plays the cast once, the inner one
+                loops forever. Framer cannot do both on a single element — a
+                one-shot entry and an infinite idle fight over the same
+                properties, and the idle wins immediately. */}
             <motion.div
-              animate={{
-                rotate: look.spin === 'cw' ? [0, 360] : look.spin === 'ccw' ? [0, -360] : 0,
-                scale: look.pulse ? [1, 1.25, 1] : 1,
-              }}
-              transition={{
-                duration: look.spin ? 4 : 1.4,
-                repeat: Infinity,
-                ease: look.spin ? 'linear' : 'easeInOut',
-              }}
-              className="text-7xl sm:text-8xl mb-5 drop-shadow-[0_0_20px_rgba(255,255,255,0.6)] relative z-10"
+              initial={
+                isCast
+                  ? { scale: 0.2, rotate: -35, opacity: 0, x: event.targetPlayerName ? -70 : 0 }
+                  : { scale: 0.8, opacity: 0, x: 0 }
+              }
+              animate={{ scale: 1, rotate: 0, opacity: 1, x: 0 }}
+              transition={{ type: 'spring', damping: 11, stiffness: 260, delay: 0.05 }}
+              className="relative mb-5 z-10"
             >
-              {look.icon}
+              {/* Shockwave. Two rings, offset, once each — a loop would turn a
+                  moment of impact into wallpaper for the next three seconds. */}
+              {isCast &&
+                [0, 0.18].map((delay) => (
+                  <motion.span
+                    key={delay}
+                    initial={{ scale: 0.3, opacity: 0.75 }}
+                    animate={{ scale: 2.6, opacity: 0 }}
+                    transition={{ duration: 0.85, delay: 0.1 + delay, ease: 'easeOut' }}
+                    className="absolute inset-0 rounded-full border-2 border-white/80 pointer-events-none"
+                  />
+                ))}
+
+              <motion.div
+                animate={{
+                  rotate: look.spin === 'cw' ? [0, 360] : look.spin === 'ccw' ? [0, -360] : 0,
+                  scale: look.pulse ? [1, 1.25, 1] : 1,
+                }}
+                transition={{
+                  duration: look.spin ? 4 : 1.4,
+                  repeat: Infinity,
+                  ease: look.spin ? 'linear' : 'easeInOut',
+                  delay: 0.35,
+                }}
+                className="drop-shadow-[0_0_20px_rgba(255,255,255,0.6)]"
+              >
+                <GameIcon
+                  src={eventArt(event.kind)}
+                  emoji={look.icon}
+                  className="w-32 h-32 sm:w-36 sm:h-36 text-7xl sm:text-8xl"
+                  eager
+                />
+              </motion.div>
             </motion.div>
 
             {/* Who this happened to. The room is watching somebody else's turn

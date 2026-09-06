@@ -6,6 +6,8 @@ import { Player, RoundResult } from '@/lib/types';
 import { MINIGAME_LABELS, SHOP_ITEMS, describePerformance } from '@/lib/gameRules';
 import { roomStore } from '@/lib/roomStore';
 import { audioSFX } from '@/lib/audioFeedback';
+import { powerupArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
 import AvatarIllustration from './AvatarIllustration';
 
 interface PowerupShopProps {
@@ -118,7 +120,12 @@ export default function PowerupShop({
                 }`}
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="text-2xl p-1.5 rounded-xl bg-white/10 shrink-0">{item.icon}</span>
+                  <GameIcon
+                    src={powerupArt(item.id)}
+                    emoji={item.icon}
+                    alt={item.name}
+                    className="w-11 h-11 text-2xl p-1.5 rounded-xl bg-white/10 shrink-0"
+                  />
                   <div className="min-w-0">
                     <h5 className="font-extrabold text-xs text-white flex items-center gap-1.5">
                       {item.name}

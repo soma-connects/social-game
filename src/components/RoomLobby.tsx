@@ -25,6 +25,8 @@ import { roomStore } from '@/lib/roomStore';
 import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState } from '@/lib/types';
 import { MAX_PLAYERS, TEAMS } from '@/lib/gameRules';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
+import { vibeArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
 
 const MINI_GAMES: { id: MiniGameId; name: string; icon: string; blurb: string }[] = [
   { id: 'voice_arena', name: 'Voice Arena', icon: '🎙️', blurb: 'Say the prompt before the timer dies' },
@@ -619,7 +621,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                                 🔒 SOON
                               </span>
                             )}
-                            <span className="text-lg block">{vibe.emoji}</span>
+                            <GameIcon src={vibeArt(vibe.id)} emoji={vibe.emoji} className="w-7 h-7 text-lg mx-auto" />
                             <span className="font-extrabold text-xs block mt-0.5">{vibe.label}</span>
                             <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{vibe.blurb}</span>
                             {isSelected && (

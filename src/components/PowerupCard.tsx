@@ -2,7 +2,8 @@
 
 import React from 'react';
 import { PowerupItem } from '@/lib/types';
-import { Zap } from 'lucide-react';
+import { powerupArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
 
 interface PowerupCardProps {
   powerup: PowerupItem;
@@ -23,7 +24,12 @@ export default function PowerupCard({ powerup, onUse, disabled = false }: Poweru
         }`}
       >
         <div className="flex items-center gap-2.5">
-          <span className="text-xl p-1.5 rounded-xl bg-white/10">{powerup.icon}</span>
+          <GameIcon
+            src={powerupArt(powerup.id)}
+            emoji={powerup.icon}
+            alt={powerup.name}
+            className="w-9 h-9 text-xl p-1 rounded-xl bg-white/10 shrink-0"
+          />
           <div>
             <h5 className="font-extrabold text-xs text-white">{powerup.name}</h5>
             <p className="text-[10px] text-gray-300 max-w-[120px] truncate">{powerup.description}</p>

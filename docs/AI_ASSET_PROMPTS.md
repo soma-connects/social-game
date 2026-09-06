@@ -793,13 +793,11 @@ compass, medal. Found across `GameHeader.tsx`, `VoiceCallBar.tsx`, `LeftSidebar.
 
 Generating them as PNGs would be a mistake: a control icon has to stay razor-sharp at
 16 px, flip colour on hover and focus, respond to `currentColor`, and never cost an HTTP
-request. Raster art does none of that. Install a vector set instead:
+request. Raster art does none of that — use a vector set.
 
-```bash
-npm install lucide-react
-```
-
-Then the mapping is direct:
+`lucide-react` is already a dependency and already used in 42 components, so the
+remaining emoji controls are leftovers rather than a missing library. Nothing to
+install; the mapping is direct:
 
 | Emoji | Where | lucide-react |
 | --- | --- | --- |

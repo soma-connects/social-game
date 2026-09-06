@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import { Palette, Check, Sparkles } from 'lucide-react';
 import { MapTheme } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
+import { themeArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
 import { audioSFX } from '@/lib/audioFeedback';
 
 interface ThemeSelectorProps {
@@ -26,7 +28,7 @@ export default function ThemeSelector({ currentTheme, onSelectTheme }: ThemeSele
         onClick={() => setIsOpen(!isOpen)}
         className="glass-pill hover:bg-white/20 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-2 border border-white/20 transition-all shadow-md"
       >
-        <span className="text-base">{THEMES[currentTheme].icon}</span>
+        <GameIcon src={themeArt(currentTheme)} emoji={THEMES[currentTheme].icon} className="w-5 h-5 text-base" />
         <span className="hidden sm:inline">{THEMES[currentTheme].name}</span>
         <Palette className="w-3.5 h-3.5 text-partyYellow" />
       </button>
@@ -54,7 +56,7 @@ export default function ThemeSelector({ currentTheme, onSelectTheme }: ThemeSele
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
-                    <span className="text-lg">{theme.icon}</span>
+                    <GameIcon src={themeArt(theme.id)} emoji={theme.icon} className="w-6 h-6 text-lg" />
                     <span className="font-bold">{theme.name}</span>
                   </div>
                   {isSelected && <Check className="w-4 h-4 text-partyCyan" />}

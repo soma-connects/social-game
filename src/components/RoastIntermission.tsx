@@ -24,6 +24,8 @@ import { Player, RoomState, SocialReactionId } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
 import { MINIGAME_FAIL_THRESHOLD, STARTING_LIVES } from '@/lib/gameRules';
+import { socialArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
 import { VoiceClip } from '@/hooks/useVoiceRecorder';
 import AvatarIllustration from './AvatarIllustration';
 import VoiceReplay from './VoiceReplay';
@@ -275,7 +277,7 @@ export default function RoastIntermission({
                 onClick={() => triggerSound(item.action)}
                 className="glass-pill hover:bg-white/20 active:scale-95 text-white font-extrabold text-xs py-3 px-2 rounded-xl border border-white/20 flex flex-col items-center justify-center gap-1 transition-all shadow-md"
               >
-                <span className="text-xl">{item.icon}</span>
+                <GameIcon src={socialArt(item.id)} emoji={item.icon} className="w-7 h-7 text-xl mx-auto" />
                 <span className="text-[10px] truncate w-full text-center">{item.name}</span>
               </button>
             ))}
@@ -296,7 +298,7 @@ export default function RoastIntermission({
                   className="glass-pill hover:bg-partyYellow/20 active:scale-95 text-white font-bold text-xs py-3 px-3 rounded-2xl border border-partyYellow/40 flex items-center justify-between gap-2 transition-all shadow-lg"
                 >
                   <span className="flex items-center gap-2">
-                    <span className="text-lg">{btn.icon}</span>
+                    <GameIcon src={socialArt(btn.id)} emoji={btn.icon} className="w-6 h-6 text-lg mx-auto" />
                     <span>{btn.label}</span>
                   </span>
                   <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded-full font-mono text-partyYellow font-black">

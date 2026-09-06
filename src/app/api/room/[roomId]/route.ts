@@ -56,6 +56,7 @@ import {
   performanceToSteps,
   pickMiniGame,
   rememberMiniGame,
+  recordPlayedMiniGame,
   resolveTile,
   scoreToPerformance,
   sumReactionBonus,
@@ -72,6 +73,12 @@ import {
   writeSecrets,
 } from '@/lib/server/roomServer';
 import { archiveMatch } from '@/lib/server/matchArchive';
+import {
+  newSessionId,
+  recordSessionCompleted,
+  recordSessionCreated,
+  recordSessionStarted,
+} from '@/lib/server/sessionArchive';
 import { verifyUid } from '@/lib/firebase/server';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES } from '@/lib/roomVibes';
@@ -284,6 +291,10 @@ function advanceRoundOrOpenShop(room: RoomState): void {
     if (room.roomType !== 'team_battle') {
       room.recentMiniGames = rememberMiniGame(room.recentMiniGames, game);
     }
+
+    // The permanent log, on the other hand, records every mode and never drops
+    // the early rounds — it is what the archive reports as gamesPlayed.
+    room.playedMiniGames = recordPlayedMiniGame(room.playedMiniGames, game);
 
     room.currentMiniGame = game;
     room.phase = miniGamePhase(game);
@@ -1209,8 +1220,10 @@ async function createRoom(
 ): Promise<{ room: RoomState; playerId: string; token: string }> {
   const host = makePlayer(hostName, 0, true);
   if (hostUid) host.uid = hostUid;
+  const createdAt = Date.now();
   const room: RoomState = {
     roomId,
+    sessionId: newSessionId(roomId, createdAt),
     hostId: host.id,
     phase: 'lobby',
     roomType,
@@ -1240,6 +1253,11 @@ async function createRoom(
   };
   pushEvent(room, `🎮 ${host.name} opened room ${roomId}`, 'system');
   await writeRoom(room);
+
+  // Opens the funnel row. Awaited but never throws — a room that was created
+  // and abandoned is the single most useful thing the dashboard can show, and
+  // it is also the one case that will never report itself later.
+  await recordSessionCreated(room, createdAt);
 
   const token = newToken();
   await writeSecrets(roomId, { tokens: { [host.id]: token } });
@@ -1341,6 +1359,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       // than by anything this loop tracks.
       if (room.phase === 'game_over' && !room.matchArchived) {
         await archiveMatch(room, 'winner');
+        await recordSessionCompleted(room, 'winner');
       }
 
       return response;
@@ -2697,6 +2716,7 @@ async function applyAction(
       room.matchArchived = false;
       room.winner = null;
       room.aiMasterState = null;
+      await recordSessionStarted(room);
       for (const player of room.players) {
         player.lives = STARTING_LIVES;
         delete player.eliminated;
@@ -2864,11 +2884,20 @@ async function applyAction(
       room.turnResult = null;
       room.lastMove = null;
       room.awards = null;
+      // Match-scoped, so cleared where the match begins rather than trusting
+      // that end_match ran first — a second match in the same room would
+      // otherwise archive the previous one's mini-games as its own.
+      room.recentMiniGames = [];
+      room.playedMiniGames = [];
       for (const player of room.players) {
         player.lives = STARTING_LIVES;
         delete player.eliminated;
         resetMatchStats(player);
       }
+
+      // Moves the funnel row from "a room was opened" to "a match actually
+      // began" — the step most rooms are expected to fall out of.
+      await recordSessionStarted(room);
 
       if (room.enabledMiniGames?.includes('story_builder')) {
         room.storyBuilderState = { prompt: '', story: [], currentPlayerIndex: 0, phase: 'prompting', votes: {} };
@@ -2913,6 +2942,7 @@ async function applyAction(
       // match already ended with a winner it was archived then, and
       // archiveMatch's create() makes the second call a no-op.
       await archiveMatch(room, room.winner ? 'winner' : 'ended_early');
+      await recordSessionCompleted(room, room.winner ? 'winner' : 'ended_early');
 
       for (const player of room.players) {
         player.boardPosition = 0;
@@ -2948,6 +2978,7 @@ async function applyAction(
       room.socialRound = null;
       room.liveState = null;
       room.recentMiniGames = [];
+      room.playedMiniGames = [];
       room.truthBluffState = null;
       room.storyBuilderState = null;
       room.debateState = null;

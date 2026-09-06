@@ -500,6 +500,23 @@ export function rememberMiniGame(recent: MiniGameId[] | undefined, game: MiniGam
   return [...(recent ?? []), game].slice(-MINIGAME_HISTORY_WINDOW);
 }
 
+/**
+ * Upper bound on the archived mini-game log.
+ *
+ * High enough that no realistic match reaches it — a long evening is well under
+ * a hundred rounds — and low enough that a stuck room cannot grow the document
+ * the whole table re-reads on every poll.
+ */
+export const PLAYED_MINIGAMES_LIMIT = 200;
+
+/** Appends to the permanent per-match log the archive reads. */
+export function recordPlayedMiniGame(
+  played: MiniGameId[] | undefined,
+  game: MiniGameId
+): MiniGameId[] {
+  return [...(played ?? []), game].slice(-PLAYED_MINIGAMES_LIMIT);
+}
+
 export const BOARD_GRAPH: Record<number, BoardNode> = {
   0: { id: 0, type: 'normal', next: [24], x: 15, y: 85 },
   1: { id: 1, type: 'buff', next: [27], x: 10, y: 65 },

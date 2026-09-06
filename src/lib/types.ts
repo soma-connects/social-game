@@ -454,6 +454,15 @@ export type RoomState = {
   hostId: string;
   phase: GamePhase;
   /**
+   * Identifies this opening of the room for the usage funnel.
+   *
+   * Distinct from matchId and longer-lived: it is minted when the room is
+   * created and survives every match played in it, because the funnel's whole
+   * point is to count rooms that never reached a match at all. Room codes are
+   * reused, so the code alone cannot identify a session.
+   */
+  sessionId?: string | null;
+  /**
    * Identifies the current match for the permanent `matches` record. Minted
    * when the room leaves the lobby and cleared when it returns, so it doubles
    * as "a match is in progress".
@@ -505,6 +514,20 @@ export type RoomState = {
    * rather than bad luck.
    */
   recentMiniGames?: MiniGameId[];
+  /**
+   * Every mini-game this match has served, in order, for the permanent record.
+   *
+   * Deliberately separate from `recentMiniGames`, which exists to feed the
+   * repeat rule and is therefore capped at MINIGAME_HISTORY_WINDOW and skipped
+   * entirely for Team Battle. Both of those are correct for what it does and
+   * wrong for analytics: a twelve-round match archived only its last six picks,
+   * and a Team Battle archived none at all, so "which mini-games actually get
+   * played" was answered with truncated, mode-biased data.
+   *
+   * Bounded generously rather than left to grow without limit — the whole room
+   * document is re-read on a poll, so an unbounded array is a slow leak.
+   */
+  playedMiniGames?: MiniGameId[];
   /** Result of this turn's mini-game, cleared once the player has moved. */
   turnResult?: TurnResult | null;
   /** Laugh meter and peer judge votes for the active voice-related round. */

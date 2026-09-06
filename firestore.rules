@@ -42,6 +42,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Usage funnel: one row per room opening, written only by the Admin SDK.
+    //
+    // Closed to browsers for the same reason as matches, plus one of its own:
+    // these rows are what the admin dashboard reads, and a client that could
+    // write here could manufacture the usage numbers the product is steered by.
+    match /sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
     // Lifetime totals per Firebase Auth uid.
     //
     // Deliberately not "allow read: if request.auth.uid == playerId". That rule

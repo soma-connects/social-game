@@ -11,7 +11,7 @@ import MapRenderer from './MapRenderer';
 import BackgroundMusic from './BackgroundMusic';
 import DiceRoller, { type RollBonus } from './DiceRoller';
 import TileEventOverlay from './TileEventOverlay';
-import { TOTAL_TILES } from '@/lib/gameRules';
+import { TOTAL_TILES, boardProgress, heatTier, leaderProgressOf, slipstreamSteps } from '@/lib/gameRules';
 
 interface RoadmapBoardProps {
   room: RoomState;
@@ -166,6 +166,15 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
   const roomMove =
     room.lastMove && Date.now() - room.lastMove.at < 20000 ? room.lastMove : null;
 
+  // The bonuses this player's roll already qualifies for. Recomputed client-side
+  // from the same shared rules the server uses, so the preview and the roll
+  // agree without needing an extra request.
+  const pendingHeat = heatTier(activePlayer.streak ?? 0).stepBonus;
+  const pendingSlipstream = slipstreamSteps(
+    boardProgress(activePlayer.boardPosition),
+    leaderProgressOf(room.players)
+  );
+
   // Bonus chips for the dice overlay, built from the breakdown the roll request
   // returned rather than from the room snapshot, which is still describing the
   // previous player at the moment the dice is thrown.
@@ -265,6 +274,25 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
 
       {/* STICKY FLOATING ACTION BUTTON (FAB) IN THE MIDDLE AT THE BOTTOM — MOBILE OPTIMIZED! */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-xs px-4 flex flex-col items-center gap-2">
+        {/* What the roll is already worth, before it is thrown.
+            The dice reveals earned steps rather than a random number, so this
+            is knowable in advance — and telling a trailing player the catch-up
+            is coming is the difference between rolling and giving up. */}
+        {canRoll && !hasRolled && !isRolling && (pendingHeat > 0 || pendingSlipstream > 0) && (
+          <div className="flex items-center gap-1.5 text-[10px] font-black">
+            {pendingHeat > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-orange-500/25 border border-orange-400/60 text-orange-200">
+                🔥 +{pendingHeat} STREAK
+              </span>
+            )}
+            {pendingSlipstream > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/25 border border-emerald-400/60 text-emerald-200">
+                💨 +{pendingSlipstream} SLIPSTREAM
+              </span>
+            )}
+          </div>
+        )}
+
         {!hasRolled ? (
           <button
             onClick={rollDice}

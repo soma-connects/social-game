@@ -35,6 +35,9 @@ import {
   MINIGAME_FAIL_THRESHOLD,
   STARTING_LIVES,
   STREAK_KEEP_THRESHOLD,
+  PRESENCE_TIMEOUT_MS,
+  isPresent,
+  leaderProgressOf,
   applyHeat,
   computeAwards,
   heatTier,
@@ -152,8 +155,9 @@ function pickSocialBadge(round: SocialRound | null, performance: number): string
   return 'Voice Rookie';
 }
 
-/** How long a player can go without a heartbeat before we treat them as gone. */
-const PRESENCE_TIMEOUT_MS = 25000;
+// PRESENCE_TIMEOUT_MS now lives in gameRules: the board previews the bonuses a
+// roll has already earned, so the client has to pick the same leader this file
+// does, and two copies of the timeout would drift.
 
 /**
  * Ceiling on a base64 Guess the Voice clip.
@@ -185,9 +189,7 @@ const PERFORMER_PHASES = new Set<GamePhase>([
  */
 function activePlayers(room: RoomState): Player[] {
   const now = Date.now();
-  return room.players.filter(
-    (p) => p.connected !== false && now - (p.lastSeen ?? now) < PRESENCE_TIMEOUT_MS
-  );
+  return room.players.filter((p) => isPresent(p, now));
 }
 
 /** Drops players who have gone quiet, and hands the host role on if needed. */
@@ -885,10 +887,7 @@ function recordRound(
 
 /** Board depth of whoever is furthest along, for the slipstream gap. */
 function leaderProgress(room: RoomState): number {
-  return activePlayers(room).reduce(
-    (best, player) => Math.max(best, boardProgress(player.boardPosition)),
-    0
-  );
+  return leaderProgressOf(room.players);
 }
 
 /**

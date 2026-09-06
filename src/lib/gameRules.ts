@@ -694,6 +694,36 @@ export const SLIPSTREAM_MAX_STEPS = 6;
  * the result of a round: a player who aces the mini-game still out-runs a
  * player who bombed it and is being carried by the deficit bonus.
  */
+/**
+ * How long a player can go without a heartbeat before they count as gone.
+ *
+ * Shared rather than server-only because the board previews the bonuses a roll
+ * has already earned, and that preview has to pick the same leader the server
+ * will. A client that only checked `connected` would keep counting somebody who
+ * closed their laptop as the pace-setter, and quietly show a slipstream figure
+ * the roll then contradicts.
+ */
+export const PRESENCE_TIMEOUT_MS = 25000;
+
+/** Whether a player is still in the room, by connection flag and heartbeat. */
+export function isPresent(
+  player: { connected?: boolean; lastSeen?: number },
+  now: number = Date.now()
+): boolean {
+  return player.connected !== false && now - (player.lastSeen ?? now) < PRESENCE_TIMEOUT_MS;
+}
+
+/** Board depth of whoever is furthest along, ignoring players who have gone. */
+export function leaderProgressOf(
+  players: { connected?: boolean; lastSeen?: number; boardPosition: number }[],
+  now: number = Date.now()
+): number {
+  return players.reduce(
+    (best, player) => (isPresent(player, now) ? Math.max(best, boardProgress(player.boardPosition)) : best),
+    0
+  );
+}
+
 export function slipstreamSteps(progress: number, leaderProgress: number): number {
   const gap = leaderProgress - progress;
   if (gap <= 0) return 0;

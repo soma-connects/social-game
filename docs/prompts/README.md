@@ -10,12 +10,12 @@ what you have will already be the most-seen art in the game.
 | --- | --- | --- | --- |
 | 01 | `01-mode-cards.txt` | 7 | `RoomLobby.tsx` mode tiles |
 | 02 | `02-board-tiles.txt` | 8 | `themeConfig.ts` → `nodeColors` |
-| 03 | `03-journey-tiles.txt` | 10 | `boardGraph.ts` → `TILE_ICONS` |
+| 03 | `03-journey-tiles.txt` | 10 | `boardGraph.ts` → `TILE_TYPE_ICONS` |
 | 04 | `04-powerups.txt` | 7 | `gameRules.ts` → `POWERUP_SHOP` |
-| 05 | `05-event-bursts.txt` | 12 | `TileEventOverlay.tsx` → `EVENT_STYLES` |
+| 05 | `05-event-bursts.txt` | 13 | `TileEventOverlay.tsx` → `LOOKS` |
 | 06 | `06-role-badges.txt` | 6 | `gameContent.ts` → `AVATARS` |
 | 07 | `07-room-vibes.txt` | 5 | `roomVibes.ts` → `ROOM_VIBES` |
-| 08 | `08-dare-styles.txt` | 8 | `gameContent.ts` → `DARE_STYLES` |
+| 08 | `08-dare-styles.txt` | 8 | `gameContent.ts` → `DARE_CATEGORIES` |
 | 09 | `09-soundboard-reactions.txt` | 15 | `RoastIntermission.tsx`, `AiMasterGame.tsx` |
 | 10 | `10-theme-icons.txt` | 7 | `themeConfig.ts` → theme `icon` |
 
@@ -100,3 +100,19 @@ The slicer warns when it sees a checkerboard, before it writes any files.
 
 If a PNG isn't available, the fallback that works is flat black — the Background block
 in every prompt already asks for exactly that.
+
+### Checking coverage against the code
+
+```bash
+python3 scripts/check-icons.py            # report
+python3 scripts/check-icons.py --strict   # exit 1 on any mismatch, for CI
+```
+
+It reads the ids straight out of the source — the `PowerupType`, `TileNodeType` and
+`MapTheme` unions in `src/lib/types.ts`, and the `TILE_TYPE_ICONS`, `LOOKS`,
+`DARE_CATEGORIES` and `ROOM_VIBES` literals — and compares them with what is actually
+in `public/`. It reports both directions: an id the code needs with no art yet, and a
+file whose name no code id will ever ask for.
+
+That second direction is the one worth having. A misnamed file looks completely fine in
+a folder listing and simply never loads.

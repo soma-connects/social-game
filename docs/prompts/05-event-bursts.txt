@@ -25,10 +25,10 @@ Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
 
 TASK — Sheet 5 of 10: TILE EVENT BURSTS
 Slices go to: public/events/*.png at 512x512
-Replaces the emoji in: src/components/TileEventOverlay.tsx (EVENT_STYLES)
+Replaces the emoji in: src/components/TileEventOverlay.tsx (LOOKS)
 
-Using the STYLE BIBLE above, generate ONE image: a 4-column x 3-row grid of twelve
-dramatic game-event icons on a single canvas, identical scale and lighting, each centred
+Using the STYLE BIBLE above, generate ONE image: a 5-column x 3-row grid of thirteen
+dramatic game-event icons (leave the last two cells empty) on a single canvas, identical scale and lighting, each centred
 in its own invisible square cell. These fire as a full-screen overlay when a player
 lands on something — so give each one motion, energy and glow, but keep the silhouette
 clean.
@@ -49,9 +49,11 @@ clean.
                    terracotta and gold.
 9.  FINISH       — a gold trophy erupting with confetti and light rays.
 10. BOOST        — a rocket climbing steeply, cyan #00F0FF flame, speed streaks behind.
-11. FREEZE       — a large crystalline snowflake with ice shards spreading from it,
+11. REWIND       — a double-left-arrow rewind symbol being dragged backwards, slate
+                   grey with cold blue motion streaks trailing to the right.
+12. FREEZE       — a large crystalline snowflake with ice shards spreading from it,
                    cyan #00F0FF, cold vapour.
-12. BOMB         — a black cartoon bomb mid-detonation, hot pink #FF4757 blast ring
+13. BOMB         — a black cartoon bomb mid-detonation, hot pink #FF4757 blast ring
                    bursting outward from it.
 
 Background — READ CAREFULLY, this is where this prompt usually goes wrong:
@@ -64,8 +66,8 @@ Every icon must sit directly on ONE single shared background covering the whole 
   - Do NOT draw grid lines, separators or borders between the icons.
   - Do NOT write any text, label, caption, title or letterform anywhere on the canvas.
 Preferred output: transparent PNG. Fallback: flat #000000 black.
-Output 2048x1536.
+Output 2560x1536.
 
 AFTER: slice into wormhole.png, asteroid.png, shield_block.png, shield_gain.png,
-shield_up.png, supply_drop.png, dare.png, duel.png, finish.png, boost.png, freeze.png,
-bomb.png
+shield_up.png, supply_drop.png, dare.png, duel.png, finish.png, boost.png, rewind.png,
+freeze.png, bomb.png

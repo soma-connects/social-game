@@ -461,7 +461,7 @@ above. Here are the other seven.
 
 ### Sheet 3 — Journey tiles  →  `public/tiles/journey/*.png`, 256×256
 
-Source: `TILE_ICONS` in `src/lib/boardGraph.ts` (10 icons). These mark what a space on
+Source: `TILE_TYPE_ICONS` in `src/lib/boardGraph.ts` (10 icons). These mark what a space on
 the road *does*, so each needs an instantly readable silhouette. Glyph only — the CSS
 draws the coloured disc behind it.
 
@@ -503,7 +503,7 @@ Slice → `minigame.png`, `ai_challenge.png`, `treasure.png`, `trap.png`, `myste
 
 ### Sheet 4 — Tile event bursts  →  `public/events/*.png`, 512×512
 
-Source: `EVENT_STYLES` in `src/components/TileEventOverlay.tsx` (12 icons). These fire
+Source: `LOOKS` in `src/components/TileEventOverlay.tsx` (12 icons). These fire
 as a big animated overlay when you land on something, so unlike the tile glyphs they
 **should** be dramatic — energy, motion, impact.
 
@@ -548,7 +548,7 @@ Slice → `wormhole.png`, `asteroid.png`, `shield_block.png`, `shield_gain.png`,
 
 ### Sheet 5 — Dare styles  →  `public/dares/*.png`, 256×256
 
-Source: `DARE_STYLES` in `src/lib/gameContent.ts` (8 icons). These are the performance
+Source: `DARE_CATEGORIES` in `src/lib/gameContent.ts` (8 icons). These are the performance
 styles a player can be forced into — the funniest part of the game, so let the art be
 funny too.
 

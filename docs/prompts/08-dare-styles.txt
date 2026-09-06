@@ -25,7 +25,7 @@ Never: photorealism, stock-photo look, watermarks, text, letters, numbers,
 
 TASK — Sheet 8 of 10: DARE PERFORMANCE STYLES
 Slices go to: public/dares/*.png at 256x256
-Replaces the emoji in: src/lib/gameContent.ts (DARE_STYLES)
+Replaces the emoji in: src/lib/gameContent.ts (DARE_CATEGORIES)
 
 Using the STYLE BIBLE above, generate ONE image: a 4-column x 2-row grid of eight
 comedic performance-style icons on a single canvas, identical scale and lighting, each

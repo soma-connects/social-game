@@ -161,6 +161,32 @@ def find_cells(content: np.ndarray, min_frac: float = 0.03) -> list:
     return cells
 
 
+def trim_caption(content: np.ndarray, cell: tuple) -> tuple:
+    """Cut a baked-in caption off the bottom of one cell.
+
+    When an icon is tall enough that its glow nearly touches the text beneath
+    it, the two land in a single content box and cropping to that box keeps the
+    words. A caption is recognisable by shape: a short, wide band at the bottom,
+    separated from the icon by a gap. Nothing in this art is shaped like that.
+    """
+    x0, y0, x1, y1 = cell
+    bands = runs(content[y0:y1, x0:x1].any(axis=1), 4)
+    if len(bands) < 2:
+        return cell
+
+    top, bottom = bands[-1]
+    height = bottom - top
+    if height >= (y1 - y0) * 0.35:
+        return cell                                   # too tall to be a caption
+
+    xs = np.nonzero(content[y0 + top:y0 + bottom, x0:x1].any(axis=0))[0]
+    if not len(xs) or (xs.max() - xs.min() + 1) / max(height, 1) < 2.0:
+        return cell                                   # not wide and flat: part of the icon
+
+    ys, xs = np.nonzero(content[y0:y0 + bands[-2][1], x0:x1])
+    return (x0 + xs.min(), y0 + ys.min(), x0 + xs.max() + 1, y0 + ys.max() + 1)
+
+
 def drop_specks(cells: list) -> tuple:
     """Discard fragments far smaller than the real icons.
 
@@ -273,6 +299,11 @@ def main() -> int:
         cells = grid_cells(content, rows, cols)
     else:
         cells = find_cells(content)
+
+    captioned = [c for c in cells if trim_caption(content, c) != c]
+    cells = [trim_caption(content, c) for c in cells]
+    if captioned:
+        print(f"  trimmed a caption off {len(captioned)} cell(s)")
 
     cells, specks = drop_specks(cells)
     if specks:

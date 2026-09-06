@@ -55,13 +55,17 @@ Add `--dry-run` first: it prints what it found and where, and writes nothing. If
 count it reports doesn't match your names, the sheet is the problem, not the tool —
 check it before writing 15 mislabelled files.
 
+Baked-in text labels are handled without a flag: captions that separate into their own
+blobs are ignored as too small, and one still attached to a tall icon is recognised by
+shape — a short, wide band with a gap above it — and cut. Both are reported.
+
 Flags worth knowing:
 
 | Flag | When |
 | --- | --- |
 | `--soft` | art generated on a **black** background — fades outer glows into alpha instead of cutting them off, which is what removes the dark ring around glowing icons |
 | `--grid RxC` | auto-detection merged or split icons; forces an even grid instead |
-| `--drop-bottom PX` | the model baked a text label under each icon; cuts that strip off first |
+| `--drop-bottom PX` | manual override when a baked-in label survives the automatic trim |
 | `--size N` | output size, default 512 (use 256 for tile and badge sheets) |
 | `--dry-run` | report only |
 

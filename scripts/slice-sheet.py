@@ -195,8 +195,12 @@ def drop_specks(cells: list) -> tuple:
     come out as extra "icons" and shift every name after them onto the wrong
     file. Real icons on one sheet are drawn at one scale, so anything under a
     fraction of the median area is not one of them.
+
+    Two cells is enough to judge: a single-icon sheet with one stray sparkle in
+    the corner is exactly the case, and the median of the pair still sits far
+    above the speck.
     """
-    if len(cells) < 3:
+    if len(cells) < 2:
         return cells, []
     areas = [(x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in cells]
     floor = float(np.median(areas)) * 0.15

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
+import { Trophy } from 'lucide-react';
 import { MapTheme, Player } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
 // Shared with the server so the board shown matches the tile effects applied.
@@ -195,7 +196,7 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
       {/* Bottom Landmark Track Decoration */}
       <div className="flex justify-between items-center z-10 pt-2 border-t border-white/10 text-xs font-bold text-cyan-200/70 tracking-widest">
         <span className="flex items-center gap-1">LAUNCHPAD (TILE #1)</span>
-        <span className="flex items-center gap-1">AURORA STATION (TILE #24) 🏆</span>
+        <span className="flex items-center gap-1">AURORA STATION (TILE #24) <Trophy className="w-3 h-3" /></span>
       </div>
     </div>
   );

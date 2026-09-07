@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Mic, Play, Users, Sparkles, MessageCircle, Share2, Globe } from 'lucide-react';
+import { Mic, Play, Users, Sparkles, MessageCircle, Share2, Globe, Zap } from 'lucide-react';
 import { roomStore } from '@/lib/roomStore';
 import { audioSFX } from '@/lib/audioFeedback';
 import { AVATARS } from '@/lib/gameContent';
@@ -158,9 +158,9 @@ export default function HomePage() {
         </div>
 
         <div className="flex items-center justify-center gap-6 text-xs text-gray-400 font-medium pt-2">
-          <span className="flex items-center gap-1.5">🎙️ Web Speech STT</span>
-          <span className="flex items-center gap-1.5">💬 WhatsApp Invite</span>
-          <span className="flex items-center gap-1.5">⚡ Opponent Traps</span>
+          <span className="flex items-center gap-1.5"><Mic className="w-3.5 h-3.5" /> Web Speech STT</span>
+          <span className="flex items-center gap-1.5"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp Invite</span>
+          <span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5" /> Opponent Traps</span>
         </div>
       </div>
     </main>

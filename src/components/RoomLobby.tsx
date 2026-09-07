@@ -608,8 +608,8 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                             }`}
                           >
                             {vibe.comingSoon && (
-                              <span className="absolute top-1.5 right-1.5 bg-black/50 text-partyYellow text-[8px] font-black px-1.5 py-0.5 rounded-full border border-partyYellow/30">
-                                🔒 SOON
+                              <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-0.5 bg-black/50 text-partyYellow text-[8px] font-black px-1.5 py-0.5 rounded-full border border-partyYellow/30">
+                                <LockKeyhole className="w-2 h-2" /> SOON
                               </span>
                             )}
                             <GameIcon src={vibeArt(vibe.id)} emoji={vibe.emoji} className="w-7 h-7 text-lg mx-auto" />

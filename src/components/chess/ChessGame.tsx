@@ -10,7 +10,7 @@ import ChessBoard from './ChessBoard';
 import ChessClocks from './ChessClocks';
 import BackgroundMusic from '../BackgroundMusic';
 import { audioSFX } from '@/lib/audioFeedback';
-import { Flag, RotateCcw, MessageSquare, Check, X, ShieldAlert, Sparkles } from 'lucide-react';
+import { Flag, RotateCcw, MessageSquare, Check, X, ShieldAlert, Sparkles, Bot, Users, Swords, Trophy, Lightbulb } from 'lucide-react';
 
 interface ChessGameProps {
   room: RoomState;
@@ -165,8 +165,14 @@ export default function ChessGame({ room, myPlayer, roomId }: ChessGameProps) {
       {/* Game Mode Badge & Status Header */}
       <div className="flex items-center justify-between w-full px-2">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 uppercase tracking-widest">
-            {cs.mode === 'vs_ai' ? `🤖 VS AI (${cs.botDifficulty})` : cs.mode === '2v2' ? '👥 2v2 CONSULTATION' : '⚔️ 1v1 DUEL'}
+          <span className="inline-flex items-center gap-1.5 text-xs font-black px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 uppercase tracking-widest">
+            {cs.mode === 'vs_ai' ? (
+              <><Bot className="w-3.5 h-3.5" /> VS AI ({cs.botDifficulty})</>
+            ) : cs.mode === '2v2' ? (
+              <><Users className="w-3.5 h-3.5" /> 2v2 Consultation</>
+            ) : (
+              <><Swords className="w-3.5 h-3.5" /> 1v1 Duel</>
+            )}
           </span>
           {isSpectator && (
             <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
@@ -178,8 +184,8 @@ export default function ChessGame({ room, myPlayer, roomId }: ChessGameProps) {
         {/* Turn Indicator */}
         <div className="flex items-center gap-2">
           {cs.winner ? (
-            <span className="text-xs font-black text-amber-300 bg-amber-500/20 px-3 py-1 rounded-lg border border-amber-500/30 animate-pulse">
-              🏆 {cs.winReason}: {cs.winner === 'w' ? 'WHITE WINS' : cs.winner === 'b' ? 'BLACK WINS' : 'DRAW'}
+            <span className="inline-flex items-center gap-1.5 text-xs font-black text-amber-300 bg-amber-500/20 px-3 py-1 rounded-lg border border-amber-500/30 animate-pulse">
+              <Trophy className="w-3.5 h-3.5" /> {cs.winReason}: {cs.winner === 'w' ? 'WHITE WINS' : cs.winner === 'b' ? 'BLACK WINS' : 'DRAW'}
             </span>
           ) : (
             <span className="text-xs font-bold text-slate-300">
@@ -267,8 +273,8 @@ export default function ChessGame({ room, myPlayer, roomId }: ChessGameProps) {
             <Flag className="w-3.5 h-3.5" /> Resign
           </button>
           {is2v2Mode && (
-            <p className="text-[11px] text-slate-400 italic">
-              💡 Tip: Click pieces to propose moves to your teammate!
+            <p className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 italic">
+              <Lightbulb className="w-3.5 h-3.5 shrink-0" /> Tip: Click pieces to propose moves to your teammate!
             </p>
           )}
         </div>

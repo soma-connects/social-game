@@ -786,10 +786,17 @@ No text, no letters, no numbers. Output 2048×512.
 
 ## 7. Group B — UI chrome: use vectors, do NOT generate these
 
-These emoji are **controls**, not art: mic on/off, mute, settings, lock, tick, cross,
-back, leave, copy, search, user, users, flag, refresh, plug, bell, lightbulb, coin,
-compass, medal. Found across `GameHeader.tsx`, `VoiceCallBar.tsx`, `LeftSidebar.tsx`,
-`RoomLobby.tsx`, `AiMasterGame.tsx`, `ChessGame.tsx`, `page.tsx`.
+These emoji are **controls and status markers**, not art.
+
+A correction to an earlier version of this section: it claimed roughly twenty of them
+and listed mic, mute, settings and leave among the offenders. Those were already
+`lucide-react` — `VoiceCallBar`, `GameHeader`, `LeftSidebar` and `MicContentionNotice`
+had been converted long before, and 42 components import the library. The genuine
+leftovers were fifteen inline label and status glyphs across eight files, since
+converted: the landing-page feature chips, the header's brand button, the lobby's
+"coming soon" lock, the chess mode badge, winner banner and teammate tip, the AI
+Master's listening, verdict and bribe lines, the roast lounge headings, the map's
+landmark label, and PitchBird's calibration prompt.
 
 Generating them as PNGs would be a mistake: a control icon has to stay razor-sharp at
 16 px, flip colour on hover and focus, respond to `currentColor`, and never cost an HTTP

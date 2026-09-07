@@ -864,7 +864,7 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
         {gameState === 'calibrating' && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/80 backdrop-blur-sm rounded-3xl">
             <div className="text-center space-y-4 px-6">
-              <div className="text-6xl animate-bounce">🎤</div>
+              <div className="flex justify-center animate-bounce"><Mic className="w-16 h-16 text-partyYellow" /></div>
               <h3 className="text-2xl font-black text-white">CALIBRATING YOUR VOICE</h3>
               <p className="text-sm text-gray-300 max-w-xs mx-auto">
                 Slide <span className="text-partyYellow font-bold">&quot;AHHH&quot;</span> from your{' '}

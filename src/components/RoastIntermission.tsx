@@ -19,6 +19,7 @@ import {
   ArrowRight,
   Sparkle,
   Zap,
+  Mic,
 } from 'lucide-react';
 import { Player, RoomState, SocialReactionId } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
@@ -177,8 +178,8 @@ export default function RoastIntermission({
           <div className="flex items-center gap-3 text-left">
             <AvatarIllustration avatar={activePlayer.avatar} size="lg" isSpeaking />
             <div>
-              <span className="text-[10px] font-black text-partyYellow uppercase tracking-widest block animate-pulse">
-                🎙️ OPEN MIC ROAST LOUNGE
+              <span className="flex items-center gap-1.5 text-[10px] font-black text-partyYellow uppercase tracking-widest animate-pulse">
+                <Mic className="w-3 h-3" /> OPEN MIC ROAST LOUNGE
               </span>
               <h3 className="font-extrabold text-2xl text-white">{activePlayer.name}&apos;s Turn Recap</h3>
               <p className="text-xs text-partyCyan font-bold">
@@ -215,8 +216,8 @@ export default function RoastIntermission({
           />
         </div>
 
-        <p className="text-xs text-gray-300 font-bold bg-white/5 py-2 px-4 rounded-xl border border-white/10 inline-block">
-          🎙️ Live mics stay open! Laugh at each other&apos;s flaws, tease the accent, and blast the soundboard!
+        <p className="inline-flex items-center gap-1.5 text-xs text-gray-300 font-bold bg-white/5 py-2 px-4 rounded-xl border border-white/10">
+          <Mic className="w-3.5 h-3.5 shrink-0" /> Live mics stay open! Laugh at each other&apos;s flaws, tease the accent, and blast the soundboard!
         </p>
 
         {/* Turn Performance & Badges Card */}
@@ -267,8 +268,8 @@ export default function RoastIntermission({
 
         {/* Interactive Soundboard Pad */}
         <div className="space-y-2 pt-2 text-left">
-          <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">
-            🔊 LIVE PARTY SOUNDBOARD (TAP TO BLAST OVER MIC):
+          <span className="flex items-center gap-1.5 text-[10px] font-black text-gray-400 uppercase tracking-wider">
+            <Volume2 className="w-3 h-3" /> LIVE PARTY SOUNDBOARD (TAP TO BLAST OVER MIC):
           </span>
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
             {SOUNDBOARD.map((item) => (

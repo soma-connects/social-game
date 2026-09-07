@@ -4,28 +4,17 @@ import React, { useState } from 'react';
 import { RoomState, MiniGameId } from '@/lib/types';
 import { Swords, CheckCircle2, Circle } from 'lucide-react';
 import { roomStore } from '@/lib/roomStore';
+import { MINI_GAMES } from '@/lib/gameRules';
 
 interface TeamBattleGameSelectProps {
   room: RoomState;
   myPlayerId: string;
 }
 
-const ELIGIBLE_GAMES: { id: MiniGameId; icon: string; label: string; description: string }[] = [
-  { id: 'voice_arena', icon: '🎙️', label: 'Voice Arena', description: 'Pronounce words correctly under pressure.' },
-  { id: 'pitch_bird', icon: '🐦', label: 'Pitch Bird', description: 'Navigate a bird using the pitch of your voice.' },
-  { id: 'solfege', icon: '🎵', label: 'Solfege', description: 'Sing back the correct musical notes.' },
-  { id: 'truth_or_bluff', icon: '🎭', label: 'Truth or Bluff', description: 'Tell a convincing lie and fool the other team.' },
-  { id: 'spelling_bee', icon: '🐝', label: 'Spelling Bee', description: 'Spell out words letter by letter.' },
-  { id: 'story_builder', icon: '📖', label: 'Story Builder', description: 'Add to a growing story, sentence by sentence.' },
-  { id: 'debate', icon: '⚖️', label: 'Debate', description: 'Argue your side of a silly topic.' },
-  { id: 'guess_the_voice', icon: '🕵️', label: 'Guess the Voice', description: 'Record a disguised message and guess who spoke.' },
-  { id: 'trivia_showdown', icon: '🧠', label: 'Trivia Showdown', description: 'Answer trivia questions fast with your voice.' },
-  { id: 'asteroid_defense', icon: '☄️', label: 'Asteroid Defense', description: 'Shoot down asteroids by calling out their words!' }
-];
 
 export default function TeamBattleGameSelect({ room, myPlayerId }: TeamBattleGameSelectProps) {
   const isHost = room.hostId === myPlayerId;
-  const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(ELIGIBLE_GAMES.slice(0, 3).map(g => g.id));
+  const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(MINI_GAMES.slice(0, 3).map((g) => g.id));
 
   const toggleGame = (gameId: MiniGameId) => {
     setSelectedGames(prev => 
@@ -52,7 +41,7 @@ export default function TeamBattleGameSelect({ room, myPlayerId }: TeamBattleGam
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {ELIGIBLE_GAMES.map((gameInfo) => {
+        {MINI_GAMES.map((gameInfo) => {
           const isSelected = selectedGames.includes(gameInfo.id);
           
           return (
@@ -75,7 +64,7 @@ export default function TeamBattleGameSelect({ room, myPlayerId }: TeamBattleGam
                 )}
               </div>
               <h3 className="text-lg font-bold text-white mb-1">{gameInfo.label}</h3>
-              <p className="text-xs text-gray-400 line-clamp-2">{gameInfo.description}</p>
+              <p className="text-xs text-gray-400 line-clamp-2">{gameInfo.blurb}</p>
             </button>
           );
         })}

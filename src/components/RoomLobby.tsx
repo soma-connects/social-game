@@ -23,20 +23,11 @@ import { motion } from 'framer-motion';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
 import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState } from '@/lib/types';
-import { MAX_PLAYERS, TEAMS } from '@/lib/gameRules';
+import { MAX_PLAYERS, MINI_GAMES, TEAMS } from '@/lib/gameRules';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
 import { vibeArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
 
-const MINI_GAMES: { id: MiniGameId; name: string; icon: string; blurb: string }[] = [
-  { id: 'voice_arena', name: 'Voice Arena', icon: '🎙️', blurb: 'Say the prompt before the timer dies' },
-  { id: 'pitch_bird', name: 'PitchBird', icon: '🐦', blurb: 'Fly through gates using your pitch' },
-  { id: 'solfege', name: 'Karaoke', icon: '🎵', blurb: 'Hear Do, then sing the note you are given' },
-  { id: 'spelling_bee', name: 'Spelling Bee', icon: '🐝', blurb: 'Listen to the word, then spell it out loud' },
-  { id: 'truth_or_bluff', name: 'Truth or Bluff', icon: '🎭', blurb: 'Tell a true story and a lie, see who guesses right' },
-  { id: 'trivia_showdown', name: 'Trivia Showdown', icon: '🧠', blurb: 'Answer trivia questions fast with your voice' },
-  { id: 'asteroid_defense', name: 'Asteroid Defense', icon: '☄️', blurb: 'Shoot down asteroids by calling out their words!' },
-];
 import { audioSFX } from '@/lib/audioFeedback';
 import AvatarIllustration from './AvatarIllustration';
 import BackgroundMusic from './BackgroundMusic';
@@ -818,7 +809,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                         }`}
                       >
                         <span className="text-xl block">{game.icon}</span>
-                        <span className="font-extrabold text-sm block">{game.name}</span>
+                        <span className="font-extrabold text-sm block">{game.label}</span>
                         <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{game.blurb}</span>
                       </button>
                     );

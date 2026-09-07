@@ -45,31 +45,83 @@ export const MINIGAME_MAX_SCORE: Record<MiniGameId, number> = {
   asteroid_defense: 300,
 };
 
-export const MINIGAME_LABELS: Record<MiniGameId, string> = {
-  voice_arena: 'Voice Arena',
-  pitch_bird: 'PitchBird',
-  solfege: 'Karaoke',
-  spelling_bee: 'Spelling Bee',
-  truth_or_bluff: 'Truth or Bluff',
-  story_builder: 'Story Builder',
-  debate: 'Debate',
-  guess_the_voice: 'Guess the Voice',
-  trivia_showdown: 'Trivia Showdown',
-  asteroid_defense: 'Asteroid Defense',
+export type MiniGameInfo = {
+  id: MiniGameId;
+  /** Player-facing name. */
+  label: string;
+  icon: string;
+  /** One line explaining how it is played, for pickers. */
+  blurb: string;
 };
 
-export const MINIGAME_ICONS: Record<MiniGameId, string> = {
-  voice_arena: '🎙️',
-  pitch_bird: '🐦',
-  solfege: '🎵',
-  spelling_bee: '🐝',
-  truth_or_bluff: '🎭',
-  story_builder: '📖',
-  debate: '⚖️',
-  guess_the_voice: '🕵️',
-  trivia_showdown: '🧠',
-  asteroid_defense: '☄️',
+/**
+ * Every mini-game, described once.
+ *
+ * A Record keyed by MiniGameId rather than an array, so adding a game to the
+ * type and forgetting to describe it here is a compile error rather than a
+ * game that quietly never appears. That had already happened: the lobby
+ * carried its own hard-coded list of seven, so a host who touched the
+ * mini-game toggles wrote those seven back over `enabledMiniGames` and
+ * silently switched off Story Builder, Debate and Guess the Voice — three
+ * finished games — for the rest of the match.
+ *
+ * Everything below is derived from this, so the pickers cannot drift again.
+ */
+const MINI_GAME_CATALOGUE: Record<MiniGameId, Omit<MiniGameInfo, 'id'>> = {
+  voice_arena: {
+    label: 'Voice Arena', icon: '\u{1F399}\uFE0F',
+    blurb: 'Say the prompt before the timer dies',
+  },
+  pitch_bird: {
+    label: 'PitchBird', icon: '\u{1F426}',
+    blurb: 'Fly through gates using your pitch',
+  },
+  solfege: {
+    label: 'Karaoke', icon: '\u{1F3B5}',
+    blurb: 'Hear Do, then sing the note you are given',
+  },
+  spelling_bee: {
+    label: 'Spelling Bee', icon: '\u{1F41D}',
+    blurb: 'Listen to the word, then spell it out loud',
+  },
+  truth_or_bluff: {
+    label: 'Truth or Bluff', icon: '\u{1F3AD}',
+    blurb: 'Tell a true story and a lie, see who guesses right',
+  },
+  story_builder: {
+    label: 'Story Builder', icon: '\u{1F4D6}',
+    blurb: 'Add to a growing story, sentence by sentence',
+  },
+  debate: {
+    label: 'Debate', icon: '\u2696\uFE0F',
+    blurb: 'Argue your side of a silly topic',
+  },
+  guess_the_voice: {
+    label: 'Guess the Voice', icon: '\u{1F575}\uFE0F',
+    blurb: 'Record a disguised message and guess who spoke',
+  },
+  trivia_showdown: {
+    label: 'Trivia Showdown', icon: '\u{1F9E0}',
+    blurb: 'Answer trivia questions fast with your voice',
+  },
+  asteroid_defense: {
+    label: 'Asteroid Defense', icon: '\u2604\uFE0F',
+    blurb: 'Shoot down asteroids by calling out their words!',
+  },
 };
+
+/** The catalogue as an ordered list — what every mini-game picker renders. */
+export const MINI_GAMES: MiniGameInfo[] = (
+  Object.keys(MINI_GAME_CATALOGUE) as MiniGameId[]
+).map((id) => ({ id, ...MINI_GAME_CATALOGUE[id] }));
+
+export const MINIGAME_LABELS: Record<MiniGameId, string> = Object.fromEntries(
+  MINI_GAMES.map((game) => [game.id, game.label]),
+) as Record<MiniGameId, string>;
+
+export const MINIGAME_ICONS: Record<MiniGameId, string> = Object.fromEntries(
+  MINI_GAMES.map((game) => [game.id, game.icon]),
+) as Record<MiniGameId, string>;
 
 /** Raw mini-game score → 0..1 performance. */
 export function scoreToPerformance(game: MiniGameId, score: number): number {
@@ -346,18 +398,7 @@ export function alternateByTeam<T extends { teamId?: TeamId }>(ordered: T[]): T[
   return woven;
 }
 
-export const ALL_MINI_GAMES: MiniGameId[] = [
-  'voice_arena',
-  'pitch_bird',
-  'solfege',
-  'spelling_bee',
-  'truth_or_bluff',
-  'story_builder',
-  'debate',
-  'guess_the_voice',
-  'trivia_showdown',
-  'asteroid_defense',
-];
+export const ALL_MINI_GAMES: MiniGameId[] = MINI_GAMES.map((game) => game.id);
 export const BOARD_MINI_GAMES: MiniGameId[] = ['voice_arena', 'pitch_bird', 'solfege', 'truth_or_bluff', 'trivia_showdown', 'asteroid_defense'];
 
 /** Maps a mini-game to the phase that runs it. */

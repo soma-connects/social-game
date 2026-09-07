@@ -7,6 +7,15 @@ export const metadata: Metadata = {
   title: "Voice Party Arcade | High-Speed Voice & 3D Board Game",
   description: "Multiplayer voice party game, 3D roadmap board, AI host dares & karaoke arcade!",
   manifest: "/manifest.json",
+  // Without these Next emits no icon links at all, so iOS falls back to a
+  // screenshot of the page when someone adds the game to their home screen.
+  icons: {
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

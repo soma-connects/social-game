@@ -6,6 +6,12 @@ Art arrives sheet by sheet over weeks, named by hand from a prompt. This is
 what catches the gap the eye doesn't: an icon the code needs that nobody ever
 generated, or a file named something the code will never ask for.
 
+It also reports whether each group is RENDERED — whether any component calls
+its helper from lib/gameIcons.ts. A folder full of correctly named art that no
+screen draws looks identical to a finished job from the filesystem, and that is
+exactly how eighteen icons sat unused here: they were generated from data
+arrays that turned out to have no render site.
+
     python3 scripts/check-icons.py           # report
     python3 scripts/check-icons.py --strict  # exit 1 on any mismatch, for CI
 """
@@ -52,50 +58,85 @@ def array_ids(path: str, anchor: str) -> list:
     return re.findall(r"\bid: '([^']+)'", src[start:end])
 
 
-# Each group: where the files live, and where the truth lives.
+# Each group: where the files live, where the ids come from, and the
+# lib/gameIcons.ts helper a component has to call for any of it to appear.
 GROUPS = [
-    ("public/powerups",     lambda: union_members("src/lib/types.ts", "PowerupType")),
-    ("public/tiles",        lambda: [t for t in union_members("src/lib/types.ts", "TileNodeType")
-                                     if t != "empty"]),
-    ("public/themes/icons", lambda: union_members("src/lib/types.ts", "MapTheme")),
-    ("public/tiles/journey", lambda: object_keys("src/lib/boardGraph.ts", "TILE_TYPE_ICONS")),
-    ("public/events",       lambda: object_keys("src/components/TileEventOverlay.tsx", "LOOKS")),
-    ("public/dares",        lambda: array_ids("src/lib/gameContent.ts", "DARE_CATEGORIES")),
-    ("public/vibes",        lambda: object_keys("src/lib/roomVibes.ts", "ROOM_VIBES")),
+    ("public/powerups", "powerupArt",
+     lambda: union_members("src/lib/types.ts", "PowerupType")),
+    ("public/tiles", "tileArt",
+     lambda: [t for t in union_members("src/lib/types.ts", "TileNodeType") if t != "empty"]),
+    ("public/themes/icons", "themeArt",
+     lambda: union_members("src/lib/types.ts", "MapTheme")),
+    ("public/tiles/journey", "journeyArt",
+     lambda: object_keys("src/lib/boardGraph.ts", "TILE_TYPE_ICONS")),
+    ("public/events", "eventArt",
+     lambda: object_keys("src/components/TileEventOverlay.tsx", "LOOKS")),
+    ("public/dares", "dareArt",
+     lambda: array_ids("src/lib/gameContent.ts", "DARE_CATEGORIES")),
+    ("public/vibes", "vibeArt",
+     lambda: object_keys("src/lib/roomVibes.ts", "ROOM_VIBES")),
 ]
 
 # No single array to check against — these are named from the prompt.
-LOOSE = {
-    "public/modes": 7,
-    "public/badges": 6,
-    "public/social": 15,
-}
+LOOSE = [
+    ("public/modes", "modeArt", 7),
+    ("public/badges", "badgeArt", 6),
+    ("public/social", "socialArt", 15),
+]
+
+
+def renders(helper: str) -> int:
+    """How many components call this helper. Zero means the art never appears."""
+    count = 0
+    for base in ("src/components", "src/app"):
+        for root, _, files in os.walk(os.path.join(ROOT, base)):
+            for name in files:
+                if not name.endswith((".tsx", ".ts")):
+                    continue
+                with open(os.path.join(root, name), encoding="utf-8") as f:
+                    if f"{helper}(" in f.read():
+                        count += 1
+    return count
 
 
 def main() -> int:
     problems = 0
     total = 0
-    for folder, source in GROUPS:
+    unrendered = []
+    for folder, helper, source in GROUPS:
         want = list(dict.fromkeys(source()))
         have = sorted(os.path.basename(p)[:-4]
                       for p in glob.glob(os.path.join(ROOT, folder, "*.png")))
         total += len(have)
         missing = [w for w in want if w not in have]
         extra = [h for h in have if h not in want]
+        drawn = renders(helper)
         flag = "ok" if not missing and not extra else "MISMATCH"
-        print(f"{folder:24} {len(have):3} files / {len(want):3} ids   {flag}")
+        where = f"drawn in {drawn}" if drawn else "NOT RENDERED"
+        print(f"{folder:24} {len(have):3} files / {len(want):3} ids   {flag:9} {where}")
+        if not drawn:
+            unrendered.append(folder)
         for m in missing:
             print(f"    no art yet for id: {m}")
         for e in extra:
             print(f"    no code id for file: {e}.png")
         problems += len(missing) + len(extra)
 
-    for folder, want in LOOSE.items():
+    for folder, helper, want in LOOSE:
         have = len(glob.glob(os.path.join(ROOT, folder, "*.png")))
         total += have
+        drawn = renders(helper)
         flag = "ok" if have == want else "CHECK"
-        print(f"{folder:24} {have:3} files / {want:3} expected   {flag}   (no source array)")
+        where = f"drawn in {drawn}" if drawn else "NOT RENDERED"
+        print(f"{folder:24} {have:3} files / {want:3} named   {flag:9} {where}")
         problems += have != want
+        if not drawn:
+            unrendered.append(folder)
+
+    if unrendered:
+        print("\nArt with no render site — correct on disk, invisible in the game:")
+        for folder in unrendered:
+            print(f"  {folder}")
 
     print(f"\n{total} icons, {problems} problem(s)")
     return 1 if problems and "--strict" in sys.argv else 0

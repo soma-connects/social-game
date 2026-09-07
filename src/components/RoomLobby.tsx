@@ -25,7 +25,7 @@ import { roomStore } from '@/lib/roomStore';
 import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState } from '@/lib/types';
 import { MAX_PLAYERS, MINI_GAMES, TEAMS } from '@/lib/gameRules';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
-import { vibeArt } from '@/lib/gameIcons';
+import { badgeArt, modeArt, vibeArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
 
 import { audioSFX } from '@/lib/audioFeedback';
@@ -207,7 +207,14 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <div>
                 <span className="text-[10px] font-black text-partyYellow uppercase tracking-wider block">YOUR ACTIVE AVATAR</span>
                 <h4 className="text-base font-black text-white">{myPlayer.avatar.name}</h4>
-                <p className="text-[11px] text-partyCyan font-bold">{myPlayer.avatar.role ?? 'Party Contestant'}</p>
+                <p className="flex items-center gap-1.5 text-[11px] text-partyCyan font-bold uppercase">
+                  <GameIcon
+                    src={badgeArt(myPlayer.avatar.badge.toLowerCase())}
+                    emoji={myPlayer.avatar.emoji}
+                    className="w-4 h-4 text-[11px] shrink-0"
+                  />
+                  {myPlayer.avatar.badge || 'Party Contestant'}
+                </p>
               </div>
             </div>
 
@@ -470,7 +477,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyCyan/15 border border-partyCyan/30 shrink-0">
-                  🎲
+                  <GameIcon src={modeArt('board')} emoji="🎲" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -500,7 +507,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyPink/15 border border-partyPink/30 shrink-0">
-                  🎤
+                  <GameIcon src={modeArt('voice')} emoji="🎤" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -530,7 +537,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/30 shrink-0">
-                  🍻
+                  <GameIcon src={modeArt('party')} emoji="🍻" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -560,7 +567,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyYellow/15 border border-partyYellow/30 shrink-0">
-                  🤖
+                  <GameIcon src={modeArt('ai_master')} emoji="🤖" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -640,7 +647,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-red-500/15 border border-red-500/30 shrink-0">
-                  ⚔️
+                  <GameIcon src={modeArt('team_battle')} emoji="⚔️" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -670,7 +677,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-cyan-500/15 border border-cyan-400/30 shrink-0">
-                  ♟️
+                  <GameIcon src={modeArt('chess')} emoji="♟️" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -700,7 +707,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-amber-500/15 border border-amber-400/30 shrink-0">
-                  🎲
+                  <GameIcon src={modeArt('ludo')} emoji="🎲" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">

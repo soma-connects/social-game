@@ -34,6 +34,17 @@ import {
   FINISH_NODE,
   MINIGAME_FAIL_THRESHOLD,
   STARTING_LIVES,
+  STREAK_KEEP_THRESHOLD,
+  DARE_BLOCKED_MESSAGE,
+  personalDaresAllowed,
+  PRESENCE_TIMEOUT_MS,
+  isPresent,
+  leaderProgressOf,
+  applyHeat,
+  computeAwards,
+  heatTier,
+  slipstreamLabel,
+  slipstreamSteps,
   loseLife,
   respawnToStart,
   TileOutcome,
@@ -47,6 +58,7 @@ import {
   performanceToSteps,
   pickMiniGame,
   rememberMiniGame,
+  recordPlayedMiniGame,
   resolveTile,
   scoreToPerformance,
   sumReactionBonus,
@@ -63,6 +75,12 @@ import {
   writeSecrets,
 } from '@/lib/server/roomServer';
 import { archiveMatch } from '@/lib/server/matchArchive';
+import {
+  newSessionId,
+  recordSessionCompleted,
+  recordSessionCreated,
+  recordSessionStarted,
+} from '@/lib/server/sessionArchive';
 import { verifyUid } from '@/lib/firebase/server';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES } from '@/lib/roomVibes';
@@ -146,8 +164,9 @@ function pickSocialBadge(round: SocialRound | null, performance: number): string
   return 'Voice Rookie';
 }
 
-/** How long a player can go without a heartbeat before we treat them as gone. */
-const PRESENCE_TIMEOUT_MS = 25000;
+// PRESENCE_TIMEOUT_MS now lives in gameRules: the board previews the bonuses a
+// roll has already earned, so the client has to pick the same leader this file
+// does, and two copies of the timeout would drift.
 
 /**
  * Ceiling on a base64 Guess the Voice clip.
@@ -179,9 +198,7 @@ const PERFORMER_PHASES = new Set<GamePhase>([
  */
 function activePlayers(room: RoomState): Player[] {
   const now = Date.now();
-  return room.players.filter(
-    (p) => p.connected !== false && now - (p.lastSeen ?? now) < PRESENCE_TIMEOUT_MS
-  );
+  return room.players.filter((p) => isPresent(p, now));
 }
 
 /** Drops players who have gone quiet, and hands the host role on if needed. */
@@ -276,6 +293,10 @@ function advanceRoundOrOpenShop(room: RoomState): void {
     if (room.roomType !== 'team_battle') {
       room.recentMiniGames = rememberMiniGame(room.recentMiniGames, game);
     }
+
+    // The permanent log, on the other hand, records every mode and never drops
+    // the early rounds — it is what the archive reports as gamesPlayed.
+    room.playedMiniGames = recordPlayedMiniGame(room.playedMiniGames, game);
 
     room.currentMiniGame = game;
     room.phase = miniGamePhase(game);
@@ -501,6 +522,7 @@ const HOST_ONLY_ACTIONS = new Set([
   'set_theme',
   'update_minigames',
   'update_room_vibe',
+  'set_visibility',
   'ai_master_start',
   'ai_master_verdict',
   'ai_master_next_round',
@@ -543,6 +565,11 @@ const ACTIVE_PLAYER_ACTIONS = new Set([
  */
 const SELF_PLAYER_ID_ACTIONS = new Set([
   'heartbeat',
+  // Consent, so it can only ever be given for yourself. Without this the
+  // playerId in the body is whatever the sender chose, and one player could
+  // switch ANOTHER player's microphone on — the exact thing the public-room
+  // default exists to prevent.
+  'set_mic_opt_in',
   'mark_away',
   'leave_room',
   'set_avatar',
@@ -687,6 +714,9 @@ function applyLanding(room: RoomState, player: Player, node: number): TileOutcom
   const outcome = resolveTile(node, player.hasShield);
 
   player.boardPosition = outcome.position;
+  // Every board move lands here, so this is the one place the closing awards
+  // need in order to see a deficit while it still exists.
+  trackDeficits(room);
   if (outcome.grantsShield) player.hasShield = true;
   if (outcome.breaksShield) player.hasShield = false;
   if (outcome.coins) player.score = Math.max(0, player.score + outcome.coins);
@@ -733,6 +763,9 @@ function applyLanding(room: RoomState, player: Player, node: number): TileOutcom
   }
 
   if (outcome.triggersDare) {
+    // A refused dare leaves the phase untouched, so the turn carries on as if
+    // the tile were an ordinary one rather than hanging on a peer_dare screen
+    // that will never be filled in.
     startDare(room, player);
   } else if (outcome.triggersDuel) {
     startDuel(room, player);
@@ -749,10 +782,19 @@ function applyLanding(room: RoomState, player: Player, node: number): TileOutcom
  * The dare used to be invented inside the modal on the rolling player's screen,
  * which meant nobody else knew what had been asked, and refreshing lost it.
  */
-function startDare(room: RoomState, target: Player, challenger?: Player): void {
+function startDare(room: RoomState, target: Player, challenger?: Player): boolean {
+  // The guard lives here rather than at each call site, so a third way to start
+  // a dare cannot be added without inheriting it. A dare is one player ordering
+  // another to perform while the room scores them — the single mechanic in this
+  // game that does not survive contact with strangers.
+  if (!personalDaresAllowed(room)) {
+    pushEvent(room, `🔇 ${DARE_BLOCKED_MESSAGE}`, 'system');
+    return false;
+  }
+
   const rivals = activePlayers(room).filter((p) => p.id !== target.id);
   const picked = challenger ?? rivals[Math.floor(Math.random() * rivals.length)];
-  if (!picked) return;
+  if (!picked) return false;
 
   room.currentDare = {
     dareText: DARES[Math.floor(Math.random() * DARES.length)],
@@ -761,6 +803,7 @@ function startDare(room: RoomState, target: Player, challenger?: Player): void {
   };
   room.phase = 'peer_dare';
   pushEvent(room, `🎤 ${picked.name} dares ${target.name}!`, 'dare');
+  return true;
 }
 
 /**
@@ -801,6 +844,98 @@ const TRAP_DEBATE_SETBACK = 2;
 
 /** How far a failed dare drags you back — enough to undo a typical roll. */
 const DARE_FAIL_SETBACK = 6;
+
+/**
+ * Clears the per-match record a player carries.
+ *
+ * Deliberately does NOT touch level, vibeScore or badges: those are progression
+ * earned by the person and survive the match, while everything below describes
+ * one match only and would otherwise leak a streak or a bomb count into the
+ * next one.
+ */
+function resetMatchStats(player: Player): void {
+  delete player.streak;
+  delete player.bestStreak;
+  delete player.roundsPlayed;
+  delete player.performanceTotal;
+  delete player.bombs;
+  delete player.bestRound;
+  delete player.worstDeficit;
+}
+
+/**
+ * Books one finished mini-game round against the player.
+ *
+ * Both completion handlers ran the same half-dozen lines inline, and they had
+ * already drifted from each other. Everything that has to happen exactly once
+ * per round — the streak, the match-long stats the closing awards read, and the
+ * heat multiplier on the coins — now happens here, so a new mini-game gets all
+ * of it by calling one function.
+ *
+ * Returns the coins actually earned, which is the raw figure with the streak
+ * multiplier applied.
+ */
+function recordRound(
+  room: RoomState,
+  player: Player,
+  game: MiniGameId,
+  rawCoins: number,
+  performance: number
+): { coins: number; streak: number; heatBonus: number; brokeStreak: boolean } {
+  const previousStreak = player.streak ?? 0;
+  const kept = performance >= STREAK_KEEP_THRESHOLD;
+
+  // A streak is only worth having if it can be lost, so anything short of a
+  // decent round drops it to zero rather than merely failing to extend it.
+  const streak = kept ? previousStreak + 1 : 0;
+  const brokeStreak = !kept && previousStreak >= 2;
+  player.streak = streak;
+  player.bestStreak = Math.max(player.bestStreak ?? 0, streak);
+
+  const coins = applyHeat(rawCoins, streak);
+
+  player.roundsPlayed = (player.roundsPlayed ?? 0) + 1;
+  player.performanceTotal = (player.performanceTotal ?? 0) + performance;
+  if (performance <= MINIGAME_FAIL_THRESHOLD) player.bombs = (player.bombs ?? 0) + 1;
+  if (performance > (player.bestRound?.performance ?? -1)) {
+    player.bestRound = { game, performance, points: coins };
+  }
+
+  if (brokeStreak) {
+    pushEvent(room, `💧 ${player.name} lost a ${previousStreak}-round streak`, 'debuff');
+  }
+
+  const tier = heatTier(streak);
+  if (tier.multiplier > 1) {
+    pushEvent(
+      room,
+      `${tier.icon} ${player.name} is ${tier.label.toUpperCase()} — ${streak} in a row, x${tier.multiplier} coins`,
+      'buff'
+    );
+  }
+
+  return { coins, streak, heatBonus: tier.stepBonus, brokeStreak };
+}
+
+/** Board depth of whoever is furthest along, for the slipstream gap. */
+function leaderProgress(room: RoomState): number {
+  return leaderProgressOf(room.players);
+}
+
+/**
+ * Records how far behind the leader everyone currently is, keeping the worst.
+ *
+ * The Comeback Kid award needs a deficit that was actually recovered, and by
+ * the final whistle the deficit is gone — the board only stores where everyone
+ * is now. Cheap enough to run after every board mutation.
+ */
+function trackDeficits(room: RoomState): void {
+  const leader = leaderProgress(room);
+  for (const player of room.players) {
+    const deficit = Math.max(0, leader - boardProgress(player.boardPosition));
+    player.worstDeficit = Math.max(player.worstDeficit ?? 0, deficit);
+  }
+}
 
 /**
  * Charges a life for bombing the task the room just watched you attempt.
@@ -1042,6 +1177,13 @@ function judgeBribe(state: AiMasterState, player: Player, amount: number): boole
 function declareWinner(room: RoomState, player: Player, reason: 'finish' | 'last_standing' = 'finish'): void {
   room.winner = player;
   room.phase = 'game_over';
+
+  // Worked out once, here, rather than in the client. Every player's stats are
+  // about to stop changing, and the alternative — each of six clients deriving
+  // its own award list from a snapshot — lets two people in the same room read
+  // out different winners.
+  trackDeficits(room);
+  room.awards = computeAwards(room.players);
   if (room.roomType === 'team_battle' && player.teamId) {
     room.winningTeam = player.teamId;
     const team = getTeam(player.teamId);
@@ -1099,8 +1241,10 @@ async function createRoom(
 ): Promise<{ room: RoomState; playerId: string; token: string }> {
   const host = makePlayer(hostName, 0, true);
   if (hostUid) host.uid = hostUid;
+  const createdAt = Date.now();
   const room: RoomState = {
     roomId,
+    sessionId: newSessionId(roomId, createdAt),
     hostId: host.id,
     phase: 'lobby',
     roomType,
@@ -1130,6 +1274,11 @@ async function createRoom(
   };
   pushEvent(room, `🎮 ${host.name} opened room ${roomId}`, 'system');
   await writeRoom(room);
+
+  // Opens the funnel row. Awaited but never throws — a room that was created
+  // and abandoned is the single most useful thing the dashboard can show, and
+  // it is also the one case that will never report itself later.
+  await recordSessionCreated(room, createdAt);
 
   const token = newToken();
   await writeSecrets(roomId, { tokens: { [host.id]: token } });
@@ -1231,6 +1380,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       // than by anything this loop tracks.
       if (room.phase === 'game_over' && !room.matchArchived) {
         await archiveMatch(room, 'winner');
+        await recordSessionCompleted(room, 'winner');
       }
 
       return response;
@@ -1926,7 +2076,15 @@ async function applyAction(
       const points = basePoints + bluffBonus + reactionBonus + judgeBonus;
       const performance = scoreToPerformance(game, points);
       const steps = performanceToSteps(performance);
-      const coinsEarned = Math.floor(performance * 100);
+      // Streak, match stats and the heat multiplier all land in one place, so
+      // the coins banked below are already the boosted figure.
+      const { coins: coinsEarned } = recordRound(
+        room,
+        active,
+        game,
+        Math.floor(performance * 100),
+        performance
+      );
 
       active.score += coinsEarned;
       // In Team Battle the same points also feed the crew total, which is what
@@ -2022,7 +2180,15 @@ async function applyAction(
       const points = basePoints + reactionBonus + judgeBonus;
       const performance = scoreToPerformance(game, points);
       const steps = performanceToSteps(performance);
-      const coinsEarned = Math.floor(performance * 100);
+      // Streak, match stats and the heat multiplier all land in one place, so
+      // the coins banked below are already the boosted figure.
+      const { coins: coinsEarned } = recordRound(
+        room,
+        active,
+        game,
+        Math.floor(performance * 100),
+        performance
+      );
 
       active.score += coinsEarned;
       // In Team Battle the same points also feed the crew total, which is what
@@ -2130,7 +2296,7 @@ async function applyAction(
       const active = room.players[room.activePlayerIndex];
       if (!active) return NextResponse.json({ error: 'No active player' }, { status: 409 });
 
-      // The mini-game decides roll order; the dice movement itself stays random.
+      // The mini-game decides both the roll order and the distance travelled.
       const entry = (room.roundResults ?? []).find((r) => r.playerId === active.id);
       if (entry) {
         if (entry.rolled) {
@@ -2139,9 +2305,46 @@ async function applyAction(
         entry.rolled = true;
       }
 
-      const die1 = Math.floor(Math.random() * 6) + 1;
-      const die2 = Math.floor(Math.random() * 6) + 1;
-      const roll = die1 + die2;
+      // The dice reveals what the mini-game earned — it is not a fresh random
+      // number. See the turn-loop note at the top of gameRules: "play badly and
+      // you shuffle forward, play well and you get the full six."
+      //
+      // Rolling 2d6 here instead quietly severed the game's core loop. A player
+      // could bomb every single mini-game and still outrun a player who aced
+      // them, which left the voice rounds deciding nothing but coins and roll
+      // order — and the `steps` figure the room was shown after every round was
+      // never actually spent.
+      //
+      // A player with no banked result (joined mid-round, or their result was
+      // dropped with them) falls back to a genuine roll rather than being stuck
+      // on the spot.
+      const earned = entry?.steps ?? Math.floor(Math.random() * 11) + 2;
+      const heatBonus = heatTier(active.streak ?? 0).stepBonus;
+      const slipstream = slipstreamSteps(boardProgress(active.boardPosition), leaderProgress(room));
+      const roll = earned + heatBonus + slipstream;
+
+      // Announced, never silent. A catch-up bonus the room cannot see reads as
+      // the board being broken rather than as the game keeping somebody in it.
+      if (heatBonus > 0) {
+        pushEvent(room, `🔥 ${active.name}'s streak adds +${heatBonus} step`, 'buff');
+      }
+      if (slipstream > 0) {
+        pushEvent(
+          room,
+          `${slipstreamLabel(slipstream)} — ${active.name} catches +${slipstream} step${slipstream === 1 ? '' : 's'}`,
+          'buff'
+        );
+      }
+
+      room.lastMove = {
+        playerId: active.id,
+        playerName: active.name,
+        base: earned,
+        heat: heatBonus,
+        slipstream,
+        total: roll,
+        at: Date.now(),
+      };
 
       let currentId = active.boardPosition;
       let remaining = roll;
@@ -2155,17 +2358,17 @@ async function applyAction(
           active.boardPosition = currentId;
           active.remainingSteps = remaining;
           room.phase = 'branch_choice';
-          pushEvent(room, `🎲 ${active.name} rolled ${roll} and reached a fork in the road!`, 'system');
-          return NextResponse.json({ room: await writeRoom(room), roll, waitingForBranch: true });
+          pushEvent(room, `🎲 ${active.name} earned ${roll} and reached a fork in the road!`, 'system');
+          return NextResponse.json({ room: await writeRoom(room), roll, move: room.lastMove, waitingForBranch: true });
         }
         currentId = node.next[0];
         remaining--;
       }
 
-      pushEvent(room, `🎲 ${active.name} rolled ${roll}`, 'system');
+      pushEvent(room, `🎲 ${active.name} moves ${roll} step${roll === 1 ? '' : 's'}`, 'system');
       const outcome = applyLanding(room, active, currentId);
 
-      return NextResponse.json({ room: await writeRoom(room), roll, outcome });
+      return NextResponse.json({ room: await writeRoom(room), roll, move: room.lastMove, outcome });
     }
 
     case 'choose_branch': {
@@ -2266,6 +2469,12 @@ async function applyAction(
       const owned = active.inventory.indexOf(powerupId);
       if (owned === -1) {
         return NextResponse.json({ error: 'Powerup not in inventory' }, { status: 409 });
+      }
+
+      // Checked before the item is consumed, so a blocked dare does not also
+      // cost the player the Dare Gun they paid for.
+      if (powerupId === 'dare_gun' && !personalDaresAllowed(room)) {
+        return NextResponse.json({ error: DARE_BLOCKED_MESSAGE }, { status: 409 });
       }
 
       // Resolve the victim before spending anything, so a bad target does not
@@ -2534,9 +2743,11 @@ async function applyAction(
       room.matchArchived = false;
       room.winner = null;
       room.aiMasterState = null;
+      await recordSessionStarted(room);
       for (const player of room.players) {
         player.lives = STARTING_LIVES;
         delete player.eliminated;
+        resetMatchStats(player);
       }
       pushEvent(room, `🤖 The AI Master takes the stage — ${ROOM_VIBES[roomVibeOf(room)].label}`, 'system');
       await startAiMasterRound(room);
@@ -2667,6 +2878,51 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    case 'set_visibility': {
+      const next = body.isPublic === true;
+
+      // Only from the lobby. Publishing a match already in progress drops
+      // strangers into the middle of somebody's game, and — worse — would flip
+      // the safety rules underneath players who joined under the old ones.
+      if (room.phase !== 'lobby') {
+        return NextResponse.json(
+          { error: 'The room can only be listed or delisted from the lobby.' },
+          { status: 409 }
+        );
+      }
+
+      room.isPublic = next;
+      if (next) {
+        // Latched, never cleared. Delisting must not silently re-enable dares
+        // aimed at whoever already walked in off the browser.
+        room.wasEverPublic = true;
+        pushEvent(
+          room,
+          '🌍 Room listed publicly — anyone can find and join it. Mics start muted and dares are off.',
+          'system'
+        );
+      } else {
+        pushEvent(room, '🔒 Room delisted — invite only from here.', 'system');
+      }
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /**
+     * The player's own microphone consent.
+     *
+     * Not host-only and deliberately not restricted to the active player: this
+     * is the one control every person in the room must be able to reach at any
+     * moment, including in the middle of somebody else's turn.
+     */
+    case 'set_mic_opt_in': {
+      const player = room.players.find((p) => p.id === body.playerId);
+      if (!player) return NextResponse.json({ error: 'Player not found' }, { status: 404 });
+
+      player.micOptIn = body.micOptIn === true;
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
     case 'update_minigames': {
       const games = Array.isArray(body.miniGames) ? (body.miniGames as MiniGameId[]) : null;
       const valid = games?.filter((g) => ALL_MINI_GAMES.includes(g)) ?? [];
@@ -2698,10 +2954,22 @@ async function applyAction(
       room.rollIndex = 0;
       room.shopReady = [];
       room.turnResult = null;
+      room.lastMove = null;
+      room.awards = null;
+      // Match-scoped, so cleared where the match begins rather than trusting
+      // that end_match ran first — a second match in the same room would
+      // otherwise archive the previous one's mini-games as its own.
+      room.recentMiniGames = [];
+      room.playedMiniGames = [];
       for (const player of room.players) {
         player.lives = STARTING_LIVES;
         delete player.eliminated;
+        resetMatchStats(player);
       }
+
+      // Moves the funnel row from "a room was opened" to "a match actually
+      // began" — the step most rooms are expected to fall out of.
+      await recordSessionStarted(room);
 
       if (room.enabledMiniGames?.includes('story_builder')) {
         room.storyBuilderState = { prompt: '', story: [], currentPlayerIndex: 0, phase: 'prompting', votes: {} };
@@ -2746,6 +3014,7 @@ async function applyAction(
       // match already ended with a winner it was archived then, and
       // archiveMatch's create() makes the second call a no-op.
       await archiveMatch(room, room.winner ? 'winner' : 'ended_early');
+      await recordSessionCompleted(room, room.winner ? 'winner' : 'ended_early');
 
       for (const player of room.players) {
         player.boardPosition = 0;
@@ -2756,6 +3025,7 @@ async function applyAction(
         delete player.skipNextTurn;
         delete player.remainingSteps;
         delete player.eliminated;
+        resetMatchStats(player);
       }
 
       room.phase = 'lobby';
@@ -2773,11 +3043,14 @@ async function applyAction(
       room.shopReady = [];
       room.turnResult = null;
       room.boardEvent = null;
+      room.lastMove = null;
+      room.awards = null;
       room.rollDeadline = null;
       room.currentDare = null;
       room.socialRound = null;
       room.liveState = null;
       room.recentMiniGames = [];
+      room.playedMiniGames = [];
       room.truthBluffState = null;
       room.storyBuilderState = null;
       room.debateState = null;

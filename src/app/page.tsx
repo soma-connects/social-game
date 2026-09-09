@@ -7,6 +7,8 @@ import { roomStore } from '@/lib/roomStore';
 import { audioSFX } from '@/lib/audioFeedback';
 import { AVATARS } from '@/lib/gameContent';
 import AvatarIllustration from '@/components/AvatarIllustration';
+import PublicRoomBrowser from '@/components/PublicRoomBrowser';
+import PublicRoomGate, { hasAcknowledged } from '@/components/PublicRoomGate';
 
 export default function HomePage() {
   const router = useRouter();
@@ -14,6 +16,8 @@ export default function HomePage() {
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The public room waiting on the safety acknowledgement, if one is pending.
+  const [pendingPublicRoom, setPendingPublicRoom] = useState<string | null>(null);
 
   // Both flows wait for the server before navigating, so the game page never
   // opens onto a room that was never actually created.
@@ -32,14 +36,11 @@ export default function HomePage() {
     router.push(`/game/${newCode}`);
   };
 
-  const handleJoinRoom = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanCode = joinCode.trim().toUpperCase();
-    if (!cleanCode) return;
-
+  /** Shared by the code form and the public browser once any gate has passed. */
+  const joinRoomById = async (code: string) => {
     setBusy(true);
     setError(null);
-    const result = await roomStore.joinRoom(cleanCode, hostName.trim() || 'Guest Player');
+    const result = await roomStore.joinRoom(code, hostName.trim() || 'Guest Player');
     setBusy(false);
 
     if (result.error) {
@@ -47,7 +48,28 @@ export default function HomePage() {
       return;
     }
     audioSFX.playStreetVendorBell();
-    router.push(`/game/${cleanCode}`);
+    router.push(`/game/${code}`);
+  };
+
+  /**
+   * Tapping a public room.
+   *
+   * The acknowledgement is asked once per browser and only here — a room a
+   * friend sent you a link to does not need a warning about who is in it.
+   */
+  const handleJoinPublicRoom = (roomId: string) => {
+    if (hasAcknowledged()) {
+      void joinRoomById(roomId);
+      return;
+    }
+    setPendingPublicRoom(roomId);
+  };
+
+  const handleJoinRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = joinCode.trim().toUpperCase();
+    if (!cleanCode) return;
+    await joinRoomById(cleanCode);
   };
 
   return (
@@ -156,6 +178,19 @@ export default function HomePage() {
             </p>
           )}
         </div>
+
+        <PublicRoomBrowser onJoin={handleJoinPublicRoom} busy={busy} />
+
+        {pendingPublicRoom && (
+          <PublicRoomGate
+            onAccept={() => {
+              const roomId = pendingPublicRoom;
+              setPendingPublicRoom(null);
+              void joinRoomById(roomId);
+            }}
+            onCancel={() => setPendingPublicRoom(null)}
+          />
+        )}
 
         <div className="flex items-center justify-center gap-6 text-xs text-gray-400 font-medium pt-2">
           <span className="flex items-center gap-1.5">🎙️ Web Speech STT</span>

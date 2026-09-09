@@ -48,6 +48,15 @@ export type Player = {
   lastSeen?: number;
   /** Set when they left on purpose, or were dropped for going quiet. */
   connected?: boolean;
+  /**
+   * Whether this player has opted in to sending their microphone.
+   *
+   * Undefined reads as "yes" in a private room and "no" in a public one. In a
+   * room of friends the open mic is the entire game and asking permission every
+   * time would be noise; in a room of strangers an always-hot mic is something
+   * nobody consented to, so it starts off and the player turns it on.
+   */
+  micOptIn?: boolean;
   /** Social progression, mostly earned from making the room react. */
   level?: number;
   vibeScore?: number;
@@ -66,6 +75,41 @@ export type Player = {
    * one out means sitting out the evening.
    */
   eliminated?: boolean;
+  /**
+   * Consecutive mini-game rounds at or above STREAK_KEEP_THRESHOLD.
+   *
+   * Reset to 0 by any round that falls short, which is the whole point — the
+   * multiplier it pays is worth less than having something to lose.
+   */
+  streak?: number;
+  /** Highest streak reached this match, kept for the closing awards. */
+  bestStreak?: number;
+  /**
+   * Match-long mini-game record, accumulated because `roundResults` is wiped at
+   * the top of every round and the awards need the whole match to look back on.
+   *
+   * Deliberately a running total rather than a list of rounds: the awards only
+   * ever ask for an average, a best and a count, and a per-round array on every
+   * player would be copied into every one of the ~1.5s room snapshots.
+   */
+  roundsPlayed?: number;
+  /** Sum of every round's 0..1 performance. Divided by roundsPlayed for the mean. */
+  performanceTotal?: number;
+  /** Rounds that came in at or below MINIGAME_FAIL_THRESHOLD. */
+  bombs?: number;
+  /** The single best round of the match, for the highlight award. */
+  bestRound?: { game: MiniGameId; performance: number; points: number };
+  /**
+   * The largest gap, in board steps, this player has ever been behind the
+   * leader during the match.
+   *
+   * Tracked rather than derived because a comeback is about a deficit that was
+   * recovered, and by the final whistle the deficit is gone — the board only
+   * ever stores where everyone is now. Note this cannot be "lowest board
+   * position": everybody starts on the launchpad, so that number is 0 for the
+   * whole room and would hand Comeback Kid to whoever simply went furthest.
+   */
+  worstDeficit?: number;
   /** Set when a player is paused at a branching node with remaining dice steps */
   remainingSteps?: number;
   hasShield?: boolean;
@@ -416,8 +460,19 @@ export type RoomState = {
    * the room at once; clients should ignore it.
    */
   rev?: number;
+  /** Server clock at the last write, used to tell a live room from a dead one. */
+  updatedAt?: number;
   hostId: string;
   phase: GamePhase;
+  /**
+   * Identifies this opening of the room for the usage funnel.
+   *
+   * Distinct from matchId and longer-lived: it is minted when the room is
+   * created and survives every match played in it, because the funnel's whole
+   * point is to count rooms that never reached a match at all. Room codes are
+   * reused, so the code alone cannot identify a session.
+   */
+  sessionId?: string | null;
   /**
    * Identifies the current match for the permanent `matches` record. Minted
    * when the room leaves the lobby and cleared when it returns, so it doubles
@@ -445,6 +500,27 @@ export type RoomState = {
   roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master';
   /** The social vibe the host picked, steering the AI Master's tone and mini-game mix. Undefined reads as classic_party. */
   roomVibe?: RoomVibeId;
+  /**
+   * Listed in the public browser, so strangers can find and join it.
+   *
+   * The default is false and stays false: a room made from a link somebody sent
+   * you is private, and the host has to deliberately open it. Absent reads as
+   * private, so no existing room is retroactively published.
+   *
+   * This is not merely a listing flag — it is the switch that decides whether
+   * the people in this room know each other, and several safety rules key off
+   * it (see `strangerRoom` in gameRules). Everything that is fun among friends
+   * and hostile among strangers is gated on it.
+   */
+  isPublic?: boolean;
+  /**
+   * Set once the host opens the room up, so a room that was public earlier in
+   * the evening keeps its stranger-safety rules for the rest of the match even
+   * if it is delisted. Un-publishing must not silently re-enable dares aimed at
+   * whoever already walked in.
+   */
+  wasEverPublic?: boolean;
+
   /** Set instead of a solo winner when the room is in team mode. */
   winningTeam?: TeamId | null;
   /** Cumulative scores in Team Battle mode. */
@@ -470,12 +546,47 @@ export type RoomState = {
    * rather than bad luck.
    */
   recentMiniGames?: MiniGameId[];
+  /**
+   * Every mini-game this match has served, in order, for the permanent record.
+   *
+   * Deliberately separate from `recentMiniGames`, which exists to feed the
+   * repeat rule and is therefore capped at MINIGAME_HISTORY_WINDOW and skipped
+   * entirely for Team Battle. Both of those are correct for what it does and
+   * wrong for analytics: a twelve-round match archived only its last six picks,
+   * and a Team Battle archived none at all, so "which mini-games actually get
+   * played" was answered with truncated, mode-biased data.
+   *
+   * Bounded generously rather than left to grow without limit — the whole room
+   * document is re-read on a poll, so an unbounded array is a slow leak.
+   */
+  playedMiniGames?: MiniGameId[];
   /** Result of this turn's mini-game, cleared once the player has moved. */
   turnResult?: TurnResult | null;
   /** Laugh meter and peer judge votes for the active voice-related round. */
   socialRound?: SocialRound | null;
   /** What the performer is doing right now, for spectators. */
   liveState?: LiveMiniGameState | null;
+  /**
+   * Where the active player's last move came from, broken into its parts.
+   *
+   * The dice is a reveal of what the mini-game earned rather than a random
+   * number, so the room has to be able to see the arithmetic — a token that
+   * travels fifteen spaces with no explanation reads as a bug. Server-computed
+   * and shipped whole so the board cannot show a different sum than the one
+   * that was actually walked.
+   */
+  lastMove?: {
+    playerId: string;
+    playerName: string;
+    /** Steps the mini-game performance bought. */
+    base: number;
+    /** Extra steps from the player's streak. */
+    heat: number;
+    /** Extra steps for trailing the leader. */
+    slipstream: number;
+    total: number;
+    at: number;
+  } | null;
   /** The last thing the board did to somebody, for the whole room to watch. */
   boardEvent?: BoardEvent | null;
   /**
@@ -516,6 +627,13 @@ export type RoomState = {
   ludoState?: import('./ludo/ludoTypes').LudoRoomState | null;
   /** AI Master game state. */
   aiMasterState?: AiMasterState | null;
+  /**
+   * The closing awards, computed once when the match ends.
+   *
+   * Server-side rather than derived per client: six people reading the same
+   * snapshot must not be able to disagree about who won Crowd Favourite.
+   */
+  awards?: import('./gameRules').Award[] | null;
   /** Session memory — small structured events for Who Said It? and AI callbacks. */
   sessionMemory?: SessionMemoryEvent[];
 };

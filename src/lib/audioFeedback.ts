@@ -393,6 +393,65 @@ class AudioFeedbackEngine {
   public playTap() {
     this.playPop();
   }
+
+  /**
+   * Rising fanfare for reaching a new heat tier.
+   *
+   * `tier` is 1-based over the paying tiers, and pitches the whole arpeggio up
+   * with it — the fifth streak has to sound bigger than the second or the
+   * escalation only exists in the scoreboard. Kept as one parameterised sound
+   * rather than four hand-tuned ones so adding a tier needs no new audio.
+   */
+  public playStreakUp(tier: number) {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const root = 440 * Math.pow(2, Math.max(0, tier - 1) / 12); // a semitone per tier
+    const notes = [root, root * 1.25, root * 1.5, root * 2];
+
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const at = now + i * 0.07;
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, at);
+
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(0.25, at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, at + 0.3);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(at);
+      osc.stop(at + 0.32);
+    });
+  }
+
+  /** The sad little slide for losing a streak you had been holding. */
+  public playStreakLost() {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(660, now);
+    osc.frequency.exponentialRampToValueAtTime(220, now + 0.45);
+
+    gain.gain.setValueAtTime(0.22, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.5);
+  }
 }
 
 export const audioSFX = new AudioFeedbackEngine();

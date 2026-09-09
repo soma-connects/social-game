@@ -10,6 +10,7 @@ import {
   TurnResult,
 } from './types';
 import { RoomVibeId } from './roomVibes';
+import type { PublicRoomSummary } from '@/app/api/rooms/public/route';
 import { getIdToken } from './firebase/auth';
 
 const ROOM_CACHE_PREFIX = 'voice_party_room_';
@@ -668,6 +669,67 @@ class RoomStoreManager {
 
   public advanceTurn(roomId: string) {
     return this.post(roomId, { action: 'advance_turn' });
+  }
+
+  // ─── Public rooms and safety ──────────────────────────────────────────────
+
+  /** Host-only. Lists or delists the room in the public browser. */
+  public setVisibility(roomId: string, isPublic: boolean) {
+    return this.post(roomId, { action: 'set_visibility', isPublic });
+  }
+
+  /**
+   * This player's own microphone consent.
+   *
+   * Sends the player id explicitly rather than relying on the active player,
+   * because everybody must be able to reach their own mic switch at any point
+   * in the round, including during somebody else's turn.
+   */
+  public setMicOptIn(roomId: string, micOptIn: boolean) {
+    return this.post(roomId, {
+      action: 'set_mic_opt_in',
+      playerId: this.getMyPlayerId(roomId),
+      micOptIn,
+    });
+  }
+
+  /**
+   * The public room browser's feed.
+   *
+   * Not a Firestore query: firestore.rules refuses to let a browser list the
+   * rooms collection, because doing so would hand out every private room's code
+   * along with the names and transcripts inside it.
+   */
+  public async listPublicRooms(): Promise<{ rooms: PublicRoomSummary[]; error?: string }> {
+    try {
+      const response = await fetch('/api/rooms/public', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) return { rooms: [], error: data.error ?? 'Could not load rooms.' };
+      return { rooms: (data.rooms as PublicRoomSummary[]) ?? [] };
+    } catch {
+      return { rooms: [], error: 'Could not reach the server.' };
+    }
+  }
+
+  /** Files a report against another player. */
+  public async reportPlayer(input: {
+    roomId: string;
+    reportedPlayerId: string;
+    reason: string;
+    note?: string;
+  }): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const idToken = await getIdToken();
+      const response = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...input, idToken }),
+      });
+      const data = await response.json();
+      return response.ok ? { ok: true } : { ok: false, error: data.error ?? 'Could not file the report.' };
+    } catch {
+      return { ok: false, error: 'Could not reach the server.' };
+    }
   }
 }
 

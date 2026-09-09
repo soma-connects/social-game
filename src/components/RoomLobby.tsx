@@ -190,6 +190,49 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
         </button>
       </div>
 
+      {/* Public listing. Host-only, and lobby-only on the server: publishing a
+          match in progress would drop strangers into somebody's game and flip
+          the safety rules underneath the people already in it. */}
+      {myPlayer.isHost && (
+        <div className="glass-card rounded-3xl p-4 sm:p-5 border border-white/10 relative z-10 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className={`p-2.5 rounded-xl border shrink-0 ${
+                room.isPublic
+                  ? 'bg-partyCyan/20 text-partyCyan border-partyCyan/40'
+                  : 'bg-white/5 text-gray-400 border-white/10'
+              }`}
+            >
+              <Globe className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-sm sm:text-base text-white">
+                {room.isPublic ? 'LISTED PUBLICLY' : 'INVITE ONLY'}
+              </h3>
+              <p className="text-gray-300 text-xs max-w-md">
+                {room.isPublic
+                  ? 'Anyone can find this room and join. Mics start muted and dares are off.'
+                  : 'Only people with the code can join. Make it public to fill empty seats with strangers.'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              audioSFX.playTap();
+              void roomStore.setVisibility(room.roomId, !room.isPublic);
+            }}
+            className={`w-full sm:w-auto font-black text-xs px-5 py-2.5 rounded-xl transition-all shrink-0 ${
+              room.isPublic
+                ? 'bg-white/10 hover:bg-white/20 text-gray-200 border border-white/20'
+                : 'bg-partyCyan hover:bg-cyan-300 text-partyDark'
+            }`}
+          >
+            {room.isPublic ? 'MAKE PRIVATE' : 'MAKE PUBLIC'}
+          </button>
+        </div>
+      )}
+
       {/* Two-up grid for Lounging Area & Mode Hub */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 relative z-10">
         {/* Player Lounging Area */}

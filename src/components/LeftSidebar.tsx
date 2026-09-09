@@ -1,11 +1,13 @@
 'use client';
 
-import React from 'react';
-import { Mic, Users, Trophy, MapPin, UserMinus, WifiOff, Heart } from 'lucide-react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import { Mic, Users, Trophy, MapPin, UserMinus, WifiOff, Heart, MoreVertical, VolumeX } from 'lucide-react';
 import { Player } from '@/lib/types';
 import { BOARD_LENGTH, MAX_PLAYERS, STARTING_LIVES, TEAMS, boardProgress, getTeam } from '@/lib/gameRules';
 import AvatarIllustration from './AvatarIllustration';
 import HeatBadge from './HeatBadge';
+import PlayerSafetyMenu from './PlayerSafetyMenu';
+import { isBlocked, isMuted, safetyServerVersion, safetyVersion, subscribeSafety } from '@/lib/safety';
 
 interface LeftSidebarProps {
   roomId: string;
@@ -29,6 +31,12 @@ export default function LeftSidebar({
   onKickPlayer,
   roomType = 'board_game',
 }: LeftSidebarProps) {
+  const [safetyTarget, setSafetyTarget] = useState<Player | null>(null);
+
+  // Mute and block live outside React, in device storage, so the roster has to
+  // be told when they change or a tap on Mute leaves the icon stale.
+  useSyncExternalStore(subscribeSafety, safetyVersion, safetyServerVersion);
+
   return (
     <aside className="hidden lg:flex w-64 glass-card rounded-3xl p-5 border border-white/15 space-y-6 backdrop-blur-xl bg-slate-900/70 shadow-2xl flex-col justify-between shrink-0">
       <div className="space-y-5">
@@ -110,6 +118,15 @@ export default function LeftSidebar({
                         </span>
                       )}
                       <HeatBadge streak={player.streak} />
+                      {(isMuted(player.id) || isBlocked(player.uid)) && (
+                        <span
+                          title={isBlocked(player.uid) ? 'Blocked' : 'Muted'}
+                          className="inline-flex items-center gap-0.5 text-[8px] px-1 py-px rounded font-black bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                        >
+                          <VolumeX className="w-2 h-2" />
+                          {isBlocked(player.uid) ? 'BLOCKED' : 'MUTED'}
+                        </span>
+                      )}
                     </div>
                     <p className="text-[10px] text-partyCyan font-bold flex items-center gap-1">
                       <Trophy className="w-2.5 h-2.5" /> {player.score} pts
@@ -154,6 +171,20 @@ export default function LeftSidebar({
                     </span>
                   )}
 
+                  {/* Mute, block and report. Available to everyone about
+                      everyone else — safety controls that only the host can
+                      reach are not safety controls. */}
+                  {!isMe && (
+                    <button
+                      onClick={() => setSafetyTarget(player)}
+                      title={`Mute, block or report ${player.name}`}
+                      aria-label={`Mute, block or report ${player.name}`}
+                      className="text-gray-500 hover:text-white transition-colors p-0.5 rounded"
+                    >
+                      <MoreVertical className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
                   {canManage && !player.isHost && !isMe && (
                     <button
                       onClick={() => onKickPlayer?.(player)}
@@ -173,6 +204,14 @@ export default function LeftSidebar({
       <div className="pt-4 border-t border-white/10 text-center">
         <p className="text-[10px] text-gray-400 font-mono">MARIO PARTY + JACKBOX VIBES</p>
       </div>
+
+      {safetyTarget && (
+        <PlayerSafetyMenu
+          player={safetyTarget}
+          roomId={roomId}
+          onClose={() => setSafetyTarget(null)}
+        />
+      )}
     </aside>
   );
 }

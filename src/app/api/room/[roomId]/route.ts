@@ -35,6 +35,8 @@ import {
   MINIGAME_FAIL_THRESHOLD,
   STARTING_LIVES,
   STREAK_KEEP_THRESHOLD,
+  DARE_BLOCKED_MESSAGE,
+  personalDaresAllowed,
   PRESENCE_TIMEOUT_MS,
   isPresent,
   leaderProgressOf,
@@ -520,6 +522,7 @@ const HOST_ONLY_ACTIONS = new Set([
   'set_theme',
   'update_minigames',
   'update_room_vibe',
+  'set_visibility',
   'ai_master_start',
   'ai_master_verdict',
   'ai_master_next_round',
@@ -562,6 +565,11 @@ const ACTIVE_PLAYER_ACTIONS = new Set([
  */
 const SELF_PLAYER_ID_ACTIONS = new Set([
   'heartbeat',
+  // Consent, so it can only ever be given for yourself. Without this the
+  // playerId in the body is whatever the sender chose, and one player could
+  // switch ANOTHER player's microphone on — the exact thing the public-room
+  // default exists to prevent.
+  'set_mic_opt_in',
   'mark_away',
   'leave_room',
   'set_avatar',
@@ -755,6 +763,9 @@ function applyLanding(room: RoomState, player: Player, node: number): TileOutcom
   }
 
   if (outcome.triggersDare) {
+    // A refused dare leaves the phase untouched, so the turn carries on as if
+    // the tile were an ordinary one rather than hanging on a peer_dare screen
+    // that will never be filled in.
     startDare(room, player);
   } else if (outcome.triggersDuel) {
     startDuel(room, player);
@@ -771,10 +782,19 @@ function applyLanding(room: RoomState, player: Player, node: number): TileOutcom
  * The dare used to be invented inside the modal on the rolling player's screen,
  * which meant nobody else knew what had been asked, and refreshing lost it.
  */
-function startDare(room: RoomState, target: Player, challenger?: Player): void {
+function startDare(room: RoomState, target: Player, challenger?: Player): boolean {
+  // The guard lives here rather than at each call site, so a third way to start
+  // a dare cannot be added without inheriting it. A dare is one player ordering
+  // another to perform while the room scores them — the single mechanic in this
+  // game that does not survive contact with strangers.
+  if (!personalDaresAllowed(room)) {
+    pushEvent(room, `🔇 ${DARE_BLOCKED_MESSAGE}`, 'system');
+    return false;
+  }
+
   const rivals = activePlayers(room).filter((p) => p.id !== target.id);
   const picked = challenger ?? rivals[Math.floor(Math.random() * rivals.length)];
-  if (!picked) return;
+  if (!picked) return false;
 
   room.currentDare = {
     dareText: DARES[Math.floor(Math.random() * DARES.length)],
@@ -783,6 +803,7 @@ function startDare(room: RoomState, target: Player, challenger?: Player): void {
   };
   room.phase = 'peer_dare';
   pushEvent(room, `🎤 ${picked.name} dares ${target.name}!`, 'dare');
+  return true;
 }
 
 /**
@@ -2450,6 +2471,12 @@ async function applyAction(
         return NextResponse.json({ error: 'Powerup not in inventory' }, { status: 409 });
       }
 
+      // Checked before the item is consumed, so a blocked dare does not also
+      // cost the player the Dare Gun they paid for.
+      if (powerupId === 'dare_gun' && !personalDaresAllowed(room)) {
+        return NextResponse.json({ error: DARE_BLOCKED_MESSAGE }, { status: 409 });
+      }
+
       // Resolve the victim before spending anything, so a bad target does not
       // consume the item.
       let target: Player | undefined;
@@ -2848,6 +2875,51 @@ async function applyAction(
       }
       room.roomVibe = vibe as keyof typeof ROOM_VIBES;
       pushEvent(room, `${ROOM_VIBES[room.roomVibe].emoji} Room vibe set to ${ROOM_VIBES[room.roomVibe].label}`, 'system');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'set_visibility': {
+      const next = body.isPublic === true;
+
+      // Only from the lobby. Publishing a match already in progress drops
+      // strangers into the middle of somebody's game, and — worse — would flip
+      // the safety rules underneath players who joined under the old ones.
+      if (room.phase !== 'lobby') {
+        return NextResponse.json(
+          { error: 'The room can only be listed or delisted from the lobby.' },
+          { status: 409 }
+        );
+      }
+
+      room.isPublic = next;
+      if (next) {
+        // Latched, never cleared. Delisting must not silently re-enable dares
+        // aimed at whoever already walked in off the browser.
+        room.wasEverPublic = true;
+        pushEvent(
+          room,
+          '🌍 Room listed publicly — anyone can find and join it. Mics start muted and dares are off.',
+          'system'
+        );
+      } else {
+        pushEvent(room, '🔒 Room delisted — invite only from here.', 'system');
+      }
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /**
+     * The player's own microphone consent.
+     *
+     * Not host-only and deliberately not restricted to the active player: this
+     * is the one control every person in the room must be able to reach at any
+     * moment, including in the middle of somebody else's turn.
+     */
+    case 'set_mic_opt_in': {
+      const player = room.players.find((p) => p.id === body.playerId);
+      if (!player) return NextResponse.json({ error: 'Player not found' }, { status: 404 });
+
+      player.micOptIn = body.micOptIn === true;
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

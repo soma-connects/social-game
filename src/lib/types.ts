@@ -48,6 +48,15 @@ export type Player = {
   lastSeen?: number;
   /** Set when they left on purpose, or were dropped for going quiet. */
   connected?: boolean;
+  /**
+   * Whether this player has opted in to sending their microphone.
+   *
+   * Undefined reads as "yes" in a private room and "no" in a public one. In a
+   * room of friends the open mic is the entire game and asking permission every
+   * time would be noise; in a room of strangers an always-hot mic is something
+   * nobody consented to, so it starts off and the player turns it on.
+   */
+  micOptIn?: boolean;
   /** Social progression, mostly earned from making the room react. */
   level?: number;
   vibeScore?: number;
@@ -451,6 +460,8 @@ export type RoomState = {
    * the room at once; clients should ignore it.
    */
   rev?: number;
+  /** Server clock at the last write, used to tell a live room from a dead one. */
+  updatedAt?: number;
   hostId: string;
   phase: GamePhase;
   /**
@@ -489,6 +500,27 @@ export type RoomState = {
   roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master';
   /** The social vibe the host picked, steering the AI Master's tone and mini-game mix. Undefined reads as classic_party. */
   roomVibe?: RoomVibeId;
+  /**
+   * Listed in the public browser, so strangers can find and join it.
+   *
+   * The default is false and stays false: a room made from a link somebody sent
+   * you is private, and the host has to deliberately open it. Absent reads as
+   * private, so no existing room is retroactively published.
+   *
+   * This is not merely a listing flag — it is the switch that decides whether
+   * the people in this room know each other, and several safety rules key off
+   * it (see `strangerRoom` in gameRules). Everything that is fun among friends
+   * and hostile among strangers is gated on it.
+   */
+  isPublic?: boolean;
+  /**
+   * Set once the host opens the room up, so a room that was public earlier in
+   * the evening keeps its stranger-safety rules for the rest of the match even
+   * if it is delisted. Un-publishing must not silently re-enable dares aimed at
+   * whoever already walked in.
+   */
+  wasEverPublic?: boolean;
+
   /** Set instead of a solo winner when the room is in team mode. */
   winningTeam?: TeamId | null;
   /** Cumulative scores in Team Battle mode. */

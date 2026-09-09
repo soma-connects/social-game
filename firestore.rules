@@ -16,9 +16,21 @@ service cloud.firestore {
 
     match /rooms/{roomId} {
       // Knowing the room code is the only credential the game has ever had; it
-      // is what gets pasted into WhatsApp to invite people. Reads stay open so
-      // players and spectators can follow along without signing in.
-      allow read: if true;
+      // is what gets pasted into WhatsApp to invite people. Fetching one room by
+      // id stays open so players and spectators can follow along without
+      // signing in.
+      allow get: if true;
+
+      // Listing is NOT the same permission, and granting it gave the code away.
+      // `allow read` covers get AND list, so any browser could enumerate the
+      // whole collection: every active room code (making "private" meaningless,
+      // since the code is the only credential), every player's name, and
+      // sessionMemory — which stores the text of things people actually said
+      // out loud. No client has ever needed it: the game reads a single doc by
+      // id and subscribes to it. Public rooms are served by /api/rooms/public,
+      // which returns only the rooms a host deliberately opened up and only the
+      // fields the browser screen shows.
+      allow list: if false;
 
       // Never writable from a browser. A client that could write here could set
       // its own score, teleport to the finish line, or delete the room.
@@ -39,6 +51,15 @@ service cloud.firestore {
     // closed for the obvious reason — a client that could write here could
     // invent wins, and once purchases hang off these totals, invent balances.
     match /matches/{matchId} {
+      allow read, write: if false;
+    }
+
+    // Player reports, written only by the Admin SDK.
+    //
+    // Closed in both directions, and the read side matters more than usual: a
+    // report names the person who filed it, so a reporting system the reported
+    // player can read is worse than having none — it teaches people not to file.
+    match /reports/{reportId} {
       allow read, write: if false;
     }
 

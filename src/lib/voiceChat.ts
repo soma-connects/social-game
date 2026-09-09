@@ -141,6 +141,23 @@ class VoiceChatManager {
   private error: string | null = null;
   /** Remote playback gain. Ducked while the voice arena is listening. */
   private remoteVolume = 1;
+
+  /**
+   * Peers this viewer has muted or blocked.
+   *
+   * Held here rather than checked at each playback site because several code
+   * paths set `audio.muted = false` on their own — a reconnect, an unlock after
+   * autoplay was refused, a track arriving late. Any of those would quietly
+   * un-mute somebody the viewer silenced, so every one of them goes through
+   * applyAudioGate instead of touching `muted` directly.
+   */
+  private silenced = new Set<string>();
+
+  /**
+   * Private rooms default to consenting, which is today's behaviour unchanged.
+   * Public rooms set it false until the player opts in.
+   */
+  private micConsent = true;
   /** True once the browser has refused to play a peer's audio. */
   private audioBlocked = false;
   /**
@@ -215,9 +232,45 @@ class VoiceChatManager {
       micStream.setMuted(true);
       this.autoMuted = true;
     } else if (!shouldMute && this.autoMuted) {
+      // Consent outranks the round.
+      //
+      // Without this check a player who closed their mic *during* a scored
+      // round gets re-opened the moment the round ends: the auto-mute released
+      // is the one it took, and it has no idea the person withdrew in between.
+      // That is the one un-mute nobody asked for.
+      if (!this.micConsent) {
+        this.autoMuted = false;
+        return;
+      }
       micStream.setMuted(false);
       this.autoMuted = false;
     }
+  }
+
+  /**
+   * Whether this player has agreed to transmit at all.
+   *
+   * Held here rather than in the component because it is an invariant over the
+   * microphone, and several things move that microphone — the round's auto-mute,
+   * a reconnect, the mute button. Any of them re-opening a mic in a room the
+   * player never agreed to talk in is the failure this exists to prevent, so
+   * they all have to answer to one flag.
+   */
+  public setMicConsent(allowed: boolean): void {
+    this.micConsent = allowed;
+    if (allowed) return;
+
+    // Withdrawing closes the mic now, and clears the auto-mute bookkeeping so
+    // the end of the round cannot re-open it.
+    this.autoMuted = false;
+    if (this.isJoined()) {
+      micStream.setMuted(true);
+      this.emit();
+    }
+  }
+
+  public hasMicConsent(): boolean {
+    return this.micConsent;
   }
 
   // ----------------------------------------------------------------- ICE
@@ -500,9 +553,32 @@ class VoiceChatManager {
 
   public setRemoteVolume(volume: number): void {
     this.remoteVolume = Math.min(1, Math.max(0, volume));
-    this.peers.forEach((peer) => {
-      peer.audio.volume = this.remoteVolume;
-    });
+    this.peers.forEach((peer) => this.applyAudioGate(peer));
+  }
+
+  /**
+   * Replaces the set of peers this viewer refuses to hear.
+   *
+   * Takes the whole set rather than one id at a time so it can be driven
+   * straight from the mute/block lists on every render without the caller
+   * tracking what changed.
+   */
+  public setSilencedPeers(playerIds: string[]): void {
+    this.silenced = new Set(playerIds);
+    this.peers.forEach((peer) => this.applyAudioGate(peer));
+  }
+
+  /**
+   * The single place a peer's audibility is decided.
+   *
+   * Both `muted` and `volume` are set: muted alone is enough on every browser
+   * that honours it, and the zeroed volume means a stray `muted = false`
+   * elsewhere still cannot make a blocked player audible.
+   */
+  private applyAudioGate(peer: Peer): void {
+    const silenced = this.silenced.has(peer.id);
+    peer.audio.muted = silenced;
+    peer.audio.volume = silenced ? 0 : this.remoteVolume;
   }
 
   // ----------------------------------------------------------------- peers
@@ -597,10 +673,14 @@ class VoiceChatManager {
 
     const audio = typeof window !== 'undefined' ? new Audio() : ({} as HTMLAudioElement);
     if (audio.style) {
+      // Seeded from the silence set rather than defaulted to audible: a peer
+      // blocked before they ever connected would otherwise be briefly hearable
+      // between the element being created and the first track arriving.
+      const silenced = this.silenced.has(peerId);
       audio.autoplay = true;
-      audio.volume = this.remoteVolume;
-      audio.muted = false;
-      audio.defaultMuted = false;
+      audio.volume = silenced ? 0 : this.remoteVolume;
+      audio.muted = silenced;
+      audio.defaultMuted = silenced;
       audio.setAttribute('playsinline', 'true');
       audio.setAttribute('webkit-playsinline', 'true');
       (audio as any).playsInline = true;
@@ -656,7 +736,7 @@ class VoiceChatManager {
       if (!stream) return;
       peer.stream = stream;
       audio.srcObject = stream;
-      audio.muted = false;
+      this.applyAudioGate(peer);
       if (this.audioCtx && this.audioCtx.state === 'suspended') {
         void this.audioCtx.resume();
       }
@@ -721,7 +801,7 @@ class VoiceChatManager {
       // Synchronously call play on all audio elements during the user touch event
       this.peers.forEach((peer) => {
         if (peer.audio && peer.audio.srcObject) {
-          peer.audio.muted = false;
+          this.applyAudioGate(peer);
           void peer.audio.play().catch(() => {});
         }
       });
@@ -753,7 +833,7 @@ class VoiceChatManager {
     const attempts = [...this.peers.values()]
       .filter((peer) => peer.audio?.play && peer.audio.srcObject)
       .map((peer) => {
-        peer.audio.muted = false;
+        this.applyAudioGate(peer);
         return peer.audio.play().then(() => true).catch(() => false);
       });
 

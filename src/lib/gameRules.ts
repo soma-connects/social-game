@@ -223,6 +223,77 @@ export function respawnToStart(player: Player): void {
 }
 
 /** Coins a Supply Drop tile pays out. */
+// ─── Stranger rooms ─────────────────────────────────────────────────────────
+//
+// A public room is not just a private room with a listing. This game's whole
+// design assumes the people in it know each other: the microphones are always
+// hot, and one player can order another to perform a dare that the room then
+// judges. Among friends that is the point. Among strangers the same two
+// mechanics are an open mic nobody consented to and a way to make a person you
+// have never met perform on command.
+//
+// So the rules below are keyed on the room, not on the player, and they live
+// here rather than in the components that enforce them — the server decides
+// what is allowed and the UI has to agree with it, and two copies of a safety
+// rule is one copy that will drift.
+
+/**
+ * Whether a room must be treated as containing strangers.
+ *
+ * Latches on `wasEverPublic` rather than reading `isPublic` alone: a host who
+ * delists mid-match must not silently re-enable dares pointed at whoever
+ * already walked in off the browser.
+ */
+export function isStrangerRoom(room: {
+  isPublic?: boolean;
+  wasEverPublic?: boolean;
+}): boolean {
+  return room.isPublic === true || room.wasEverPublic === true;
+}
+
+/**
+ * Whether this player's microphone should be live.
+ *
+ * Private rooms keep today's behaviour exactly — the mic is on and the game
+ * works as it always has. Public rooms invert the default: off until the person
+ * says otherwise, because "everyone can hear you" is not a reasonable thing to
+ * discover after the fact.
+ */
+export function micIsLive(
+  room: { isPublic?: boolean; wasEverPublic?: boolean },
+  player: { micOptIn?: boolean }
+): boolean {
+  if (player.micOptIn !== undefined) return player.micOptIn;
+  return !isStrangerRoom(room);
+}
+
+/**
+ * Whether one player may aim a personal challenge at another.
+ *
+ * Covers the Dare Gun and the peer-dare tiles: the mechanics where a player
+ * names a victim and makes them perform. Blocked outright between strangers
+ * rather than filtered for content, because the problem is not which dare gets
+ * picked — it is one stranger directing another to do something on camera and
+ * microphone while the room scores them.
+ *
+ * The rest of the board is untouched. Offensive items that move a token or take
+ * coins (Rewind, Freeze, Point Bomb, mines) still work: they act on the game,
+ * not on the person.
+ */
+export function personalDaresAllowed(room: {
+  isPublic?: boolean;
+  wasEverPublic?: boolean;
+}): boolean {
+  return !isStrangerRoom(room);
+}
+
+/** What to tell a player who just tried to use one anyway. */
+export const DARE_BLOCKED_MESSAGE =
+  'Dares are off in public rooms — they only work with people you actually know.';
+
+/** Minimum age the acknowledgement asks the player to confirm. */
+export const PUBLIC_ROOM_MIN_AGE = 16;
+
 // ─── Heat: momentum across rounds ───────────────────────────────────────────
 //
 // Every round used to be scored in isolation: you played, you banked coins, and

@@ -35,6 +35,8 @@ export default function StoryBuilderGame({
   const [promptText, setPromptText] = useState(storyBuilderState?.prompt || '');
   const [sentence, setSentence] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  /** The keyboard stays hidden until somebody asks for it. */
+  const [showTyping, setShowTyping] = useState(false);
   const [timeLeft, setTimeLeft] = useState(15);
   
   useEffect(() => {
@@ -227,31 +229,70 @@ export default function StoryBuilderGame({
         </div>
 
         {isMySpeakingTurn ? (
-          <div className="flex flex-col gap-2 mt-4">
-            <label className="text-partyCyan font-bold tracking-wider text-sm">YOUR SENTENCE</label>
-            <div className="flex flex-col md:flex-row gap-3">
+          /*
+           * Speaking is the whole point, so the mic is the button and typing is
+           * the escape hatch. This used to be the other way round — a text field
+           * with a small mic beside it — which read as a typing game and killed
+           * the pace: everyone else sits on a live call watching somebody thumb
+           * out a sentence. The keyboard stays one tap away, because a noisy
+           * room and an unfamiliar accent both defeat recognition, and being
+           * stuck with no way to take your turn is worse than being slow.
+           */
+          <div className="flex flex-col gap-3 mt-4">
+            <label className="text-partyCyan font-bold tracking-wider text-sm">YOUR LINE</label>
+
+            {/* What they said, as it arrives. Doubles as the empty-state prompt. */}
+            <div
+              className={`min-h-[72px] rounded-2xl border-2 px-4 py-3 flex items-center transition-colors ${
+                isRecording
+                  ? 'border-red-500/50 bg-red-500/10'
+                  : sentence
+                  ? 'border-partyCyan/50 bg-partyCyan/10'
+                  : 'border-white/10 bg-white/5'
+              }`}
+            >
+              <p className={`text-lg ${sentence ? 'text-white font-bold' : 'text-gray-500'}`}>
+                {sentence || (isRecording ? 'Listening…' : 'Tap below and say your line')}
+              </p>
+            </div>
+
+            <button
+              onClick={recordSpeech}
+              className={`py-4 rounded-2xl font-black tracking-wide flex items-center justify-center gap-2 transition-all ${
+                isRecording
+                  ? 'bg-red-500/20 text-red-300 border-2 border-red-500/60 animate-pulse'
+                  : 'bg-partyCyan/15 text-partyCyan border-2 border-partyCyan/40 hover:bg-partyCyan/25'
+              }`}
+            >
+              <Mic className="w-6 h-6" />
+              {isRecording ? 'LISTENING — TAP TO STOP' : sentence ? 'SAY IT AGAIN' : 'TAP TO SPEAK'}
+            </button>
+
+            {showTyping ? (
               <input
                 type="text"
                 value={sentence}
                 onChange={(e) => setSentence(e.target.value)}
-                placeholder={`${currentPlayer?.name || 'Unknown'} is continuing the story...`}
-                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-partyCyan/50 transition-colors"
+                /* Matches the server's cap, so a long line is stopped here
+                   rather than silently truncated after they hit submit. */
+                maxLength={240}
+                autoFocus
+                placeholder="Type your line instead…"
+                className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-partyCyan/50 transition-colors"
               />
+            ) : (
               <button
-                onClick={recordSpeech}
-                className={`p-3 rounded-xl flex items-center justify-center transition-all ${
-                  isRecording 
-                    ? 'bg-red-500/20 text-red-400 border border-red-500/50 animate-pulse' 
-                    : 'bg-partyCyan/10 text-partyCyan hover:bg-partyCyan/20 border border-partyCyan/30'
-                }`}
+                onClick={() => setShowTyping(true)}
+                className="text-xs text-gray-400 hover:text-partyCyan underline underline-offset-4 self-center"
               >
-                <Mic className="w-6 h-6" />
+                Mic not catching it? Type instead
               </button>
-            </div>
+            )}
+
             <button
               onClick={handleSubmitSentence}
               disabled={!sentence}
-              className="mt-2 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl"
+              className="py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl"
             >
               <Send className="w-5 h-5 inline mr-2" /> SUBMIT
             </button>

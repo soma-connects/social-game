@@ -187,6 +187,20 @@ export function newToken(): string {
   return randomBytes(24).toString('base64url');
 }
 
+/**
+ * Trims and caps a piece of player-authored text.
+ *
+ * A room is stored as a single Firestore document, and Firestore rejects any
+ * document over 1 MiB. Nothing about a party game needs a long string, so
+ * without a cap one pasted essay in a story round makes every later write to
+ * that room fail — which does not inconvenience whoever sent it, it ends the
+ * match for all six players. The entry point is the only place this can be
+ * enforced once, since every one of these strings is stored verbatim.
+ */
+export function playerText(value: unknown, max: number): string {
+  return String(value ?? '').trim().slice(0, max);
+}
+
 export function pushEvent(room: RoomState, text: string, type: EventLog['type']): void {
   const event: EventLog = {
     id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,

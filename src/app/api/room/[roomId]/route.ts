@@ -56,6 +56,7 @@ import {
 import {
   RoomConflictError,
   newToken,
+  playerText,
   pushEvent,
   readRoom,
   readSecrets,
@@ -1267,7 +1268,7 @@ async function applyAction(
 
   switch (action) {
     case 'join': {
-      const name = String(body.playerName ?? '').trim();
+      const name = playerText(body.playerName, 24);
 
       // A refresh or a reconnect re-claims the seat this browser already holds.
       // Matching on the *name* instead — which is what this used to do — meant
@@ -1336,7 +1337,7 @@ async function applyAction(
     }
 
     case 'add_trap': {
-      const word = String(body.trapWord ?? '').trim();
+      const word = playerText(body.trapWord, 80);
       if (!word) return NextResponse.json({ error: 'Trap word is required' }, { status: 400 });
       // Authorship comes from the authenticated caller, not from the body —
       // otherwise a trap can be planted in somebody else's name.
@@ -1527,7 +1528,7 @@ async function applyAction(
 
     /** Opens a Story Builder round with the prompt the active player drew. */
     case 'story_builder_start': {
-      const prompt = String(body.prompt ?? '').trim();
+      const prompt = playerText(body.prompt, 200);
       if (!prompt) return NextResponse.json({ error: 'A starting prompt is required' }, { status: 400 });
 
       room.storyBuilderState = {
@@ -1546,7 +1547,7 @@ async function applyAction(
       const state = room.storyBuilderState;
       if (!state) return NextResponse.json({ error: 'No story in progress' }, { status: 409 });
 
-      const sentence = String(body.sentence ?? '').trim();
+      const sentence = playerText(body.sentence, 240);
       const author = room.players.find((p) => p.id === body.playerId);
       if (!sentence || !author) {
         return NextResponse.json({ error: 'A sentence and a known player are required' }, { status: 400 });
@@ -1615,7 +1616,7 @@ async function applyAction(
 
     /** Pairs the active player against an opponent and opens the debate. */
     case 'debate_start': {
-      const topic = String(body.topic ?? '').trim();
+      const topic = playerText(body.topic, 120);
       if (!topic) return NextResponse.json({ error: 'A debate topic is required' }, { status: 400 });
 
       const starter = room.players.find((p) => p.id === body.playerId) ?? room.players[room.activePlayerIndex];
@@ -1662,7 +1663,7 @@ async function applyAction(
         pushEvent(room, `🗳️ Both sides have spoken — the room votes`, 'system');
       }
 
-      const argument = String(body.argument ?? '').trim();
+      const argument = playerText(body.argument, 400);
       if (argument) {
         const speaker = room.players.find((p) => p.id === body.playerId);
         room.sessionMemory ??= [];
@@ -1841,7 +1842,7 @@ async function applyAction(
 
       const secrets = await readSecrets(roomId);
       const target = secrets.triviaAnswer ?? '';
-      const spoken = String(body.answerText ?? '');
+      const spoken = playerText(body.answerText, 120);
 
       // Speech recognition hands back a whole sentence ("uh, I think it's
       // Lagos"), so the answer counts when it appears as a whole word inside
@@ -3213,6 +3214,21 @@ async function applyAction(
       const ls = room.ludoState;
       if (ls.hasRolled) return NextResponse.json({ error: 'Already rolled this turn' }, { status: 400 });
 
+      // Verify the caller owns the colour to move.
+      //
+      // Chess checks this; Ludo did not, so any player in the room could roll
+      // and move on somebody else's turn — burning their roll from across the
+      // table. The AI seats are the one exception, and only from the client
+      // that drives them (the host), exactly as chess allows.
+      {
+        const seat = ls.players.find((p) => p.color === ls.activeColor);
+        const callerId = body.callerId ?? body.playerId;
+        const isBotTurn = seat?.isAi === true && callerId === room.hostId;
+        if (seat && seat.playerId !== callerId && !isBotTurn) {
+          return NextResponse.json({ error: 'It is not your turn' }, { status: 403 });
+        }
+      }
+
       const roll = Math.floor(Math.random() * 6) + 1;
       ls.diceValue = roll;
       ls.hasRolled = true;
@@ -3302,6 +3318,21 @@ async function applyAction(
 
       if (!ls.hasRolled || !roll) {
         return NextResponse.json({ error: 'Must roll dice first' }, { status: 400 });
+      }
+
+      // Verify the caller owns the colour to move.
+      //
+      // Chess checks this; Ludo did not, so any player in the room could roll
+      // and move on somebody else's turn — burning their roll from across the
+      // table. The AI seats are the one exception, and only from the client
+      // that drives them (the host), exactly as chess allows.
+      {
+        const seat = ls.players.find((p) => p.color === ls.activeColor);
+        const callerId = body.callerId ?? body.playerId;
+        const isBotTurn = seat?.isAi === true && callerId === room.hostId;
+        if (seat && seat.playerId !== callerId && !isBotTurn) {
+          return NextResponse.json({ error: 'It is not your turn' }, { status: 403 });
+        }
       }
 
       const activeColor = ls.activeColor;

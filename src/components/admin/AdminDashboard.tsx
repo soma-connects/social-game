@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { BarList, ChartCard, EmptyPlot, Funnel, LineChart, StatTile } from './Charts';
 import { FUNNEL_RAMP, INK, SERIES, STATUS, percent } from './vizTokens';
 import type { AnalyticsSummary } from '@/lib/server/analytics';
+import ReportsQueue from './ReportsQueue';
 
 type RecentMatch = {
   matchId: string;
@@ -42,7 +43,10 @@ function rateTone(rate: number, warn: number, bad: number): string {
   return STATUS.good;
 }
 
+type Tab = 'analytics' | 'reports';
+
 export default function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
+  const [tab, setTab] = useState<Tab>('analytics');
   const [days, setDays] = useState<number>(30);
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,8 +72,9 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
   }, [onSignOut]);
 
   useEffect(() => {
+    if (tab !== 'analytics') return;
     void load(days);
-  }, [days, load]);
+  }, [days, load, tab]);
 
   const summary = data?.summary;
 
@@ -78,12 +83,14 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold" style={{ color: INK.primary }}>
-            Game analytics
+            {tab === 'reports' ? 'Moderation' : 'Game analytics'}
           </h1>
           <p className="text-xs mt-0.5" style={{ color: INK.muted }}>
-            {summary
-              ? `Last ${summary.rangeDays} days · updated ${new Date(summary.generatedAt).toLocaleTimeString()}`
-              : 'Loading…'}
+            {tab === 'reports'
+              ? 'Player reports and what was decided about them'
+              : summary
+                ? `Last ${summary.rangeDays} days · updated ${new Date(summary.generatedAt).toLocaleTimeString()}`
+                : 'Loading…'}
           </p>
         </div>
 
@@ -92,28 +99,55 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
             className="inline-flex rounded-xl overflow-hidden border"
             style={{ borderColor: INK.axis }}
           >
-            {RANGES.map((range) => (
+            {(['analytics', 'reports'] as Tab[]).map((name) => (
               <button
-                key={range}
-                onClick={() => setDays(range)}
-                className="px-3 py-1.5 text-xs font-semibold transition-colors"
+                key={name}
+                onClick={() => setTab(name)}
+                className="px-3 py-1.5 text-xs font-semibold capitalize transition-colors"
                 style={{
-                  backgroundColor: days === range ? SERIES[0] : 'transparent',
-                  color: days === range ? '#ffffff' : INK.secondary,
+                  backgroundColor: tab === name ? SERIES[0] : 'transparent',
+                  color: tab === name ? '#ffffff' : INK.secondary,
                 }}
               >
-                {range}d
+                {name}
               </button>
             ))}
           </div>
 
-          <button
-            onClick={() => load(days)}
-            className="px-3 py-1.5 text-xs font-semibold rounded-xl border"
-            style={{ borderColor: INK.axis, color: INK.secondary }}
-          >
-            Refresh
-          </button>
+          {/* The date range only means something on the analytics tab; the
+              moderation queue is a backlog, not a time series, and hiding an
+              old unresolved report behind a 7-day filter is how one gets
+              forgotten. */}
+          {tab === 'analytics' && (
+            <>
+              <div
+                className="inline-flex rounded-xl overflow-hidden border"
+                style={{ borderColor: INK.axis }}
+              >
+                {RANGES.map((range) => (
+                  <button
+                    key={range}
+                    onClick={() => setDays(range)}
+                    className="px-3 py-1.5 text-xs font-semibold transition-colors"
+                    style={{
+                      backgroundColor: days === range ? SERIES[0] : 'transparent',
+                      color: days === range ? '#ffffff' : INK.secondary,
+                    }}
+                  >
+                    {range}d
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => load(days)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-xl border"
+                style={{ borderColor: INK.axis, color: INK.secondary }}
+              >
+                Refresh
+              </button>
+            </>
+          )}
           <button
             onClick={onSignOut}
             className="px-3 py-1.5 text-xs font-semibold rounded-xl border"
@@ -124,7 +158,9 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
         </div>
       </header>
 
-      {error && (
+      {tab === 'reports' && <ReportsQueue onSignOut={onSignOut} />}
+
+      {tab === 'analytics' && error && (
         <div
           className="rounded-2xl p-4 border text-sm"
           style={{ backgroundColor: INK.surface, borderColor: STATUS.critical, color: INK.secondary }}
@@ -134,13 +170,13 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
         </div>
       )}
 
-      {loading && !data && (
+      {tab === 'analytics' && loading && !data && (
         <p className="text-sm py-16 text-center" style={{ color: INK.muted }}>
           Loading analytics…
         </p>
       )}
 
-      {summary && data && (
+      {tab === 'analytics' && summary && data && (
         <>
           {summary.sessionsCreated === 0 && (
             <div

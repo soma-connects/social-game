@@ -3,21 +3,9 @@ import { adminDb } from '@/lib/firebase/server';
 import { verifyUid } from '@/lib/firebase/server';
 import { newToken, readRoom } from '@/lib/server/roomServer';
 import { callerKey, consume } from '@/lib/server/rateLimit';
+import { isReportReason, type ReportRecord } from '@/lib/server/reports';
 
 export const dynamic = 'force-dynamic';
-
-/** The reasons the UI offers. Anything else is refused rather than stored. */
-const REASONS = [
-  'harassment',
-  'hate_speech',
-  'sexual_content',
-  'threats',
-  'spam',
-  'underage',
-  'other',
-] as const;
-
-type Reason = (typeof REASONS)[number];
 
 /**
  * A player report.
@@ -49,10 +37,10 @@ export async function POST(request: Request) {
 
   const roomId = String(body.roomId ?? '').trim().toUpperCase();
   const reportedPlayerId = String(body.reportedPlayerId ?? '').trim();
-  const reason = String(body.reason ?? '') as Reason;
+  const reason = body.reason;
   const note = String(body.note ?? '').trim().slice(0, 500);
 
-  if (!roomId || !reportedPlayerId || !REASONS.includes(reason)) {
+  if (!roomId || !reportedPlayerId || !isReportReason(reason)) {
     return NextResponse.json({ error: 'Missing or invalid report details' }, { status: 400 });
   }
 
@@ -68,7 +56,7 @@ export async function POST(request: Request) {
 
   try {
     const id = `${roomId}-${Date.now().toString(36)}-${newToken().slice(0, 8)}`;
-    await adminDb.collection('reports').doc(id).set({
+    const record: ReportRecord = {
       id,
       roomId,
       at: Date.now(),
@@ -83,7 +71,10 @@ export async function POST(request: Request) {
       roomWasPublic: room.isPublic === true || room.wasEverPublic === true,
       roomPhase: room.phase,
       playerNames: room.players.map((player) => player.name).slice(0, 8),
-    });
+      // Explicit rather than left absent, so the queue can query for it.
+      status: 'open',
+    };
+    await adminDb.collection('reports').doc(id).set(record);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

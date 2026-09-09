@@ -17,6 +17,7 @@ import { Player } from '@/lib/types';
 import { usePitchDetection, CALIBRATION_MS } from '@/hooks/usePitchDetection';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
+import { publishFrame } from '@/lib/liveFrames';
 import { Mic, MicOff, Volume2 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -324,7 +325,25 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
         if (s.overheatCooldown <= 0) s.overheating = false;
       }
 
-      // Let the room watch: distance and score, throttled in roomStore.
+      // Let the room actually watch it happen. Positions are sent as fractions
+      // of the canvas rather than pixels, so a spectator can mirror this at
+      // whatever size their panel happens to be.
+      if (roomId) {
+        const next = s.gates.find((g) => g.x + GATE_WIDTH > 0);
+        publishFrame(player.id, 'pitch_bird', {
+          y: s.playerY / CANVAS_H,
+          score: s.score,
+          dist: Math.floor(s.distance / 10),
+          hot: s.overheating,
+          // -1 parks the gate off the mirror when none is on screen yet.
+          gx: next ? next.x / CANVAS_W : -1,
+          gt: next ? next.gapTop / CANVAS_H : 0,
+          gb: next ? next.gapBottom / CANVAS_H : 0,
+        });
+      }
+
+      // The durable, slower copy: what a spectator with no peer connection —
+      // no mic, still connecting, or watching from outside the call — sees.
       if (roomId) {
         roomStore.pushLiveState(roomId, player.id, {
           prompt: `${Math.floor(s.distance / 10)}m`,

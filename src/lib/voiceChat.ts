@@ -72,6 +72,16 @@ interface Peer {
   id: string;
   pc: RTCPeerConnection;
   audio: HTMLAudioElement;
+  /**
+   * Side channel for live gameplay frames — the bird's height, the score
+   * ticking up — so the room watches the attempt instead of a number that
+   * refreshes every second and a half. Rides the connection that already
+   * carries the voice, so it costs no server and no extra handshake.
+   *
+   * Never allowed to affect audio: every use is wrapped, and a channel that
+   * fails to open simply means the room falls back to the slow path.
+   */
+  channel?: RTCDataChannel;
   /** Remote audio, kept so listeners can record the performer for the replay. */
   stream: MediaStream | null;
   analyser: AnalyserNode | null;
@@ -125,6 +135,7 @@ class VoiceChatManager {
   private myId: string | null = null;
 
   private peers = new Map<string, Peer>();
+  private frameHandlers = new Set<(payload: string) => void>();
   /** Everyone in the room. Bounds who may become a peer; does not select them. */
   private roomMemberIds = new Set<string>();
   private localStream: MediaStream | null = null;
@@ -620,6 +631,21 @@ class VoiceChatManager {
       missedPresence: 0,
     };
 
+    // The lower id offers (see connect above), so that side opens the channel
+    // and the other picks it up. Creating it here rather than later keeps it in
+    // the first offer, so there is no renegotiation.
+    try {
+      if (this.myId && this.myId < peerId) {
+        // Unreliable and unordered, deliberately: a dropped frame of a moving
+        // bird is worth nothing a moment later, and waiting to retransmit it
+        // would delay the frames that still matter.
+        this.attachChannel(peer, pc.createDataChannel('live', { ordered: false, maxRetransmits: 0 }));
+      }
+      pc.ondatachannel = (event) => this.attachChannel(peer, event.channel);
+    } catch {
+      // No channel: the room still gets the slow Firestore path.
+    }
+
     /**
      * Always create the outgoing audio sender, even with no track to put in it.
      *
@@ -772,6 +798,16 @@ class VoiceChatManager {
   private destroyPeer(peer: Peer): void {
     peer.pc.onicecandidate = null;
     peer.pc.ontrack = null;
+    peer.pc.ondatachannel = null;
+    try {
+      if (peer.channel) {
+        peer.channel.onmessage = null;
+        peer.channel.close();
+      }
+    } catch {
+      // Already gone.
+    }
+    peer.channel = undefined;
     peer.pc.onconnectionstatechange = null;
     try {
       peer.pc.close();
@@ -792,6 +828,54 @@ class VoiceChatManager {
    *   relies on restartIce() alone — on the answering side that call has
    *   nothing to trigger, since that side never creates offers.
    */
+  /** Points a channel's messages at the subscribers. Failure is never fatal. */
+  private attachChannel(peer: Peer, channel: RTCDataChannel): void {
+    try {
+      peer.channel = channel;
+      channel.onmessage = (event) => {
+        if (typeof event.data !== 'string') return;
+        this.frameHandlers.forEach((handler) => {
+          try {
+            handler(event.data);
+          } catch {
+            // One bad subscriber must not stop the others.
+          }
+        });
+      };
+    } catch {
+      peer.channel = undefined;
+    }
+  }
+
+  /**
+   * Sends one live frame to everyone on the call.
+   *
+   * Drops the frame rather than queueing when a channel is not open or its
+   * buffer is backing up — for realtime mirroring the next frame is always
+   * better than a late one, and an unbounded buffer would grow forever on a
+   * bad connection.
+   */
+  public broadcastFrame(payload: string): void {
+    this.peers.forEach((peer) => {
+      const channel = peer.channel;
+      if (!channel || channel.readyState !== 'open') return;
+      if (channel.bufferedAmount > 64_000) return;
+      try {
+        channel.send(payload);
+      } catch {
+        // Peer went away mid-send; the connection state handling deals with it.
+      }
+    });
+  }
+
+  /** Subscribes to live frames from other players. Returns an unsubscribe. */
+  public onFrame(handler: (payload: string) => void): () => void {
+    this.frameHandlers.add(handler);
+    return () => {
+      this.frameHandlers.delete(handler);
+    };
+  }
+
   private async makeOffer(peer: Peer, iceRestart = false): Promise<void> {
     if (!this.myId) return;
     try {

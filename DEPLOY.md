@@ -121,7 +121,18 @@ Project → Settings → Environment Variables, then deploy.
 
 ### Cloud Run
 
-Deploy through `cloudbuild.yaml`, not `gcloud run deploy --source .`:
+```bash
+./scripts/deploy-cloudrun.sh --check   # validate, deploy nothing
+./scripts/deploy-cloudrun.sh           # deploy
+```
+
+That reads the seven Firebase values from `.env.local`, refuses to run if any
+are missing, shows the branch, commit, project and account, and asks before
+deploying. It is the same command as below with the substitutions filled in
+from the file rather than by hand.
+
+The underlying invocation, if you would rather run it yourself — deploy through
+`cloudbuild.yaml`, not `gcloud run deploy --source .`:
 
 ```bash
 gcloud builds submit --config cloudbuild.yaml \

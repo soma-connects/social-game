@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e:board": "npx --yes playwright test tests/board-realtime.spec.ts"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",

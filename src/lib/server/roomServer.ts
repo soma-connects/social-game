@@ -116,6 +116,10 @@ export async function writeRoom(room: RoomState): Promise<RoomState> {
       if (currentRev !== expectedRev) throw new RoomConflictError(room.roomId);
     }
     room.rev = (expectedRev ?? 0) + 1;
+    // Liveness, for the public room browser. Without it a room that everybody
+    // walked away from keeps advertising itself until the six-hour sweep, and
+    // the browser's top result is a lobby nobody is sitting in.
+    room.updatedAt = Date.now();
     tx.set(ref, room);
   });
 

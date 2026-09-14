@@ -50,8 +50,26 @@ export default function ChallengePanel({
           }`}
         >
           <Clock className="w-3.5 h-3.5" />
-          <span>00:0{timeLeft}</span>
+          {/* Padded like every other timer in the game. The literal "00:0" this
+              replaced dropped a digit the moment the clock reached ten, which
+              the spelling round already runs at. */}
+          <span>00:{String(Math.max(0, timeLeft)).padStart(2, '0')}</span>
         </div>
+      </div>
+
+      {/* The bar the countdown was always meant to have — `timerPercentage` was
+          being computed here and thrown away. A number alone reads as
+          information; a bar draining reads as pressure, which is the point of
+          putting a clock on a party round at all. */}
+      <div className="w-full bg-partyDark h-2 rounded-full overflow-hidden border border-white/10 p-px">
+        <div
+          className={`h-full rounded-full transition-all duration-1000 ${
+            timeLeft <= 3
+              ? 'bg-red-500'
+              : 'bg-gradient-to-r from-emerald-400 via-partyYellow to-terracotta'
+          }`}
+          style={{ width: `${Math.max(0, Math.min(100, timerPercentage))}%` }}
+        />
       </div>
 
       {/* Challenge Card */}

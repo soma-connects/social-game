@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { Mic, MicOff, PhoneCall, PhoneOff, Loader2, AlertTriangle, Volume2 } from 'lucide-react';
 import { Player } from '@/lib/types';
 import { voiceChat, VoiceState } from '@/lib/voiceChat';
+import { safetyServerVersion, safetyVersion, shouldSilence, subscribeSafety } from '@/lib/safety';
 import AvatarIllustration from './AvatarIllustration';
 
 interface VoiceCallBarProps {
@@ -18,6 +19,23 @@ interface VoiceCallBarProps {
   compact?: boolean;
   /** Connects the call without waiting for a tap, once the match is running. */
   autoJoin?: boolean;
+  /**
+   * Whether this player has consented to sending their microphone.
+   *
+   * False in a public room until they say otherwise. The bar then keeps the mic
+   * closed and offers the switch, rather than opening it and telling them after.
+   */
+  micLive?: boolean;
+  /** Records the consent, so it survives a refresh and the room can see it. */
+  onMicOptIn?: (optIn: boolean) => void;
+  /**
+   * Whether this is a public room.
+   *
+   * Only there does the mute button double as a consent record. In a private
+   * room muting stays what it has always been — a local, instant toggle with no
+   * server round trip and nothing published about who has gone quiet.
+   */
+  isStranger?: boolean;
 }
 
 /**
@@ -33,6 +51,9 @@ export default function VoiceCallBar({
   autoMute,
   compact = false,
   autoJoin = false,
+  micLive = true,
+  onMicOptIn,
+  isStranger = false,
 }: VoiceCallBarProps) {
   const [state, setState] = useState<VoiceState>(voiceChat.getState());
   const [joining, setJoining] = useState(false);
@@ -55,6 +76,16 @@ export default function VoiceCallBar({
     voiceChat.setRemoteVolume(duckRemote ? 0.15 : 1);
   }, [duckRemote]);
 
+  // Push this viewer's mute and block lists down to the audio layer.
+  //
+  // Re-sent whenever either the lists or the roster change, because a blocked
+  // player rejoining creates a fresh peer connection that knows nothing about
+  // an earlier decision. Sending the whole set every time makes that free.
+  useSyncExternalStore(subscribeSafety, safetyVersion, safetyServerVersion);
+  useEffect(() => {
+    voiceChat.setSilencedPeers(players.filter(shouldSilence).map((player) => player.id));
+  }, [players, safetyVersion()]);
+
   // Voice-first turn gating.
   //
   // The game is meant to be talked over, but not *while* someone is being
@@ -70,10 +101,22 @@ export default function VoiceCallBar({
     voiceChat.applyAutoMute(autoMute);
   }, [autoMute, state.status]);
 
+  // Consent gate on the outgoing microphone.
+  //
+  // An effect rather than a one-off at join time, so revoking consent mid-call
+  // closes the mic immediately and a reconnect cannot come back up hot in a
+  // room the player never agreed to talk in.
+  useEffect(() => {
+    voiceChat.setMicConsent(micLive);
+  }, [micLive, state.status]);
+
   const handleJoin = async () => {
     setJoining(true);
     voiceChat.resumeAudio();
     await voiceChat.join(roomId, myPlayer.id, players.map((p) => p.id));
+    // Joining a stranger room connects you so you can hear the others. It does
+    // not open your microphone — that takes a separate, deliberate tap.
+    voiceChat.setMicConsent(micLive);
     setJoining(false);
   };
 
@@ -169,6 +212,32 @@ export default function VoiceCallBar({
 
   return (
     <div className="glass-card rounded-2xl px-4 py-3 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-3 bg-slate-900/70">
+      {/* Public room, microphone still closed. Deliberately the loudest thing
+          in the bar: a player who does not realise their mic is off will think
+          the game is broken, and one who does not realise it is ON has had
+          something taken from them. */}
+      {!micLive && (
+        <div className="w-full mb-1 rounded-xl bg-partyCyan/15 border border-partyCyan/50 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-bold text-cyan-100 flex items-center gap-2">
+            <MicOff className="w-4 h-4 shrink-0" />
+            Your mic is off — nobody can hear you.
+          </span>
+          <button
+            onClick={() => {
+              // Applied locally first, then recorded. The record is a server
+              // round trip and the microphone should open on the tap, not a
+              // poll later.
+              voiceChat.setMicConsent(true);
+              voiceChat.setMuted(false);
+              onMicOptIn?.(true);
+            }}
+            className="bg-partyCyan hover:bg-cyan-300 text-partyDark font-black text-[11px] px-3 py-1.5 rounded-lg active:scale-95 transition shrink-0"
+          >
+            TURN ON MIC
+          </button>
+        </div>
+      )}
+
       {/* The call is up but the browser refused to play incoming audio. Without
           this the player just hears nothing and has no idea why. */}
       {state.audioBlocked && (
@@ -242,7 +311,19 @@ export default function VoiceCallBar({
       <div className="flex items-center gap-2">
         {isLive && (
           <button
-            onClick={() => voiceChat.toggleMuted()}
+            onClick={() => {
+              // Un-muting by hand IS opting in, so it records consent rather
+              // than slipping past the public-room default. Muting by hand
+              // withdraws it, so the end of the next round cannot re-open it.
+              const nowMuted = voiceChat.toggleMuted();
+              if (!isStranger) return;
+              // In a public room the button carries consent both ways, so an
+              // explicit un-mute is an opt-in rather than a way around the
+              // default, and an explicit mute cannot be undone by the end of
+              // the next round.
+              if (!nowMuted && !micLive) onMicOptIn?.(true);
+              if (nowMuted && micLive) onMicOptIn?.(false);
+            }}
             className={`px-3 py-2 rounded-xl border font-black text-xs flex items-center gap-1.5 transition-all ${
               state.muted
                 ? 'bg-red-500/25 text-red-300 border-red-500/50'

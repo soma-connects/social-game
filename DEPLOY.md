@@ -97,12 +97,27 @@ client-side `NEXT_PUBLIC_FIREBASE_*` config values for the Firebase Web SDK.
 Both sets must be present in whatever's deploying this — Vercel project
 settings, or `--set-env-vars` / Secret Manager on Cloud Run.
 
+`ADMIN_DASHBOARD_TOKEN` gates `/admin`, the analytics dashboard over the match
+and session archives. Optional: leave it unset and the dashboard reports itself
+as not configured and serves no data. It must be at least 16 characters — the
+route refuses a shorter one rather than pretending to be locked. Generate one
+with `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`.
+
+Because it is a single shared secret, everyone who has it is the same
+principal: there is no per-person audit trail, and revoking one person means
+rotating it for everyone. That is a deliberate trade — the game's only identity
+is anonymous Firebase auth, which cannot express "this person is staff" (an
+anonymous uid dies with its browser's site data). The upgrade path when it
+matters is real Google sign-in plus a uid allowlist, behind the same
+`isAdminRequest` seam in `src/lib/server/adminAuth.ts`.
+
 ### Vercel
 
 Zero-config Next.js import works as-is. Add the Firebase env vars above (plus
 `GEMINI_API_KEY` for the AI Game Master, and `CLOUDFLARE_TURN_API_TOKEN` /
 `CLOUDFLARE_TURN_KEY_ID` if TURN relay is enabled — see **Voice chat and
-TURN** below) under Project → Settings → Environment Variables, then deploy.
+TURN** below, and `ADMIN_DASHBOARD_TOKEN` for the `/admin` dashboard) under
+Project → Settings → Environment Variables, then deploy.
 
 ### Cloud Run
 

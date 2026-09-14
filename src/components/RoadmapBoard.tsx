@@ -9,9 +9,9 @@ import confetti from 'canvas-confetti';
 import AvatarIllustration from './AvatarIllustration';
 import MapRenderer from './MapRenderer';
 import BackgroundMusic from './BackgroundMusic';
-import DiceRoller from './DiceRoller';
+import DiceRoller, { type RollBonus } from './DiceRoller';
 import TileEventOverlay from './TileEventOverlay';
-import { TOTAL_TILES } from '@/lib/gameRules';
+import { TOTAL_TILES, boardProgress, heatTier, leaderProgressOf, slipstreamSteps } from '@/lib/gameRules';
 
 interface RoadmapBoardProps {
   room: RoomState;
@@ -23,6 +23,9 @@ interface RoadmapBoardProps {
 
 export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }: RoadmapBoardProps) {
   const [diceValue, setDiceValue] = useState<number | null>(null);
+  // The breakdown behind the current dice overlay. Held in state rather than
+  // read from the room so the faces and the chips always describe one roll.
+  const [rollMove, setRollMove] = useState<RoomState['lastMove']>(null);
   const [isRolling, setIsRolling] = useState(false);
   
   // Initialize from server state so we don't get trapped on refresh
@@ -127,7 +130,12 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
       return;
     }
 
-    setDiceValue(result.roll);
+    // The faces can only show 2-12, and the total may exceed that once streak
+    // and slipstream steps are added — so the faces get the base and the chips
+    // get the rest. Passing the total here would both overflow the faces and
+    // double-count the bonuses the overlay adds back on.
+    setRollMove(result.move ?? null);
+    setDiceValue(result.move?.base ?? result.roll);
 
     const outcome = result.outcome;
     if (!outcome && !result.waitingForBranch) {
@@ -152,7 +160,34 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
   };
 
   const currentTheme: MapTheme = room.theme || 'forest';
-  const earnedSteps = room.turnResult?.steps ?? null;
+  // The shared version of the breakdown, so the whole room sees the arithmetic
+  // and not just whoever rolled. Hidden once it goes stale, otherwise the strip
+  // keeps announcing a move that happened several turns ago.
+  const roomMove =
+    room.lastMove && Date.now() - room.lastMove.at < 20000 ? room.lastMove : null;
+
+  // The bonuses this player's roll already qualifies for. Recomputed client-side
+  // from the same shared rules the server uses, so the preview and the roll
+  // agree without needing an extra request.
+  const pendingHeat = heatTier(activePlayer.streak ?? 0).stepBonus;
+  const pendingSlipstream = slipstreamSteps(
+    boardProgress(activePlayer.boardPosition),
+    leaderProgressOf(room.players)
+  );
+
+  // Bonus chips for the dice overlay, built from the breakdown the roll request
+  // returned rather than from the room snapshot, which is still describing the
+  // previous player at the moment the dice is thrown.
+  const rollBonuses: RollBonus[] = rollMove
+    ? [
+        ...(rollMove.heat > 0
+          ? [{ label: 'HOT STREAK', icon: '🔥', steps: rollMove.heat, color: '#FB923C' }]
+          : []),
+        ...(rollMove.slipstream > 0
+          ? [{ label: 'SLIPSTREAM', icon: '💨', steps: rollMove.slipstream, color: '#34D399' }]
+          : []),
+      ]
+    : [];
 
   return (
     <div className="max-w-5xl mx-auto px-2 sm:px-4 py-3 space-y-4 relative pb-28">
@@ -189,6 +224,30 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
         </div>
       )}
 
+      {/* The arithmetic behind the last move, for everyone rather than just the
+          player who threw the dice. Spectators never see the dice overlay, so
+          without this a token that travels fifteen spaces on a board where the
+          faces stop at twelve looks like a glitch. */}
+      {roomMove && (roomMove.heat > 0 || roomMove.slipstream > 0) && (
+        <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] font-black z-20 relative">
+          <span className="text-gray-400">{roomMove.playerName.toUpperCase()} MOVED</span>
+          <span className="px-2 py-0.5 rounded-full bg-white/10 border border-white/20 text-white">
+            {roomMove.base} EARNED
+          </span>
+          {roomMove.heat > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-orange-500/20 border border-orange-400/50 text-orange-300">
+              🔥 +{roomMove.heat} STREAK
+            </span>
+          )}
+          {roomMove.slipstream > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-emerald-300">
+              💨 +{roomMove.slipstream} SLIPSTREAM
+            </span>
+          )}
+          <span className="px-2 py-0.5 rounded-full bg-partyYellow text-partyDark">= {roomMove.total}</span>
+        </div>
+      )}
+
       {tileMessage && !banner && (
         <div className="p-3 rounded-2xl bg-cyan-950/80 border border-partyCyan/40 text-center text-xs sm:text-sm font-bold text-partyCyan animate-fadeIn z-20 relative backdrop-blur-md">
           {tileMessage}
@@ -215,6 +274,25 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
 
       {/* STICKY FLOATING ACTION BUTTON (FAB) IN THE MIDDLE AT THE BOTTOM — MOBILE OPTIMIZED! */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-xs px-4 flex flex-col items-center gap-2">
+        {/* What the roll is already worth, before it is thrown.
+            The dice reveals earned steps rather than a random number, so this
+            is knowable in advance — and telling a trailing player the catch-up
+            is coming is the difference between rolling and giving up. */}
+        {canRoll && !hasRolled && !isRolling && (pendingHeat > 0 || pendingSlipstream > 0) && (
+          <div className="flex items-center gap-1.5 text-[10px] font-black">
+            {pendingHeat > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-orange-500/25 border border-orange-400/60 text-orange-200">
+                🔥 +{pendingHeat} STREAK
+              </span>
+            )}
+            {pendingSlipstream > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/25 border border-emerald-400/60 text-emerald-200">
+                💨 +{pendingSlipstream} SLIPSTREAM
+              </span>
+            )}
+          </div>
+        )}
+
         {!hasRolled ? (
           <button
             onClick={rollDice}
@@ -247,6 +325,7 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
           <DiceRoller
             isRolling={isRolling}
             value={diceValue}
+            bonuses={rollBonuses}
             onRollComplete={() => {}}
           />
         )}

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import AwardsCeremony from '@/components/AwardsCeremony';
 import GameHeader from '@/components/GameHeader';
 import LeftSidebar from '@/components/LeftSidebar';
 import RightSidebar from '@/components/RightSidebar';
@@ -46,7 +47,7 @@ import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
-import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam } from '@/lib/gameRules';
+import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam, micIsLive, isStrangerRoom } from '@/lib/gameRules';
 import PowerupTargetPicker from '@/components/PowerupTargetPicker';
 import MiniGameBriefing, { useMiniGameBriefing } from '@/components/MiniGameBriefing';
 import { MINIGAME_BRIEFINGS } from '@/lib/miniGameBriefings';
@@ -420,6 +421,9 @@ export default function GameRoomPage() {
             myPlayer={myPlayer}
             duckRemote={isAttemptPhase && isMyTurn}
             autoMute={isAttemptPhase && !isMyTurn}
+            micLive={micIsLive(room, myPlayer)}
+            isStranger={isStrangerRoom(room)}
+            onMicOptIn={(optIn) => void roomStore.setMicOptIn(roomId, optIn)}
             compact={isAttemptPhase}
             autoJoin={room.players.length >= 2}
           />
@@ -799,6 +803,15 @@ export default function GameRoomPage() {
                       Final score: {room.winner.score} points
                     </p>
                   </>
+                )}
+
+                {/* The bit people stay for. Everything here was already being
+                    tracked during the match and used to be discarded at the
+                    whistle along with the reason to argue about it. */}
+                {(room.awards ?? []).length > 0 && (
+                  <div className="pt-2 border-t border-white/10">
+                    <AwardsCeremony awards={room.awards ?? []} players={room.players} />
+                  </div>
                 )}
 
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-3">

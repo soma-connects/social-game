@@ -85,58 +85,110 @@ LOOSE = [
 ]
 
 
-def renders(helper: str) -> int:
-    """How many components call this helper. Zero means the art never appears."""
-    count = 0
+def source_files():
+    """Every component and route file, which is everywhere art can be drawn."""
     for base in ("src/components", "src/app"):
         for root, _, files in os.walk(os.path.join(ROOT, base)):
-            for name in files:
-                if not name.endswith((".tsx", ".ts")):
-                    continue
-                with open(os.path.join(root, name), encoding="utf-8") as f:
-                    if f"{helper}(" in f.read():
-                        count += 1
-    return count
+            for name in sorted(files):
+                if name.endswith((".tsx", ".ts")):
+                    yield os.path.join(root, name)
+
+
+def renders(helper: str):
+    """
+    How a helper is called: (files that call it, the ids they ask for).
+
+    The second half is what a plain call count misses. `journeyArt` is called
+    from one component, which looked like a rendered folder — but it is only
+    ever called as `journeyArt('finish')`, so nine of the ten files in that
+    folder have no render site at all. Counting files says "drawn in 1";
+    counting arguments says one id of ten.
+
+    Returns ids as a set of literals, or None when the helper is called with a
+    variable — `tileArt(nodeType)` can reach every id, and there is no way to
+    know which from the source alone, so those groups are reported as dynamic
+    rather than guessed at.
+    """
+    files, ids, dynamic = 0, set(), False
+    call = re.compile(rf"\b{helper}\(\s*([^)]*?)\s*\)")
+    for path in source_files():
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        if f"{helper}(" not in src:
+            continue
+        files += 1
+        for arg in call.findall(src):
+            literal = re.fullmatch(r"'([^']*)'", arg)
+            if literal:
+                ids.add(literal.group(1))
+            else:
+                dynamic = True
+    return files, (None if dynamic else ids)
+
+
+def describe(files: int, asked) -> str:
+    """One phrase for how a group is reached from the code."""
+    if files == 0:
+        return "NOT RENDERED"
+    if asked is None:
+        return f"drawn in {files} (dynamic)"
+    return f"drawn in {files}, asks for {len(asked)}"
 
 
 def main() -> int:
     problems = 0
     total = 0
     unrendered = []
-    for folder, helper, source in GROUPS:
-        want = list(dict.fromkeys(source()))
+    idle = []  # art whose group is drawn, but whose own id is never asked for
+
+    def report(folder, helper, want, counted_label):
+        nonlocal problems, total
         have = sorted(os.path.basename(p)[:-4]
                       for p in glob.glob(os.path.join(ROOT, folder, "*.png")))
         total += len(have)
-        missing = [w for w in want if w not in have]
-        extra = [h for h in have if h not in want]
-        drawn = renders(helper)
-        flag = "ok" if not missing and not extra else "MISMATCH"
-        where = f"drawn in {drawn}" if drawn else "NOT RENDERED"
-        print(f"{folder:24} {len(have):3} files / {len(want):3} ids   {flag:9} {where}")
-        if not drawn:
-            unrendered.append(folder)
+        files, asked = renders(helper)
+        if want is None:  # LOOSE: no id list, only an expected count
+            missing, extra = [], []
+            flag = "ok" if len(have) == counted_label else "CHECK"
+            counts = f"{len(have):3} files / {counted_label:3} named"
+            problems += len(have) != counted_label
+        else:
+            missing = [w for w in want if w not in have]
+            extra = [h for h in have if h not in want]
+            flag = "ok" if not missing and not extra else "MISMATCH"
+            counts = f"{len(have):3} files / {len(want):3} ids  "
+            problems += len(missing) + len(extra)
+
+        print(f"{folder:24} {counts}  {flag:9} {describe(files, asked)}")
         for m in missing:
             print(f"    no art yet for id: {m}")
         for e in extra:
             print(f"    no code id for file: {e}.png")
-        problems += len(missing) + len(extra)
 
-    for folder, helper, want in LOOSE:
-        have = len(glob.glob(os.path.join(ROOT, folder, "*.png")))
-        total += have
-        drawn = renders(helper)
-        flag = "ok" if have == want else "CHECK"
-        where = f"drawn in {drawn}" if drawn else "NOT RENDERED"
-        print(f"{folder:24} {have:3} files / {want:3} named   {flag:9} {where}")
-        problems += have != want
-        if not drawn:
+        if files == 0:
             unrendered.append(folder)
+        elif asked is not None:
+            # Every id is a literal here, so anything absent is genuinely
+            # unreachable rather than merely unprovable.
+            for name in have:
+                if name not in asked:
+                    idle.append(f"{folder}/{name}.png")
+
+    for folder, helper, source in GROUPS:
+        report(folder, helper, list(dict.fromkeys(source())), None)
+
+    for folder, helper, expected in LOOSE:
+        report(folder, helper, None, expected)
 
     if unrendered:
         print("\nArt with no render site — correct on disk, invisible in the game:")
         for folder in unrendered:
             print(f"  {folder}")
+
+    if idle:
+        print("\nArt in a rendered group that nothing ever asks for:")
+        for path in idle:
+            print(f"  {path}")
 
     print(f"\n{total} icons, {problems} problem(s)")
     return 1 if problems and "--strict" in sys.argv else 0

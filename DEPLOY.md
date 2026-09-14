@@ -121,14 +121,47 @@ Project → Settings → Environment Variables, then deploy.
 
 ### Cloud Run
 
-Still works if GCP is ever the target again — `Dockerfile` and
-`.gcloudignore` are kept up to date. The old `--min-instances=1
---max-instances=1` pin is no longer required since state lives in Firestore,
-not the container:
+Deploy through `cloudbuild.yaml`, not `gcloud run deploy --source .`:
 
 ```bash
-gcloud run deploy voice-party-roadmap-game --source . --region us-central1 --allow-unauthenticated
+gcloud builds submit --config cloudbuild.yaml \
+  --substitutions=_GIT_SHA=$(git rev-parse --short HEAD),\
+_FIREBASE_API_KEY=...,\
+_FIREBASE_AUTH_DOMAIN=...,\
+_FIREBASE_PROJECT_ID=...,\
+_FIREBASE_STORAGE_BUCKET=...,\
+_FIREBASE_MESSAGING_SENDER_ID=...,\
+_FIREBASE_APP_ID=...,\
+_FIREBASE_MEASUREMENT_ID=...
 ```
+
+Two things about that, both of which produce a deploy that looks fine and is
+not.
+
+`--source .` cannot pass `--build-arg`, and this image needs seven of them.
+Next.js inlines `NEXT_PUBLIC_*` into the client bundle **at build time**, so
+they cannot be supplied later as runtime env vars. A `--source .` build
+produces a bundle with an empty Firebase config: the app serves, renders, and
+never reaches Firestore.
+
+`--min-instances=1 --max-instances=1` in `cloudbuild.yaml` is **required**, and
+an earlier version of this file was wrong to say otherwise. Room state does
+live in Firestore — but WebRTC signalling mailboxes do not. They are `Map`s
+held on `globalThis` in `src/lib/server/roomServer.ts`, because signalling is
+far too chatty for a database round trip, and `/api/room/[roomId]/signal`
+reads and writes them directly. On a second instance a player gets a different
+process with its own empty set of mailboxes, so two players who land on
+different containers never exchange offers, answers or ICE candidates. Room
+state syncs, the lobby looks healthy, and **voice silently never connects** —
+the worst way for it to fail, and the hardest to attribute to a deploy flag.
+
+Lifting the pin means moving the mailboxes into Redis first. That work exists
+on the `teams-and-mobile-declutter` branch ("Move WebRTC signalling into Redis
+so the app can run on more than one instance") and is not merged.
+
+`GEMINI_API_KEY`, `ADMIN_DASHBOARD_TOKEN` and the Cloudflare TURN credentials
+are real secrets and stay runtime env vars on the service — never build args,
+which would bake them into an image layer.
 
 ## Voice chat and TURN
 

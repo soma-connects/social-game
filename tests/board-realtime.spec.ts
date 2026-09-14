@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 
 const liveUrl = process.env.BASE_URL ?? 'https://voice-party-roadmap-game-705423550266.us-central1.run.app';
 
@@ -13,7 +13,7 @@ test.describe('board game realtime UI', () => {
 
     try {
       await host.goto(liveUrl, { waitUntil: 'domcontentloaded' });
-      await host.getByLabel('ENTER YOUR PLAYER NAME:').fill(`QA Host ${Date.now()}`);
+      await host.locator('input[placeholder="e.g. Chief Agbada, Sisi Vibe..."]').fill(`QA Host ${Date.now()}`);
       await host.getByRole('button', { name: 'CREATE NEW ROOM' }).click();
       await host.waitForURL(/\/game\/NJA-[A-Z0-9]+/);
 
@@ -21,7 +21,7 @@ test.describe('board game realtime UI', () => {
       await expect(host.getByText(/THE LOUNGING AREA \(1\/6 PLAYERS\)/)).toBeVisible();
 
       await guest.goto(roomUrl, { waitUntil: 'domcontentloaded' });
-      await guest.getByLabel('ENTER YOUR PLAYER NAME:').fill(`QA Guest ${Date.now()}`);
+      await guest.locator('input[placeholder="e.g. Sisi Vibe, Sharp Guy…"]').fill(`QA Guest ${Date.now()}`);
       await guest.getByRole('button', { name: /JOIN AS PLAYER 2/ }).click();
 
       // The first assertion is the realtime contract: the host's Firestore
@@ -38,7 +38,7 @@ test.describe('board game realtime UI', () => {
 
       await guest.getByRole('button', { name: 'PEEK AT THE BOARD' }).click();
       await expect(guest.getByRole('heading', { name: /roadmap/i })).toBeVisible();
-      await expect(guest.getTextContent('main')).resolves.toMatch(/Board progress/);
+      await expect(guest.locator('main')).toContainText('Board progress');
     } finally {
       await hostContext.close();
       await guestContext.close();

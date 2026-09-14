@@ -141,6 +141,18 @@ export default function GameRoomPage() {
     sessionKey: `${room?.roundNumber ?? 0}:${performer?.id ?? 'none'}:${room?.currentMiniGame ?? 'none'}`,
   });
 
+  /**
+   * A fresh round starts with a clean microphone record.
+   *
+   * Keyed on the same round/performer/game triple the clip uses, so a fault
+   * from the previous attempt cannot follow a player into the next one and
+   * excuse a round where the mic was working fine.
+   */
+  const roundKey = `${room?.roundNumber ?? 0}:${performer?.id ?? 'none'}:${room?.currentMiniGame ?? 'none'}`;
+  useEffect(() => {
+    speechEngine.clearMicFault();
+  }, [roundKey]);
+
   // â”€â”€ Presence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!myPlayerId) return;
@@ -335,8 +347,16 @@ export default function GameRoomPage() {
     }
   };
 
+  /**
+   * Banks the round, and says whether the microphone ever opened for it.
+   *
+   * Reading the fault here rather than in each game means every voice round
+   * gets the same treatment without ten components having to remember to pass
+   * it. `clearMicFault` runs when a round starts, so this only ever reports
+   * what went wrong during the attempt just finished.
+   */
   const handleMiniGameComplete = (game: MiniGameId) => (pointsEarned: number) => {
-    roomStore.completeMiniGame(roomId, game, pointsEarned);
+    roomStore.completeMiniGame(roomId, game, pointsEarned, speechEngine.getMicFault() !== null);
   };
 
   const handleFinishRoast = () => {

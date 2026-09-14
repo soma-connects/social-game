@@ -73,7 +73,34 @@ const ERROR_MESSAGES: Record<SpeechErrorCode, string> = {
   unknown: 'The microphone could not start. Try again.',
 };
 
+/**
+ * The codes that mean the microphone pipeline never opened at all.
+ *
+ * The distinction matters because a voice round that banks zero points costs a
+ * life, and these five are not a poor attempt — the player was never given a
+ * chance to make one. `no-speech` is deliberately not here: silence is a
+ * failed attempt, and treating it as a fault would forgive simply not playing.
+ */
+const HARD_FAULTS: ReadonlySet<SpeechErrorCode> = new Set([
+  'unsupported-browser',
+  'insecure-context',
+  'permission-denied',
+  'no-microphone',
+  'network',
+]);
+
+/**
+ * The last hard fault seen, kept outside the per-session diagnostics.
+ *
+ * `diagnostics` is reset by every `listenForSpeech` call, and a round can open
+ * several sessions — Android ends one after each utterance. A fault recorded in
+ * the first would be erased by the restart, so it is held here until the round
+ * that cares about it reads and clears it.
+ */
+let lastHardFault: SpeechErrorCode | null = null;
+
 function makeError(code: SpeechErrorCode, recoverable = true): SpeechError {
+  if (HARD_FAULTS.has(code)) lastHardFault = code;
   return { code, message: ERROR_MESSAGES[code], recoverable };
 }
 
@@ -181,6 +208,21 @@ class SpeechRecognitionService {
 
   public getDiagnostics(): SpeechDiagnostics {
     return { ...this.diagnostics, supported: this.getCapabilities().hasSpeechRecognition };
+  }
+
+  /**
+   * The hard fault seen since `clearMicFault`, or null if the mic was fine.
+   *
+   * A round reads this when it banks a zero so the server can tell a broken
+   * microphone apart from a bad attempt.
+   */
+  public getMicFault(): SpeechErrorCode | null {
+    return lastHardFault;
+  }
+
+  /** Call at the start of a round, so it reports that round's faults only. */
+  public clearMicFault(): void {
+    lastHardFault = null;
   }
 
   private micStream: MediaStream | null = null;

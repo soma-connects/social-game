@@ -267,6 +267,37 @@ export function loseLife(player: Player): { livesLeft: number; empty: boolean } 
   return { livesLeft, empty: livesLeft <= 0 };
 }
 
+/**
+ * How many rounds a match will forgive for a broken microphone.
+ *
+ * A voice round that banks nothing costs a life, and until now a player whose
+ * microphone was blocked, missing, or on a browser that cannot do speech at all
+ * was charged exactly like someone who tried and bombed. They never got to make
+ * an attempt.
+ *
+ * Two, not unlimited, because the claim arrives from the client and nothing can
+ * verify it. What a false claim buys is only survival — the round still banks
+ * zero points and zero steps, so it cannot be farmed for progress — and a cap
+ * keeps even that from becoming a way to sit out the voice rounds. Two covers
+ * the real shape of the problem: a permission prompt fumbled once, or a device
+ * that is simply not going to work, which is worth telling the player about
+ * rather than quietly draining their lives.
+ */
+export const MIC_FAULT_GRACE = 2;
+
+/**
+ * Whether this round's zero should be forgiven, and records it if so.
+ *
+ * Mutates `player.micFaults`, so call it once per completed round and use the
+ * answer to decide whether to charge a life.
+ */
+export function forgiveMicFault(player: Player): boolean {
+  const used = player.micFaults ?? 0;
+  if (used >= MIC_FAULT_GRACE) return false;
+  player.micFaults = used + 1;
+  return true;
+}
+
 /** Puts a wiped-out board player back on the launchpad with a full bar. */
 export function respawnToStart(player: Player): void {
   player.lives = STARTING_LIVES;

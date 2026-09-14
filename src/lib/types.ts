@@ -97,6 +97,11 @@ export type Player = {
   performanceTotal?: number;
   /** Rounds that came in at or below MINIGAME_FAIL_THRESHOLD. */
   bombs?: number;
+  /**
+   * Rounds forgiven this match because the microphone never opened.
+   * Capped by MIC_FAULT_GRACE so the claim cannot be leaned on indefinitely.
+   */
+  micFaults?: number;
   /** The single best round of the match, for the highlight award. */
   bestRound?: { game: MiniGameId; performance: number; points: number };
   /**
@@ -346,6 +351,12 @@ export type TurnResult = {
   performance: number;
   /** Board steps this buys — what the dice will land on. */
   steps: number;
+  /**
+   * The round scored zero because the microphone never opened, and the life it
+   * would have cost was waived. Set so the recap can explain the reprieve
+   * rather than showing a "bombed it" card for a round nobody got to play.
+   */
+  micFaultForgiven?: boolean;
 };
 
 /** One player's mini-game result within the current round. */

@@ -45,6 +45,7 @@ import {
   heatTier,
   slipstreamLabel,
   slipstreamSteps,
+  forgiveMicFault,
   loseLife,
   respawnToStart,
   TileOutcome,
@@ -944,8 +945,25 @@ function trackDeficits(room: RoomState): void {
  * Team Battle is scored on the crew total rather than survival, so it opts out
  * — taking lives there would punish a side twice for the same round.
  */
-function chargeFailedChallenge(room: RoomState, player: Player, game: MiniGameId): void {
-  if (room.roomType === 'team_battle') return;
+function chargeFailedChallenge(
+  room: RoomState,
+  player: Player,
+  game: MiniGameId,
+  micFault = false
+): boolean {
+  if (room.roomType === 'team_battle') return false;
+
+  // A microphone that never opened is not a failed attempt. Forgiven a fixed
+  // number of times per match, because the claim comes from the client and
+  // cannot be checked here — see MIC_FAULT_GRACE.
+  if (micFault && forgiveMicFault(player)) {
+    pushEvent(
+      room,
+      `🎙️ ${player.name}'s mic did not open — the round is not counted against them`,
+      'system'
+    );
+    return true;
+  }
 
   const from = player.boardPosition;
   const { livesLeft, empty } = loseLife(player);
@@ -957,7 +975,7 @@ function chargeFailedChallenge(room: RoomState, player: Player, game: MiniGameId
       `💔 ${player.name} bombed ${MINIGAME_LABELS[game]} — ${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left`,
       'debuff'
     );
-    return;
+    return false;
   }
 
   pushEvent(room, `☠️ ${player.name} ran out of lives — back to the launchpad with a fresh bar!`, 'debuff');
@@ -967,6 +985,7 @@ function chargeFailedChallenge(room: RoomState, player: Player, game: MiniGameId
     fromNode: from,
     toNode: 0,
   });
+  return false;
 }
 
 /**
@@ -2123,7 +2142,14 @@ async function applyAction(
         rolled: false,
       });
 
-      if (performance <= MINIGAME_FAIL_THRESHOLD) chargeFailedChallenge(room, active, game);
+      // body.micFault says the microphone never opened this round; the cap on
+      // how often that is honoured lives in forgiveMicFault. The recap needs
+      // to know a life was waived, or it shows a bombed card for a round the
+      // player never got to attempt.
+      if (performance <= MINIGAME_FAIL_THRESHOLD) {
+        const waived = chargeFailedChallenge(room, active, game, body.micFault === true);
+        if (waived && room.turnResult) room.turnResult.micFaultForgiven = true;
+      }
 
       room.phase = 'roast_intermission';
       return NextResponse.json({
@@ -2230,7 +2256,14 @@ async function applyAction(
         rolled: false,
       });
 
-      if (performance <= MINIGAME_FAIL_THRESHOLD) chargeFailedChallenge(room, active, game);
+      // body.micFault says the microphone never opened this round; the cap on
+      // how often that is honoured lives in forgiveMicFault. The recap needs
+      // to know a life was waived, or it shows a bombed card for a round the
+      // player never got to attempt.
+      if (performance <= MINIGAME_FAIL_THRESHOLD) {
+        const waived = chargeFailedChallenge(room, active, game, body.micFault === true);
+        if (waived && room.turnResult) room.turnResult.micFaultForgiven = true;
+      }
 
       // Open the roast so the room can laugh at what just happened.
       room.phase = 'roast_intermission';

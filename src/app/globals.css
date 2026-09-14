@@ -2,17 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Two copies of the palette, and the reason is not style.
+ *
+ * A custom property holds whatever tokens you give it, supported or not. So on
+ * a browser without oklch(), `--background: oklch(...)` is stored happily, and
+ * the failure lands later: `background: var(--background)` resolves to an
+ * oklch() the browser cannot parse, which is invalid at computed-value time and
+ * falls back to the property's initial value — transparent. The result is a
+ * white page and near-black text under an app whose components all assume a
+ * dark ground. Not a slightly duller theme: an unreadable one.
+ *
+ * oklch() needs Chrome 111, Safari 15.4 or Firefox 113 (2022-23). Chrome and
+ * Android's WebView update through the Play Store rather than with the OS, so
+ * most phones have it regardless of Android version — but "most" is the wrong
+ * bar for whether the app renders at all.
+ *
+ * The hex values below are the same colours converted to sRGB, so an older
+ * browser gets the intended palette rather than a fallback that looks like a
+ * mistake. Change one and change its pair.
+ */
 :root {
-  --background: oklch(13% 0.02 248);
-  --foreground: oklch(96% 0.01 248);
-  --terracotta: oklch(64% 0.18 38);
-  --emerald: oklch(72% 0.16 160);
-  --yellow: oklch(86% 0.17 88);
-  --cyan: oklch(78% 0.15 205);
-  --surface-1: oklch(17% 0.025 248);
-  --surface-2: oklch(21% 0.03 248);
-  --surface-3: oklch(25% 0.035 248);
-  --border: oklch(42% 0.035 248 / 0.72);
+  --background: #03080F;
+  --foreground: #EDF3F8;
+  --terracotta: #E35A2D;
+  --emerald: #12C281;
+  --yellow: #FFC921;
+  --cyan: #00D2E5;
+  --surface-1: #07101A;
+  --surface-2: #0D1925;
+  --surface-3: #142332;
+  --border: rgba(62, 79, 96, 0.72);
+}
+
+@supports (color: oklch(0% 0 0)) {
+  :root {
+    --background: oklch(13% 0.02 248);
+    --foreground: oklch(96% 0.01 248);
+    --terracotta: oklch(64% 0.18 38);
+    --emerald: oklch(72% 0.16 160);
+    --yellow: oklch(86% 0.17 88);
+    --cyan: oklch(78% 0.15 205);
+    --surface-1: oklch(17% 0.025 248);
+    --surface-2: oklch(21% 0.03 248);
+    --surface-3: oklch(25% 0.035 248);
+    --border: oklch(42% 0.035 248 / 0.72);
+  }
 }
 
 * { box-sizing: border-box; }

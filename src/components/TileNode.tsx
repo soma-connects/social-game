@@ -4,6 +4,8 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { MapTheme, TileNodeType } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
+import { journeyArt, tileArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
 
 interface TileNodeProps {
   index: number;
@@ -46,7 +48,11 @@ export default function TileNode({ index, nodeType, theme, isFinish = false, onC
         style={{ transform: 'translateZ(50px) rotateX(-45deg)' }}
       >
         <div className="bg-slate-900/95 backdrop-blur-xl border border-white/20 text-white text-[10px] font-bold px-3 py-2 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.8)] leading-tight">
-          <span className="text-[12px] block mb-0.5">{isFinish ? '🏆' : nodeStyle.icon}</span>
+          <GameIcon
+            src={isFinish ? journeyArt('finish') : tileArt(nodeType)}
+            emoji={isFinish ? '🏆' : nodeStyle.icon}
+            className="w-4 h-4 text-[12px] mb-0.5 mx-auto"
+          />
           {isFinish ? 'The Final Station!' : TILE_DESCRIPTIONS[nodeType]}
         </div>
       </div>
@@ -71,9 +77,11 @@ export default function TileNode({ index, nodeType, theme, isFinish = false, onC
         className="absolute z-10 pointer-events-none drop-shadow-[0_0_12px_rgba(255,255,255,0.8)]"
         style={{ transform: 'translateZ(25px) rotateX(-45deg)' }}
       >
-        <span className="text-xl sm:text-2xl block filter drop-shadow-xl">
-          {isFinish ? '🏆' : nodeStyle.icon}
-        </span>
+        <GameIcon
+          src={isFinish ? journeyArt('finish') : tileArt(nodeType)}
+          emoji={isFinish ? '🏆' : nodeStyle.icon}
+          className="w-6 h-6 sm:w-7 sm:h-7 text-xl sm:text-2xl filter drop-shadow-xl"
+        />
       </div>
 
       {/* Billboarded Node Index Badge */}

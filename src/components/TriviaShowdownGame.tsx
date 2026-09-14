@@ -279,6 +279,9 @@ export default function TriviaShowdownGame({
               placeholder="Or type answer here..."
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
+              /* The server caps this at 120; stopping here means a long answer
+                 is visibly refused rather than quietly cut after submitting. */
+              maxLength={120}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && textInput.trim()) {
                   handleEvaluate(textInput);

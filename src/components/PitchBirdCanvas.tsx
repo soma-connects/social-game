@@ -17,6 +17,7 @@ import { Player } from '@/lib/types';
 import { usePitchDetection, CALIBRATION_MS } from '@/hooks/usePitchDetection';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
+import { publishFrame } from '@/lib/liveFrames';
 import { Mic, MicOff, Volume2 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -324,7 +325,25 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
         if (s.overheatCooldown <= 0) s.overheating = false;
       }
 
-      // Let the room watch: distance and score, throttled in roomStore.
+      // Let the room actually watch it happen. Positions are sent as fractions
+      // of the canvas rather than pixels, so a spectator can mirror this at
+      // whatever size their panel happens to be.
+      if (roomId) {
+        const next = s.gates.find((g) => g.x + GATE_WIDTH > 0);
+        publishFrame(player.id, 'pitch_bird', {
+          y: s.playerY / CANVAS_H,
+          score: s.score,
+          dist: Math.floor(s.distance / 10),
+          hot: s.overheating,
+          // -1 parks the gate off the mirror when none is on screen yet.
+          gx: next ? next.x / CANVAS_W : -1,
+          gt: next ? next.gapTop / CANVAS_H : 0,
+          gb: next ? next.gapBottom / CANVAS_H : 0,
+        });
+      }
+
+      // The durable, slower copy: what a spectator with no peer connection —
+      // no mic, still connecting, or watching from outside the call — sees.
       if (roomId) {
         roomStore.pushLiveState(roomId, player.id, {
           prompt: `${Math.floor(s.distance / 10)}m`,
@@ -864,7 +883,7 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
         {gameState === 'calibrating' && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/80 backdrop-blur-sm rounded-3xl">
             <div className="text-center space-y-4 px-6">
-              <div className="text-6xl animate-bounce">🎤</div>
+              <div className="flex justify-center animate-bounce"><Mic className="w-16 h-16 text-partyYellow" /></div>
               <h3 className="text-2xl font-black text-white">CALIBRATING YOUR VOICE</h3>
               <p className="text-sm text-gray-300 max-w-xs mx-auto">
                 Slide <span className="text-partyYellow font-bold">&quot;AHHH&quot;</span> from your{' '}

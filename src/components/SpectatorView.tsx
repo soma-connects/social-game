@@ -6,15 +6,24 @@
 // see what the performer was asked to do, they cannot laugh at how it went, and
 // the reaction buttons become meaningless clicks.
 //
-// This renders a pushed summary rather than a mirrored canvas. Room state moves
-// on ~1.5s polling, so streaming frames would be a slideshow; what actually
-// matters to a spectator is the prompt and whether it is going well.
+// Two layers, because they fail in different ways.
+//
+// The summary below is pushed through room state: slow, about one update every
+// 1.5 seconds, but it reaches everybody — no microphone, no peer connection,
+// still negotiating, watching from outside the call.
+//
+// LiveMirror on top of it is peer to peer over the voice connection's data
+// channel, roughly 20fps. That is what makes an attempt watchable rather than
+// readable: at one frame a second you are reading a number, at twenty you are
+// watching somebody nearly hit a wall. It renders nothing when no frames are
+// arriving, and the summary underneath carries the panel on its own.
 
 import React from 'react';
 import { Mic, Radio, AlertTriangle } from 'lucide-react';
 import { LiveMiniGameState, Player } from '@/lib/types';
 import { MINIGAME_ICONS, MINIGAME_LABELS } from '@/lib/gameRules';
 import AvatarIllustration from './AvatarIllustration';
+import LiveMirror from './LiveMirror';
 
 interface SpectatorViewProps {
   activePlayer: Player;
@@ -54,6 +63,9 @@ export default function SpectatorView({ activePlayer, live, label }: SpectatorVi
           </div>
         )}
       </div>
+
+      {/* The attempt itself, when frames are reaching us. */}
+      <LiveMirror playerId={activePlayer.id} />
 
       {/* The prompt they are facing */}
       {fresh && live?.prompt ? (

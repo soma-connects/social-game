@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Trophy } from 'lucide-react';
 import { MapTheme, Player } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
 import { BOARD_GRAPH, TOTAL_TILES, boardProgress, BOARD_LENGTH } from '@/lib/gameRules';
@@ -105,7 +106,9 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
 
       <footer className="relative z-10 flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.1em] text-gray-400 sm:px-6">
         <span>Launchpad</span>
-        <span className="text-partyYellow">Finish line</span>
+        <span className="flex items-center gap-1.5 text-partyYellow">
+          Finish line <Trophy className="h-3 w-3" aria-hidden />
+        </span>
       </footer>
     </section>
   );

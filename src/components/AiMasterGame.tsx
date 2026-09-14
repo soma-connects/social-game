@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, Heart, Mic, Send, ThumbsDown, ThumbsUp, Coins, Sparkles, Skull } from 'lucide-react';
+import { Bot, Heart, Mic, Send, ThumbsDown, ThumbsUp, Coins, Sparkles, Skull, Headphones, Check, HeartCrack, Handshake, Ban } from 'lucide-react';
 import { AiMasterState, Player, RoomState } from '@/lib/types';
 import { STARTING_LIVES } from '@/lib/gameRules';
 import { aiGameMaster } from '@/lib/aiGameMaster';
@@ -262,8 +262,8 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
                 <MicContentionNotice active={listening} onClaimPriority={restartWithMicPriority} />
               </>
             ) : (
-              <p className="text-sm font-bold text-gray-300 text-center py-2">
-                🎧 {target?.name} is answering. Listen in on the call…
+              <p className="flex items-center justify-center gap-1.5 text-sm font-bold text-gray-300 text-center py-2">
+                <Headphones className="w-4 h-4 shrink-0" /> {target?.name} is answering. Listen in on the call…
               </p>
             )}
           </motion.div>
@@ -334,8 +334,12 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
               state.passed ? 'border-emerald-400/50' : 'border-red-500/50'
             }`}
           >
-            <p className={`text-2xl font-black ${state.passed ? 'text-emerald-300' : 'text-red-300'}`}>
-              {state.passed ? '✅ SURVIVED' : '💔 BOMBED IT'}
+            <p className={`flex items-center justify-center gap-2 text-2xl font-black ${state.passed ? 'text-emerald-300' : 'text-red-300'}`}>
+              {state.passed ? (
+                <><Check className="w-6 h-6" /> SURVIVED</>
+              ) : (
+                <><HeartCrack className="w-6 h-6" /> BOMBED IT</>
+              )}
             </p>
             {myPlayer.isHost && (
               <button
@@ -361,7 +365,12 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
               : 'bg-white/5 border-white/15 text-gray-300'
           }`}
         >
-          {latestBribe.accepted ? '🤝' : '🚫'} {latestBribe.hostLine}
+          {latestBribe.accepted ? (
+            <Handshake className="w-4 h-4 inline-block mr-1 align-text-bottom" />
+          ) : (
+            <Ban className="w-4 h-4 inline-block mr-1 align-text-bottom" />
+          )}
+          {latestBribe.hostLine}
         </div>
       )}
 

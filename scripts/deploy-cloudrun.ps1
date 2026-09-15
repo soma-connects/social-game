@@ -10,7 +10,7 @@
   So this reads them from the file and refuses to deploy if any are missing.
 
   Secrets (GEMINI_API_KEY, ADMIN_DASHBOARD_TOKEN, the Cloudflare TURN keys) stay
-  runtime env vars on the service and are deliberately not touched here —
+  runtime env vars on the service and are deliberately not touched here --
   cloudbuild.yaml uses --update-env-vars, which merges rather than replaces.
 
 .EXAMPLE
@@ -24,6 +24,12 @@ param(
   [string]$EnvFile = '.env.local'
 )
 
+# ASCII only, deliberately. Windows PowerShell 5.1 reads a .ps1 with no
+# byte-order mark using the system ANSI codepage rather than UTF-8, so a
+# UTF-8 em dash arrives as three Windows-1252 characters -- the last of
+# which is a smart quote, which PowerShell treats as a string delimiter.
+# One stray dash in a comment took the whole script out with "the string
+# is missing the terminator". Keep every character in this file ASCII.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -82,7 +88,7 @@ if ($missing.Count -gt 0) {
   Fail 'Refusing to deploy: an empty value builds a bundle that cannot reach Firebase.'
 }
 
-# Lengths only. These values are not secret — they ship to every browser — but
+# Lengths only. These values are not secret -- they ship to every browser -- but
 # echoing them into a terminal history is still a bad habit.
 Write-Host "Firebase config in ${EnvFile}:"
 foreach ($key in $required) {
@@ -107,12 +113,12 @@ if ($project -eq '<unset>') {
   Fail 'No project set. Run: gcloud config set project YOUR-PROJECT-ID   (list them with: gcloud projects list)'
 }
 
-# ── Runtime secrets ─────────────────────────────────────────────────────────
+# -- Runtime secrets ---------------------------------------------------------
 # A different path entirely from the values above. The NEXT_PUBLIC_* ones are
 # compiled into the client bundle at build time; these are read by the server at
 # request time and live on the Cloud Run service. .env* files are excluded from
-# the image on purpose — .env.production used to bake a live GEMINI_API_KEY into
-# every layer — so nothing here travels with the build. Reported, never set:
+# the image on purpose -- .env.production used to bake a live GEMINI_API_KEY into
+# every layer -- so nothing here travels with the build. Reported, never set:
 # writing a secret is the user's call, not a deploy script's side effect.
 $cb      = Get-Content cloudbuild.yaml -Raw
 $service = if ($cb -match '_SERVICE:\s*(\S+)') { $Matches[1] } else { $null }
@@ -135,7 +141,7 @@ if ($service -and $region) {
 
     if ($set -notcontains 'GEMINI_API_KEY') {
       Write-Host ''
-      Write-Host '  GEMINI_API_KEY is not set — the AI Game Master will not work.' -ForegroundColor Yellow
+      Write-Host '  GEMINI_API_KEY is not set -- the AI Game Master will not work.' -ForegroundColor Yellow
       Write-Host '  Set it from .env.production without redeploying:' -ForegroundColor Yellow
       Write-Host "    gcloud run services update $service --region $region --update-env-vars GEMINI_API_KEY=your-key"
     }
@@ -148,7 +154,7 @@ if ($service -and $region) {
     }
   } else {
     Write-Host ''
-    Write-Host "  Could not read $service in $region — a first deploy will create it." -ForegroundColor Yellow
+    Write-Host "  Could not read $service in $region -- a first deploy will create it." -ForegroundColor Yellow
   }
 }
 

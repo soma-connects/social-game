@@ -126,6 +126,13 @@ Project → Settings → Environment Variables, then deploy.
 ./scripts/deploy-cloudrun.sh           # deploy
 ```
 
+On Windows, in PowerShell:
+
+```powershell
+.\scripts\deploy-cloudrun.ps1 -Check   # validate, deploy nothing
+.\scripts\deploy-cloudrun.ps1          # deploy
+```
+
 That reads the seven Firebase values from `.env.local`, refuses to run if any
 are missing, shows the branch, commit, project and account, and asks before
 deploying. It is the same command as below with the substitutions filled in

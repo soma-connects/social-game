@@ -42,6 +42,8 @@ function Fail($msg) {
 
 Set-Location (Join-Path $PSScriptRoot '..')
 
+$projectMismatch = $false
+
 if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
   Fail 'gcloud is not installed. See https://cloud.google.com/sdk/docs/install'
 }
@@ -125,11 +127,12 @@ $service = if ($cb -match '_SERVICE:\s*(\S+)') { $Matches[1] } else { $null }
 $region  = if ($cb -match '_REGION:\s*(\S+)')  { $Matches[1] } else { $null }
 
 if ($service -and $region) {
-  $onService = & gcloud run services describe $service --region $region `
-    --format='value(spec.template.spec.containers[0].env[].name)' 2>$null
-  if ($LASTEXITCODE -eq 0) {
-    $set = @()
-    if ($onService) { $set = @($onService -split '[;\s]+' | Where-Object { $_ }) }
+  $describe = & gcloud run services describe $service --region $region --format=json 2>$null
+  if ($LASTEXITCODE -eq 0 -and $describe) {
+    $live = $describe | ConvertFrom-Json
+    $envs = @()
+    try { $envs = @($live.spec.template.spec.containers[0].env) } catch { $envs = @() }
+    $set = @($envs | ForEach-Object { $_.name })
 
     Write-Host ''
     Write-Host "Runtime env vars on $service :"
@@ -139,18 +142,41 @@ if ($service -and $region) {
       $set | Sort-Object | ForEach-Object { Write-Host "  $_" }
     }
 
+    # cloudbuild.yaml passes --update-env-vars NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    # so this deploy overwrites whatever the service is pointed at now. If the
+    # two disagree, the deploy moves the game to a different Firestore -- rooms,
+    # matches and reports all silently start landing somewhere else. Worth
+    # stopping for, because nothing about the running service would look wrong.
+    $liveProject = ($envs | Where-Object { $_.name -eq 'NEXT_PUBLIC_FIREBASE_PROJECT_ID' } |
+                    Select-Object -First 1 -ExpandProperty value -ErrorAction SilentlyContinue)
+    $fileProject = $values['NEXT_PUBLIC_FIREBASE_PROJECT_ID']
+
+    if ($liveProject -and $liveProject -ne $fileProject) {
+      Write-Host ''
+      Write-Host '  FIREBASE PROJECT CHANGE' -ForegroundColor Red
+      Write-Host "    live service: $liveProject"
+      Write-Host "    ${EnvFile}: $fileProject"
+      Write-Host ''
+      Write-Host '    Deploying will repoint the game at the second one. Every room,'
+      Write-Host '    match and report then lands in a different Firestore, and the'
+      Write-Host '    service will look perfectly healthy while it happens.'
+      Write-Host '    If that is not deliberate, fix the value before deploying.' -ForegroundColor Yellow
+      $script:projectMismatch = $true
+    } elseif ($liveProject) {
+      Write-Host ''
+      Write-Host "  Firebase project unchanged: $liveProject" -ForegroundColor Green
+    }
+
     if ($set -notcontains 'GEMINI_API_KEY') {
       Write-Host ''
       Write-Host '  GEMINI_API_KEY is not set -- the AI Game Master will not work.' -ForegroundColor Yellow
-      Write-Host '  Set it from .env.production without redeploying:' -ForegroundColor Yellow
       Write-Host "    gcloud run services update $service --region $region --update-env-vars GEMINI_API_KEY=your-key"
     }
     if ($set -notcontains 'FIREBASE_PRIVATE_KEY') {
       Write-Host ''
       Write-Host '  FIREBASE_PRIVATE_KEY is not set. That is fine on Cloud Run: the Admin SDK'
       Write-Host '  falls back to Application Default Credentials, which is this service''s own'
-      Write-Host '  account. It needs roles/datastore.user. Setting the key is only necessary'
-      Write-Host '  if you want a different identity than the service account.'
+      Write-Host '  account. It needs roles/datastore.user on the Firebase project above.'
     }
   } else {
     Write-Host ''
@@ -162,6 +188,15 @@ if ($Check) {
   Write-Host ''
   Write-Host '-Check: everything needed is present. Nothing deployed.' -ForegroundColor Green
   exit 0
+}
+
+# A plain y is not enough when the deploy would move the game to a different
+# Firestore. Typing the project name is the point: it cannot be done by reflex.
+if ($projectMismatch) {
+  $confirm = Read-Host "`nType the Firebase project you intend to deploy against"
+  if ($confirm -ne $values['NEXT_PUBLIC_FIREBASE_PROJECT_ID']) {
+    Fail "That is not $($values['NEXT_PUBLIC_FIREBASE_PROJECT_ID']). Nothing deployed."
+  }
 }
 
 $reply = Read-Host "`nDeploy this to Cloud Run? [y/N]"

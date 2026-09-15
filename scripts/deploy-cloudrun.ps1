@@ -107,6 +107,51 @@ if ($project -eq '<unset>') {
   Fail 'No project set. Run: gcloud config set project YOUR-PROJECT-ID   (list them with: gcloud projects list)'
 }
 
+# ── Runtime secrets ─────────────────────────────────────────────────────────
+# A different path entirely from the values above. The NEXT_PUBLIC_* ones are
+# compiled into the client bundle at build time; these are read by the server at
+# request time and live on the Cloud Run service. .env* files are excluded from
+# the image on purpose — .env.production used to bake a live GEMINI_API_KEY into
+# every layer — so nothing here travels with the build. Reported, never set:
+# writing a secret is the user's call, not a deploy script's side effect.
+$cb      = Get-Content cloudbuild.yaml -Raw
+$service = if ($cb -match '_SERVICE:\s*(\S+)') { $Matches[1] } else { $null }
+$region  = if ($cb -match '_REGION:\s*(\S+)')  { $Matches[1] } else { $null }
+
+if ($service -and $region) {
+  $onService = & gcloud run services describe $service --region $region `
+    --format='value(spec.template.spec.containers[0].env[].name)' 2>$null
+  if ($LASTEXITCODE -eq 0) {
+    $set = @()
+    if ($onService) { $set = @($onService -split '[;\s]+' | Where-Object { $_ }) }
+
+    Write-Host ''
+    Write-Host "Runtime env vars on $service :"
+    if ($set.Count -eq 0) {
+      Write-Host '  (none)' -ForegroundColor Yellow
+    } else {
+      $set | Sort-Object | ForEach-Object { Write-Host "  $_" }
+    }
+
+    if ($set -notcontains 'GEMINI_API_KEY') {
+      Write-Host ''
+      Write-Host '  GEMINI_API_KEY is not set — the AI Game Master will not work.' -ForegroundColor Yellow
+      Write-Host '  Set it from .env.production without redeploying:' -ForegroundColor Yellow
+      Write-Host "    gcloud run services update $service --region $region --update-env-vars GEMINI_API_KEY=your-key"
+    }
+    if ($set -notcontains 'FIREBASE_PRIVATE_KEY') {
+      Write-Host ''
+      Write-Host '  FIREBASE_PRIVATE_KEY is not set. That is fine on Cloud Run: the Admin SDK'
+      Write-Host '  falls back to Application Default Credentials, which is this service''s own'
+      Write-Host '  account. It needs roles/datastore.user. Setting the key is only necessary'
+      Write-Host '  if you want a different identity than the service account.'
+    }
+  } else {
+    Write-Host ''
+    Write-Host "  Could not read $service in $region — a first deploy will create it." -ForegroundColor Yellow
+  }
+}
+
 if ($Check) {
   Write-Host ''
   Write-Host '-Check: everything needed is present. Nothing deployed.' -ForegroundColor Green

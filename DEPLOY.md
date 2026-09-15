@@ -90,6 +90,41 @@ any access to — see that file.
 
 ### Required env vars
 
+They do not all travel the same way, and mixing the two up is how a deploy ends
+up half-working.
+
+**Build-time, public.** The seven `NEXT_PUBLIC_FIREBASE_*` values are compiled
+into the client bundle by `next build`, so they must be present *as the image is
+built* — build args, via `cloudbuild.yaml`. They cannot be added afterwards, and
+they are not secrets: they ship to every browser, and `firestore.rules` is what
+actually guards the data.
+
+**Runtime, secret.** `GEMINI_API_KEY`, `ADMIN_DASHBOARD_TOKEN`,
+`FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY`, the Cloudflare TURN pair and
+the Twilio pair are read by the server per request. They live on the Cloud Run
+service, set once and left alone — `cloudbuild.yaml` uses `--update-env-vars`,
+which merges, so a deploy does not disturb them.
+
+No `.env` file of any kind reaches the image: `.dockerignore` excludes `.env`
+and `.env.*` deliberately. `.env.production` used to be copied in, which baked a
+live `GEMINI_API_KEY` into every layer — anyone who could pull the image had the
+key, and deleting the file later would not remove it from earlier layers. So
+`.env.production` is a local file for local production builds. To deploy from
+the values in it, point the script at it (`-EnvFile .env.production`); its
+secrets still have to be set on the service separately:
+
+```bash
+gcloud run services update voice-party-roadmap-game --region us-central1 \
+  --update-env-vars GEMINI_API_KEY=...
+```
+
+`FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` are optional on Cloud Run.
+With no private key set, `src/lib/firebase/server.ts` initialises the Admin SDK
+against Application Default Credentials, which on Cloud Run is the service's own
+account — it needs `roles/datastore.user`. That is usually the better choice: no
+PEM key in an environment variable, and nothing to rotate by hand.
+
+
 Firebase Admin needs a service account (`NEXT_PUBLIC_FIREBASE_PROJECT_ID`,
 `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` — see the credential handling
 in `src/lib/firebase/server.ts` for exact formatting pitfalls), plus the

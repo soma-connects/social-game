@@ -33,6 +33,8 @@ import {
   BOMB_DAMAGE,
   FINISH_NODE,
   MINIGAME_FAIL_THRESHOLD,
+  MINE_PLANT_DISTANCE,
+  MINE_SETBACK,
   STARTING_LIVES,
   STREAK_KEEP_THRESHOLD,
   DARE_BLOCKED_MESSAGE,
@@ -45,6 +47,7 @@ import {
   heatTier,
   slipstreamLabel,
   slipstreamSteps,
+  forgiveMicFault,
   loseLife,
   respawnToStart,
   TileOutcome,
@@ -74,7 +77,16 @@ import {
   readSecrets,
   writeRoom,
   writeSecrets,
+  type RoomSecrets,
 } from '@/lib/server/roomServer';
+import { acceptedAnswers, pickTriviaQuestion, rememberTrivia } from '@/lib/triviaBank';
+import { generateTriviaFromAi } from '@/lib/server/aiHost';
+import {
+  PERFORMER_PHASES,
+  clearPhaseDeadline,
+  phaseHasStalled,
+  syncPhaseDeadline,
+} from '@/lib/server/phaseDeadline';
 import { archiveMatch } from '@/lib/server/matchArchive';
 import {
   newSessionId,
@@ -177,19 +189,6 @@ function pickSocialBadge(round: SocialRound | null, performance: number): string
  * headroom. Roughly ten seconds of Opus.
  */
 const MAX_CLIP_CHARS = 300_000;
-
-/**
- * Phases that are waiting on one specific performer, so losing them means the
- * round has to be skipped rather than waited out.
- *
- * Derived from the mini-game list instead of hand-listed: every game added since
- * this check was written — trivia, asteroid defense, the vote-based rounds —
- * was missing from it, and the room hung when its performer dropped.
- */
-const PERFORMER_PHASES = new Set<GamePhase>([
-  ...ALL_MINI_GAMES.map(miniGamePhase),
-  'roast_intermission',
-]);
 
 /**
  * Players the game should still wait for.
@@ -324,6 +323,30 @@ function advanceRoundOrOpenShop(room: RoomState): void {
   pushEvent(room, `🛒 Round ${room.roundNumber ?? 1}: everyone to the buff shop`, 'system');
 }
 
+/**
+ * Closes the roast and hands the mini-game to whoever has not taken it yet.
+ *
+ * Shared by the performer's own "roast over" tap and by the deadline that fires
+ * when it never arrives, so a timed-out roast still awards the badge the room
+ * spent the last half-minute earning them.
+ */
+function finishRoast(room: RoomState): void {
+  // Re-pick the badge now the roast reactions are in. A round that only got
+  // funny *after* the attempt should still be able to earn Room Favorite.
+  const performer = room.players[room.activePlayerIndex];
+  const round = room.socialRound?.targetPlayerId === performer?.id ? room.socialRound : null;
+  if (performer && round) {
+    const badge = pickSocialBadge(round, room.turnResult?.performance ?? 0);
+    if (addBadge(performer, badge)) {
+      pushEvent(room, `${performer.name} earned badge: ${badge}`, 'social');
+    }
+  }
+
+  // Hand over to the next player who has not taken the mini-game yet. Only
+  // once everybody has played does the room move on to shopping.
+  advanceRoundOrOpenShop(room);
+}
+
 /** Copies a fresh set of team assignments onto the live player objects. */
 function applyTeamAssignment(room: RoomState, assigned: { id: string; teamId?: TeamId }[]): void {
   const byId = new Map(assigned.map((p) => [p.id, p.teamId]));
@@ -416,7 +439,9 @@ function finishSeries(room: RoomState): void {
     const team = getTeam(room.winningTeam);
     pushEvent(room, `🏆 ${team.name} takes the series ${Math.max(red, blue)}–${Math.min(red, blue)}!`, 'system');
   } else {
-    pushEvent(room, `🤝 The series ends level at ${red}–${red}`, 'system');
+    // Prints the same today, since this branch only runs when the two are
+    // equal — but it says the wrong thing the moment the tie test changes.
+    pushEvent(room, `🤝 The series ends level at ${red}–${blue}`, 'system');
   }
 }
 
@@ -555,6 +580,11 @@ const ACTIVE_PLAYER_ACTIONS = new Set([
   'complete_truth_bluff',
   'complete_trap',
   'trivia_answer',
+  // Buzzing was open to anyone while answering was not, so a spectator who
+  // buzzed moved the round to 'answering' and was then refused permission to
+  // answer it — nobody could act and the round was stuck. The two now agree on
+  // whose round it is.
+  'trivia_buzz',
 ]);
 
 /**
@@ -701,6 +731,202 @@ function expireStalledRoll(room: RoomState, now: number): void {
     }
   }
   advanceRoll(room);
+}
+
+/**
+ * Moves the room on when whoever it was waiting for never showed up.
+ *
+ * Ridden on the heartbeat like `expireStalledRoll`, so it needs no timer of its
+ * own and no client willing to send anything.
+ */
+function expireStalledPhase(room: RoomState, now: number): void {
+  if (!phaseHasStalled(room, now)) return;
+  clearPhaseDeadline(room);
+
+  if (room.phase === 'powerup_shop') {
+    // Anyone who never pressed done is treated as done. They keep their coins;
+    // the alternative is the whole room waiting on one person's shopping.
+    const waiting = activePlayers(room).filter((p) => !(room.shopReady ?? []).includes(p.id));
+    if (waiting.length > 0) {
+      pushEvent(room, `⏳ Shop closing — ${waiting.map((p) => p.name).join(', ')} ran out of time`, 'system');
+    }
+    openBoardPhase(room);
+    return;
+  }
+
+  if (room.phase === 'roast_intermission') {
+    // The result is already banked — only the performer's "roast over" tap is
+    // missing, and finishRoast is exactly what that tap does.
+    finishRoast(room);
+    return;
+  }
+
+  const performer = room.players[room.activePlayerIndex];
+  if (!performer) {
+    advanceRoundOrOpenShop(room);
+    return;
+  }
+
+  pushEvent(room, `⏳ ${performer.name} ran out of time on ${MINIGAME_LABELS[room.currentMiniGame ?? 'voice_arena']}`, 'system');
+
+  // A forfeit has to be banked, not just skipped. advanceRoundOrOpenShop hands
+  // the turn to the first live player with no result this round — so leaving the
+  // row empty would hand it straight back to the player who just timed out, and
+  // the room would tick between the same two states forever.
+  //
+  // No life is charged. Losing one is for bombing an attempt you actually made;
+  // this player made none, and taking a life for an absence would also let the
+  // board punish somebody whose phone simply rang.
+  room.roundResults = (room.roundResults ?? []).filter((r) => r.playerId !== performer.id);
+  room.roundResults.push({
+    playerId: performer.id,
+    playerName: performer.name,
+    game: room.currentMiniGame ?? 'voice_arena',
+    pointsEarned: 0,
+    performance: 0,
+    steps: 0,
+    rolled: false,
+  });
+  room.turnResult = null;
+  advanceRoundOrOpenShop(room);
+}
+
+// ─── Buried Mines ───────────────────────────────────────────────────────────
+//
+// The shop has sold these from the start — 130 coins, with a description, and
+// two constants written for how far ahead one is laid and how far back its
+// blast throws you. None of it was ever wired up: there was no case for it in
+// use_powerup and nothing ever read the `mines` field on the room's secrets, so
+// a player bought a Buried Mine, used it, and nothing at all happened.
+//
+// Mines live in the room's secrets rather than on the room document, for the
+// same reason the Truth or Bluff answer does: every browser in the room
+// subscribes to the room, and a mine everyone can see is just a tile to walk
+// around.
+
+type PlantedMine = NonNullable<RoomSecrets['mines']>[number];
+
+/**
+ * Buries a mine up the road from the planter.
+ *
+ * Deliberately not aimed at a player. It sits on a space and takes a life from
+ * whoever stands on it — which, on a board where a Rewind can send you
+ * backwards, may well end up being the person who buried it.
+ *
+ * At a fork the first branch is followed, so a mine is only ever laid on one
+ * road; laying it on both would make a 130-coin item a guaranteed hit.
+ */
+function plantMine(secrets: RoomSecrets, planter: Player): PlantedMine | null {
+  const nodeId = walkForward(planter.boardPosition, MINE_PLANT_DISTANCE);
+  if (nodeId === planter.boardPosition) return null; // ran out of road
+  // walkForward stops *at* the finish, so close to the end this would bury one
+  // on the winning space — where it would go off after the win was declared and
+  // knock the winner back off it.
+  if (nodeId === FINISH_NODE) return null;
+
+  secrets.mines ??= [];
+  // One mine to a space. Stacking them would take several lives from one step
+  // and read as a bug rather than as bad luck.
+  if (secrets.mines.some((m) => m.nodeId === nodeId)) return null;
+
+  const mine = { nodeId, ownerId: planter.id, ownerName: planter.name };
+  secrets.mines.push(mine);
+  return mine;
+}
+
+/** Lifts the mine at a space, if one is buried there. */
+function takeMineAt(secrets: RoomSecrets, nodeId: number): PlantedMine | null {
+  const mines = secrets.mines ?? [];
+  const index = mines.findIndex((m) => m.nodeId === nodeId);
+  if (index === -1) return null;
+  const [mine] = mines.splice(index, 1);
+  secrets.mines = mines;
+  return mine;
+}
+
+/**
+ * Sets off a mine under whoever just landed on it.
+ *
+ * Costs a life and throws them back, and is announced to the whole room — the
+ * blast is the payoff for the coins somebody spent, so it has to be seen.
+ *
+ * A shield does not stop it. The shield is sold as blocking "the next asteroid,
+ * dare or freeze", and quietly having it swallow mines too would make the two
+ * items impossible to reason about from their own descriptions.
+ */
+function detonateMine(room: RoomState, victim: Player, mine: PlantedMine): void {
+  const from = victim.boardPosition;
+  victim.boardPosition = walkBack(from, MINE_SETBACK);
+
+  const { livesLeft, empty } = loseLife(victim);
+  if (empty) respawnToStart(victim);
+
+  const ownName = mine.ownerId === victim.id ? 'their own' : `${mine.ownerName}'s`;
+  pushEvent(
+    room,
+    empty
+      ? `💥 ${victim.name} walked into ${ownName} buried mine and ran out of lives — back to the launchpad!`
+      : `💥 ${victim.name} walked into ${ownName} buried mine — ${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left`,
+    'debuff'
+  );
+
+  pushBoardEvent(room, 'bomb', victim, {
+    banner: '💥 BURIED MINE!',
+    message:
+      mine.ownerId === victim.id
+        ? `${victim.name} stepped on the mine they buried themselves.`
+        : `${mine.ownerName} buried it. ${victim.name} found it.`,
+    fromNode: from,
+    toNode: victim.boardPosition,
+  });
+}
+
+/**
+ * Clears anything buried on the board.
+ *
+ * A mine outlives the round it was laid in by design, but not the match: a
+ * blast from a game two matches ago, charged against a player who never saw it
+ * bought, reads as the board being broken.
+ */
+async function clearMines(roomId: string): Promise<void> {
+  const secrets = await readSecrets(roomId);
+  if (!secrets.mines?.length) return;
+  secrets.mines = [];
+  await writeSecrets(roomId, secrets);
+}
+
+/**
+ * Sets off any mine under a player's final resting place.
+ *
+ * Called after applyLanding rather than inside it, because the tile itself may
+ * move you on again — a wormhole or an asteroid changes where you actually come
+ * to rest, and a mine is triggered by standing on it, not by passing over it.
+ *
+ * Kept out of applyLanding for a second reason: mines live in the room's
+ * secrets, which are async to read, and applyLanding is a synchronous helper
+ * shared with the heartbeat.
+ */
+async function resolveMineLanding(
+  roomId: string,
+  room: RoomState,
+  player: Player
+): Promise<() => Promise<void>> {
+  const noop = async () => {};
+  // A win is final. applyLanding may have just declared one, and a mine going
+  // off afterwards would take a life off the winner and shove them back down
+  // the road they had already finished.
+  if (room.phase === 'game_over') return noop;
+
+  const secrets = await readSecrets(roomId);
+  const mine = takeMineAt(secrets, player.boardPosition);
+  if (!mine) return noop;
+  detonateMine(room, player, mine);
+
+  // Handed back rather than written here. This action can still lose its write
+  // race and be replayed against fresh state, and a mine already lifted from
+  // the secrets would not be there to find on the second run — the player would
+  // walk over it and the coins that bought it would be gone for nothing.
+  return () => writeSecrets(roomId, secrets);
 }
 
 /**
@@ -944,8 +1170,25 @@ function trackDeficits(room: RoomState): void {
  * Team Battle is scored on the crew total rather than survival, so it opts out
  * — taking lives there would punish a side twice for the same round.
  */
-function chargeFailedChallenge(room: RoomState, player: Player, game: MiniGameId): void {
-  if (room.roomType === 'team_battle') return;
+function chargeFailedChallenge(
+  room: RoomState,
+  player: Player,
+  game: MiniGameId,
+  micFault = false
+): boolean {
+  if (room.roomType === 'team_battle') return false;
+
+  // A microphone that never opened is not a failed attempt. Forgiven a fixed
+  // number of times per match, because the claim comes from the client and
+  // cannot be checked here — see MIC_FAULT_GRACE.
+  if (micFault && forgiveMicFault(player)) {
+    pushEvent(
+      room,
+      `🎙️ ${player.name}'s mic did not open — the round is not counted against them`,
+      'system'
+    );
+    return true;
+  }
 
   const from = player.boardPosition;
   const { livesLeft, empty } = loseLife(player);
@@ -957,7 +1200,7 @@ function chargeFailedChallenge(room: RoomState, player: Player, game: MiniGameId
       `💔 ${player.name} bombed ${MINIGAME_LABELS[game]} — ${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left`,
       'debuff'
     );
-    return;
+    return false;
   }
 
   pushEvent(room, `☠️ ${player.name} ran out of lives — back to the launchpad with a fresh bar!`, 'debuff');
@@ -967,6 +1210,7 @@ function chargeFailedChallenge(room: RoomState, player: Player, game: MiniGameId
     fromNode: from,
     toNode: 0,
   });
+  return false;
 }
 
 /**
@@ -1049,6 +1293,100 @@ function pickTarget(room: RoomState, state: AiMasterState | null | undefined): P
   return draw[Math.floor(Math.random() * draw.length)];
 }
 
+// ─── The AI Master's clock ──────────────────────────────────────────────────
+//
+// This game had no clock at all: nothing on the client, nothing on the server,
+// and its phase sits outside the board's phase deadline. Every beat waits on
+// somebody, so a player who put their phone down while still heartbeating
+// stopped the match — and the only escape was the host forcing a verdict, which
+// is no escape at all when the host is the one being asked.
+
+/** Long enough to actually perform a challenge into a microphone. */
+const AI_MASTER_RESPOND_MS = 90_000;
+/** The room deciding. Shorter — they only have to press one of two buttons. */
+const AI_MASTER_VOTE_MS = 45_000;
+/** Reading the verdict before the next round is called. */
+const AI_MASTER_VERDICT_MS = 25_000;
+
+function aiMasterWaitMs(phase: AiMasterState['phase']): number {
+  if (phase === 'voting') return AI_MASTER_VOTE_MS;
+  if (phase === 'verdict') return AI_MASTER_VERDICT_MS;
+  return AI_MASTER_RESPOND_MS;
+}
+
+/** Identifies one beat, so the next one never inherits a spent clock. */
+function aiMasterBeat(state: AiMasterState): string {
+  return `${state.round}:${state.phase}`;
+}
+
+/**
+ * Arms the clock for whatever the round is waiting on.
+ *
+ * Lazy rather than set at each transition, for the same reason the board's is:
+ * hand-listing transitions is how a case gets missed, and a missed case here is
+ * a match that stops.
+ */
+function syncAiMasterDeadline(room: RoomState, now: number): void {
+  const state = room.aiMasterState;
+  if (!state || room.phase !== 'ai_master_round') return;
+
+  const beat = aiMasterBeat(state);
+  if (state.deadlineFor !== beat || !state.deadline) {
+    state.deadline = now + aiMasterWaitMs(state.phase);
+    state.deadlineFor = beat;
+  }
+}
+
+function aiMasterHasStalled(room: RoomState, now: number): boolean {
+  const state = room.aiMasterState;
+  if (!state || room.phase !== 'ai_master_round') return false;
+  if (state.deadlineFor !== aiMasterBeat(state)) return false;
+  return !!state.deadline && now >= state.deadline;
+}
+
+/**
+ * Moves the round on when whoever it was waiting for never showed up.
+ *
+ * Ridden on the heartbeat, like the board's, so it needs no timer of its own
+ * and no client willing to send anything.
+ */
+async function expireStalledAiMaster(room: RoomState, now: number): Promise<void> {
+  const state = room.aiMasterState;
+  if (!state || !aiMasterHasStalled(room, now)) return;
+
+  const target = room.players.find((p) => p.id === state.targetId);
+
+  if (state.phase === 'announcing') {
+    // Silence is an answer the room is entitled to judge, so this hands them
+    // the vote rather than deciding it. Failing them outright here would take a
+    // life for a dropped connection.
+    state.response = '';
+    state.phase = 'voting';
+    state.hostLine = `${target?.name ?? 'They'} said nothing at all. Room — your call.`;
+    pushEvent(room, `⏳ ${target?.name ?? 'The target'} ran out of time to answer`, 'system');
+    return;
+  }
+
+  if (state.phase === 'voting') {
+    // resolveAiMasterRound reads passes > fails, so an empty tally fails the
+    // target — which would punish somebody for a room that had already gone
+    // home. Nobody objecting counts as nobody objecting.
+    pushEvent(
+      room,
+      Object.keys(state.votes ?? {}).length === 0
+        ? `⏳ Nobody voted — ${target?.name ?? 'the target'} gets the benefit of the doubt`
+        : `⏳ Voting closed with the votes that were in`,
+      'system'
+    );
+    await resolveAiMasterRound(room);
+    return;
+  }
+
+  if (state.phase === 'verdict') {
+    await startAiMasterRound(room);
+  }
+}
+
 /** Occasionally re-rolls who the host likes and who it is out to get. */
 function rerollBias(room: RoomState, state: AiMasterState): void {
   const pool = survivors(room);
@@ -1124,7 +1462,11 @@ async function resolveAiMasterRound(room: RoomState): Promise<void> {
   const verdicts = Object.values(state.votes ?? {});
   const passes = verdicts.filter((v) => v === 'pass').length;
   const fails = verdicts.filter((v) => v === 'fail').length;
-  const passed = passes > fails;
+  // Nobody objecting counts as nobody objecting. A bare `passes > fails` fails
+  // the target on an empty tally, which takes a life off somebody because the
+  // room wandered off — reachable both from a timed-out vote and from the host
+  // forcing a verdict before anyone had pressed anything.
+  const passed = verdicts.length === 0 ? true : passes > fails;
 
   state.phase = 'verdict';
   state.passed = passed;
@@ -1224,6 +1566,7 @@ function startNextRound(room: RoomState): void {
   room.shopReady = [];
   room.turnResult = null;
   room.rollDeadline = null;
+  clearPhaseDeadline(room);
   room.boardEvent = null;
   room.truthBluffState = null;
   room.storyBuilderState = null;
@@ -1257,7 +1600,6 @@ async function createRoom(
     selectedLanguages: ['english', 'spelling_bee'],
     mathEnabled: false,
     trapWords: [],
-    currentChallenge: null,
     turnTimeLimit: DEFAULT_TURN_SECONDS,
     currentDare: null,
     winner: null,
@@ -1660,7 +2002,10 @@ async function applyAction(
 
       room.truthBluffState = {
         performerId: body.playerId,
-        prompt: room.currentChallenge?.word || 'Truth or Bluff',
+        // `room.currentChallenge` used to be read here and was never assigned
+        // anywhere — it was null for the life of every room, so this line only
+        // ever produced its own fallback string.
+        prompt: String(body.prompt ?? '').trim() || 'Truth or Bluff',
         claims,
         votes: {},
         phase: 'voting',
@@ -1956,20 +2301,45 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    /**
+     * Draws the next trivia question.
+     *
+     * Gemini first, the bank underneath. The bank never fails, costs nothing
+     * and works with no key configured, so it is the floor rather than the
+     * fallback of last resort; the model earns its place on the questions a
+     * committed file cannot hold, which is anything current.
+     *
+     * This used to call a function with five questions hardcoded in it behind a
+     * comment saying a real app would ask an AI, and a one-second sleep
+     * pretending one had been asked.
+     */
     case 'trivia_generate': {
       if (!room.triviaState) {
-        const trivia = await aiGameMaster.generateTriviaQuestion(room.theme);
+        const fromAi = await generateTriviaFromAi(roomVibeOf(room));
+
+        const banked = fromAi ? null : pickTriviaQuestion(room.recentTrivia);
+        const question = fromAi?.question ?? banked!.question;
+        const answer = fromAi?.answer ?? banked!.answer;
+        const accepted = fromAi
+          ? [answer, ...fromAi.accept].map((a) => a.toLowerCase().trim()).filter(Boolean)
+          : acceptedAnswers(banked!);
+        const funFact = fromAi?.funFact ?? banked!.funFact ?? '';
+
+        // Only what the room may see is remembered as asked. A Gemini question
+        // has no bank id and cannot repeat anyway.
+        if (banked) room.recentTrivia = rememberTrivia(room.recentTrivia, banked.id);
 
         // Only the question goes out. The answer stays server-side and grading
         // happens in `trivia_answer`, so it is never on the wire before the
         // reveal — it used to ride along in the same document as the question.
         const secrets = await readSecrets(roomId);
-        secrets.triviaAnswer = trivia.answer;
-        secrets.triviaFunFact = trivia.funFact;
+        secrets.triviaAnswer = answer;
+        secrets.triviaAccepted = accepted;
+        secrets.triviaFunFact = funFact;
         await writeSecrets(roomId, secrets);
 
         room.triviaState = {
-          question: trivia.question,
+          question,
           buzzedPlayerId: null,
           phase: 'asking',
           winnerId: null,
@@ -1992,6 +2362,8 @@ async function applyAction(
 
       const secrets = await readSecrets(roomId);
       const target = secrets.triviaAnswer ?? '';
+      // Older rooms stored only the one form; fall back to it.
+      const accepted = secrets.triviaAccepted?.length ? secrets.triviaAccepted : [target];
       const spoken = playerText(body.answerText, 120);
 
       // Speech recognition hands back a whole sentence ("uh, I think it's
@@ -2001,12 +2373,17 @@ async function applyAction(
       const normalize = (text: string) =>
         text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
       const cleanSpoken = normalize(spoken);
-      const cleanTarget = normalize(target);
+      // Any accepted form counts. Grading compared against a single string, so
+      // a question whose answer is "1960" marked everyone wrong whose phone
+      // transcribed "nineteen sixty" — the same answer, said out loud.
       const isCorrect =
         cleanSpoken.length > 0 &&
-        cleanTarget.length > 0 &&
-        (cleanSpoken === cleanTarget ||
-          new RegExp(`\\b${cleanTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(cleanSpoken));
+        accepted.some((candidate) => {
+          const cleanTarget = normalize(candidate);
+          if (!cleanTarget) return false;
+          if (cleanSpoken === cleanTarget) return true;
+          return new RegExp(`\\b${cleanTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(cleanSpoken);
+        });
 
       state.phase = 'reveal';
       state.revealedAt = Date.now();
@@ -2028,15 +2405,25 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room), isCorrect, answer: target });
     }
 
+    /**
+     * Locks the performer in before they answer.
+     *
+     * The round used to let them read the question and answer at leisure. This
+     * is the commitment step: buzz, and the clock drops to the short answer
+     * window. Nothing sent this action at all before — the phase it moves the
+     * round into was unreachable, which is why 'answering' was read by nothing.
+     */
     case 'trivia_buzz': {
-      if (room.triviaState && room.triviaState.phase === 'asking') {
-        room.triviaState.buzzedPlayerId = body.playerId;
-        room.triviaState.phase = 'answering';
-        const buzzer = room.players.find(p => p.id === body.playerId);
-        if (buzzer) {
-          pushEvent(room, `🚨 ${buzzer.name} buzzed in!`, 'system');
-        }
+      const state = room.triviaState;
+      if (!state || state.phase !== 'asking') {
+        return NextResponse.json({ error: 'Nothing to buzz in on' }, { status: 409 });
       }
+
+      state.buzzedPlayerId = body.playerId;
+      state.phase = 'answering';
+      const buzzer = room.players.find((p) => p.id === body.playerId);
+      if (buzzer) pushEvent(room, `🚨 ${buzzer.name} buzzed in!`, 'system');
+
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -2123,7 +2510,14 @@ async function applyAction(
         rolled: false,
       });
 
-      if (performance <= MINIGAME_FAIL_THRESHOLD) chargeFailedChallenge(room, active, game);
+      // body.micFault says the microphone never opened this round; the cap on
+      // how often that is honoured lives in forgiveMicFault. The recap needs
+      // to know a life was waived, or it shows a bombed card for a round the
+      // player never got to attempt.
+      if (performance <= MINIGAME_FAIL_THRESHOLD) {
+        const waived = chargeFailedChallenge(room, active, game, body.micFault === true);
+        if (waived && room.turnResult) room.turnResult.micFaultForgiven = true;
+      }
 
       room.phase = 'roast_intermission';
       return NextResponse.json({
@@ -2230,7 +2624,14 @@ async function applyAction(
         rolled: false,
       });
 
-      if (performance <= MINIGAME_FAIL_THRESHOLD) chargeFailedChallenge(room, active, game);
+      // body.micFault says the microphone never opened this round; the cap on
+      // how often that is honoured lives in forgiveMicFault. The recap needs
+      // to know a life was waived, or it shows a bombed card for a round the
+      // player never got to attempt.
+      if (performance <= MINIGAME_FAIL_THRESHOLD) {
+        const waived = chargeFailedChallenge(room, active, game, body.micFault === true);
+        if (waived && room.turnResult) room.turnResult.micFaultForgiven = true;
+      }
 
       // Open the roast so the room can laugh at what just happened.
       room.phase = 'roast_intermission';
@@ -2242,20 +2643,7 @@ async function applyAction(
     }
 
     case 'finish_roast': {
-      // Re-pick the badge now the roast reactions are in. A round that only got
-      // funny *after* the attempt should still be able to earn Room Favorite.
-      const performer = room.players[room.activePlayerIndex];
-      const round = room.socialRound?.targetPlayerId === performer?.id ? room.socialRound : null;
-      if (performer && round) {
-        const badge = pickSocialBadge(round, room.turnResult?.performance ?? 0);
-        if (addBadge(performer, badge)) {
-          pushEvent(room, `${performer.name} earned badge: ${badge}`, 'social');
-        }
-      }
-
-      // Hand over to the next player who has not taken the mini-game yet. Only
-      // once everybody has played does the room move on to shopping.
-      advanceRoundOrOpenShop(room);
+      finishRoast(room);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -2368,8 +2756,11 @@ async function applyAction(
 
       pushEvent(room, `🎲 ${active.name} moves ${roll} step${roll === 1 ? '' : 's'}`, 'system');
       const outcome = applyLanding(room, active, currentId);
+      const commitMine = await resolveMineLanding(roomId, room, active);
+      const rolled = await writeRoom(room);
+      await commitMine();
 
-      return NextResponse.json({ room: await writeRoom(room), roll, move: room.lastMove, outcome });
+      return NextResponse.json({ room: rolled, roll, move: room.lastMove, outcome });
     }
 
     case 'choose_branch': {
@@ -2410,8 +2801,11 @@ async function applyAction(
       // again if the tile starts a dare, a duel or the sudden-death trap.
       room.phase = 'roadmap_turn';
       const outcome = applyLanding(room, active, currentId);
+      const commitMine = await resolveMineLanding(roomId, room, active);
+      const branched = await writeRoom(room);
+      await commitMine();
 
-      return NextResponse.json({ room: await writeRoom(room), outcome });
+      return NextResponse.json({ room: branched, outcome });
     }
 
     case 'resolve_dare': {
@@ -2591,6 +2985,28 @@ async function applyAction(
             coins: -damage,
           });
           break;
+        }
+
+        case 'mine': {
+          const secrets = await readSecrets(roomId);
+          const mine = plantMine(secrets, active);
+          if (!mine) {
+            // Give the item back rather than charging for nothing — which is
+            // exactly what this powerup did in every case before today.
+            active.inventory.push(powerupId);
+            return NextResponse.json(
+              { error: 'No clear ground up the road to bury that in' },
+              { status: 409 }
+            );
+          }
+          await writeSecrets(roomId, secrets);
+
+          // The room is told a mine exists but never where. Half the value of
+          // the item is everyone walking the next few spaces nervously.
+          pushEvent(room, `💥 ${active.name} buried something up the road…`, 'debuff');
+          // The planter alone gets the space, in the response rather than in
+          // room state — the room document is readable by every browser in it.
+          return NextResponse.json({ room: await writeRoom(room), minePlantedAt: mine.nodeId });
         }
       }
 
@@ -2935,6 +3351,7 @@ async function applyAction(
     }
 
     case 'start_match': {
+      await clearMines(roomId);
       // Identifies this match in the permanent `matches` collection. Minted
       // here rather than at archive time so every row is traceable back to the
       // room and the moment it started, and so a match that ends twice cannot
@@ -3010,6 +3427,8 @@ async function applyAction(
         return NextResponse.json({ error: 'Already in the lobby' }, { status: 409 });
       }
 
+      await clearMines(roomId);
+
       // Before the wipe below, not after — the reset clears scores, positions
       // and the winner, which is most of what the record is made of. If this
       // match already ended with a winner it was archived then, and
@@ -3047,6 +3466,7 @@ async function applyAction(
       room.lastMove = null;
       room.awards = null;
       room.rollDeadline = null;
+      clearPhaseDeadline(room);
       room.currentDare = null;
       room.socialRound = null;
       room.liveState = null;
@@ -3097,8 +3517,13 @@ async function applyAction(
         (room.phase === 'roadmap_turn' || room.phase === 'branch_choice') &&
         !!room.rollDeadline &&
         now >= room.rollDeadline;
+      // Same reasoning for the waits before the board: a blown deadline that is
+      // only noticed on whichever beat happens to also be due a refresh leaves
+      // the room sitting there for up to PRESENCE_TIMEOUT_MS/3 longer.
+      const phaseStalled = phaseHasStalled(room, now);
+      const aiStalled = aiMasterHasStalled(room, now);
 
-      if (!wasAway && !needsRefresh && !rollStalled) {
+      if (!wasAway && !needsRefresh && !rollStalled && !phaseStalled && !aiStalled) {
         return NextResponse.json({ ok: true });
       }
 
@@ -3109,6 +3534,13 @@ async function applyAction(
       }
       prunePresence(room);
       expireStalledRoll(room, now);
+      expireStalledPhase(room, now);
+      await expireStalledAiMaster(room, now);
+      // Arm the clock for whatever the room is waiting on now. Last, so it sees
+      // the phase the expiries above may have just moved it into, and so a
+      // fresh wait is never handed a deadline that has already passed.
+      syncPhaseDeadline(room, now);
+      syncAiMasterDeadline(room, now);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

@@ -97,6 +97,11 @@ export type Player = {
   performanceTotal?: number;
   /** Rounds that came in at or below MINIGAME_FAIL_THRESHOLD. */
   bombs?: number;
+  /**
+   * Rounds forgiven this match because the microphone never opened.
+   * Capped by MIC_FAULT_GRACE so the claim cannot be leaned on indefinitely.
+   */
+  micFaults?: number;
   /** The single best round of the match, for the highlight award. */
   bestRound?: { game: MiniGameId; performance: number; points: number };
   /**
@@ -127,7 +132,16 @@ export type ChallengeType = 'language' | 'math' | 'trap';
 
 export type ChallengeWord = {
   id: string;
+  /** What the player is shown and asked to say. */
   word: string;
+  /**
+   * What counts as a correct spoken response, when that is not the prompt.
+   *
+   * A pronunciation challenge is its own answer — you are shown a word and you
+   * say it. A maths problem is not: showing "37 + 12 = 49" and asking for the
+   * answer prints the answer on screen, which is the state maths was left in.
+   */
+  answer?: string;
   phonetic?: string;
   translation?: string;
   language: LanguageCode | 'math' | 'trap';
@@ -185,7 +199,6 @@ export type GamePhase =
   | 'powerup_shop'
   | 'roadmap_turn'
   | 'branch_choice'
-  | 'duel_challenge'
   | 'peer_dare'
   | 'pitch_bird'
   | 'solfege'
@@ -326,6 +339,18 @@ export type AiMasterState = {
   grudgeId?: string | null;
   bribes?: AiMasterBribe[];
   revealedAt?: number;
+  /**
+   * Epoch ms by which this beat of the round has to have moved on.
+   *
+   * The AI Master had no clock anywhere — not on the client, not on the server,
+   * and its phase was not covered by the board's phase deadline either. A target
+   * who put their phone down while still heartbeating stopped the match, and the
+   * only way out was the host forcing a verdict. When the host *was* the target,
+   * there was no way out at all.
+   */
+  deadline?: number | null;
+  /** Which beat the deadline was armed for, as round and phase. */
+  deadlineFor?: string | null;
 };
 
 /** A small structured event for the Session Memory Service (powers Who Said It? later). */
@@ -346,6 +371,12 @@ export type TurnResult = {
   performance: number;
   /** Board steps this buys — what the dice will land on. */
   steps: number;
+  /**
+   * The round scored zero because the microphone never opened, and the life it
+   * would have cost was waived. Set so the recap can explain the reprieve
+   * rather than showing a "bombed it" card for a round nobody got to play.
+   */
+  micFaultForgiven?: boolean;
 };
 
 /** One player's mini-game result within the current round. */
@@ -487,7 +518,6 @@ export type RoomState = {
   selectedLanguages: LanguageCode[];
   mathEnabled: boolean;
   trapWords: TrapWord[];
-  currentChallenge: ChallengeWord | null;
   turnTimeLimit: number;
   currentDare: {
     dareText: string;
@@ -597,6 +627,26 @@ export type RoomState = {
    * five have no way to move the game on.
    */
   rollDeadline?: number | null;
+  /**
+   * Epoch ms by which the phase *before* the board has to have moved on.
+   *
+   * `rollDeadline` only guards the dice. Everything leading up to them waits on
+   * a tap that may never come: a mini-game is only banked when the performer
+   * presses "proceed", the roast only ends when their client says so, and the
+   * shop only closes once every player has pressed done. A player who is still
+   * heartbeating but has put their phone down is invisible to presence pruning,
+   * so the whole room sits there indefinitely.
+   */
+  phaseDeadline?: number | null;
+  /**
+   * Which wait `phaseDeadline` was armed for — phase, performer and round.
+   *
+   * Without it the clock would carry over between two turns that happen to sit
+   * in the same phase (the repeat rule makes back-to-back picks unlikely, not
+   * impossible), and the second player would inherit the first player's
+   * already-spent deadline and be timed out on arrival.
+   */
+  phaseDeadlineKey?: string | null;
 
   // ── Round-based loop ──────────────────────────────────────────────────────
   // A round is: every player takes the mini-game one at a time, then everyone
@@ -634,6 +684,13 @@ export type RoomState = {
    * snapshot must not be able to disagree about who won Crowd Favourite.
    */
   awards?: import('./gameRules').Award[] | null;
+  /**
+   * Trivia questions already asked this room, newest last.
+   *
+   * The picker used to index at random into five questions with no memory, so a
+   * repeat was a one-in-five event every single round.
+   */
+  recentTrivia?: string[];
   /** Session memory — small structured events for Who Said It? and AI callbacks. */
   sessionMemory?: SessionMemoryEvent[];
 };

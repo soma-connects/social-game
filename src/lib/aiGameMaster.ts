@@ -264,23 +264,6 @@ class AiGameMasterEngine {
     return this.speak(`Alright ${playerName}, it's your turn. Tell us your true story and your fake story!`);
   }
 
-  public async generateTriviaQuestion(roomTheme: string | undefined): Promise<{ question: string; answer: string; funFact: string }> {
-    // In a real app we'd call the Gemini AI here, but for this demo we'll return a random hardcoded one based on the theme.
-    // Let's provide a list of fun trivia.
-    const questions = [
-      { question: "What is the capital of Nigeria?", answer: "Abuja", funFact: "It replaced Lagos as the capital in 1991." },
-      { question: "What is the tallest mammal on Earth?", answer: "Giraffe", funFact: "A giraffe's neck can be over 6 feet long!" },
-      { question: "Which planet is known as the Red Planet?", answer: "Mars", funFact: "Mars gets its red color from iron oxide (rust) on its surface." },
-      { question: "How many continents are there?", answer: "Seven", funFact: "Asia is the largest continent in the world." },
-      { question: "What is the chemical symbol for water?", answer: "H2O", funFact: "Water covers about 71% of the Earth's surface." },
-    ];
-    
-    // Simulate AI delay
-    await new Promise(r => setTimeout(r, 1000));
-    
-    return questions[Math.floor(Math.random() * questions.length)];
-  }
-
   public getTriviaIntro(): string {
     return this.speak("🧠 Get ready! I'm reading the question now. Buzz in fast!");
   }

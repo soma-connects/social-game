@@ -412,8 +412,20 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'start_match' });
   }
 
-  /** Finishing a mini-game banks points and sets the movement for the board. */
-  public async completeMiniGame(roomId: string, game: MiniGameId, pointsEarned: number) {
+  /**
+   * Finishing a mini-game banks points and sets the movement for the board.
+   *
+   * `micFault` says the microphone never opened for this round — a blocked
+   * permission, no device, or a browser that cannot do speech. Banking zero
+   * normally costs a life, and that is unfair when the player was never able to
+   * attempt anything. The server decides how often to honour it.
+   */
+  public async completeMiniGame(
+    roomId: string,
+    game: MiniGameId,
+    pointsEarned: number,
+    micFault = false
+  ) {
     const ACTION: Record<MiniGameId, string> = {
       pitch_bird: 'complete_pitch_bird',
       solfege: 'complete_solfege',
@@ -429,6 +441,7 @@ class RoomStoreManager {
     const data = await this.post(roomId, {
       action: ACTION[game] ?? 'complete_voice_turn',
       pointsEarned,
+      micFault,
     });
     return {
       result: (data.result as TurnResult) ?? null,
@@ -443,6 +456,11 @@ class RoomStoreManager {
 
   public submitTruthBluffClaims(roomId: string, playerId: string, claims: string[], lieIndex: number) {
     return this.post(roomId, { action: 'truth_bluff_submit_claims', playerId, claims, lieIndex });
+  }
+
+  /** Locks the performer in before they answer a trivia question. */
+  public buzzTrivia(roomId: string, playerId: string) {
+    return this.post(roomId, { action: 'trivia_buzz', playerId });
   }
 
   public voteTruthBluff(roomId: string, playerId: string, voteIndex: number) {

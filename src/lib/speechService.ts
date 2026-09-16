@@ -73,7 +73,34 @@ const ERROR_MESSAGES: Record<SpeechErrorCode, string> = {
   unknown: 'The microphone could not start. Try again.',
 };
 
+/**
+ * The codes that mean the microphone pipeline never opened at all.
+ *
+ * The distinction matters because a voice round that banks zero points costs a
+ * life, and these five are not a poor attempt — the player was never given a
+ * chance to make one. `no-speech` is deliberately not here: silence is a
+ * failed attempt, and treating it as a fault would forgive simply not playing.
+ */
+const HARD_FAULTS: ReadonlySet<SpeechErrorCode> = new Set([
+  'unsupported-browser',
+  'insecure-context',
+  'permission-denied',
+  'no-microphone',
+  'network',
+]);
+
+/**
+ * The last hard fault seen, kept outside the per-session diagnostics.
+ *
+ * `diagnostics` is reset by every `listenForSpeech` call, and a round can open
+ * several sessions — Android ends one after each utterance. A fault recorded in
+ * the first would be erased by the restart, so it is held here until the round
+ * that cares about it reads and clears it.
+ */
+let lastHardFault: SpeechErrorCode | null = null;
+
 function makeError(code: SpeechErrorCode, recoverable = true): SpeechError {
+  if (HARD_FAULTS.has(code)) lastHardFault = code;
   return { code, message: ERROR_MESSAGES[code], recoverable };
 }
 
@@ -181,6 +208,21 @@ class SpeechRecognitionService {
 
   public getDiagnostics(): SpeechDiagnostics {
     return { ...this.diagnostics, supported: this.getCapabilities().hasSpeechRecognition };
+  }
+
+  /**
+   * The hard fault seen since `clearMicFault`, or null if the mic was fine.
+   *
+   * A round reads this when it banks a zero so the server can tell a broken
+   * microphone apart from a bad attempt.
+   */
+  public getMicFault(): SpeechErrorCode | null {
+    return lastHardFault;
+  }
+
+  /** Call at the start of a round, so it reports that round's faults only. */
+  public clearMicFault(): void {
+    lastHardFault = null;
   }
 
   private micStream: MediaStream | null = null;
@@ -537,12 +579,24 @@ class SpeechRecognitionService {
   public evaluateMatch(transcript: string, target: string): { isMatch: boolean; score: number } {
     if (!transcript || !target) return { isMatch: false, score: 0 };
 
+    // Keeps letters and digits from every script, not just the Latin ones.
+    //
+    // This used to strip anything outside [a-z0-9\s], which quietly made two of
+    // the four offered languages unwinnable: Japanese and Korean reduce to an
+    // empty string under that rule, on the target *and* the transcript, and the
+    // next line then returns no-match. A perfect answer scored zero.
+    //
+    // Accents still go, via the NFD pass above: "rápido" and "rapido" should
+    // count as the same word from someone playing a party game on a phone.
+    // Marks are kept here because that pass has already removed the Latin ones;
+    // what is left is the likes of the Japanese dakuten, and dropping it turns
+    // が into か and makes the game deaf to voicing.
     const clean = (str: string) =>
       str
         .toLowerCase()
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '') // strip decomposed tone marks, e.g. E ku aale
-        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/[^\p{L}\p{N}\p{M}\s]/gu, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 

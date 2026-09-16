@@ -90,6 +90,41 @@ any access to — see that file.
 
 ### Required env vars
 
+They do not all travel the same way, and mixing the two up is how a deploy ends
+up half-working.
+
+**Build-time, public.** The seven `NEXT_PUBLIC_FIREBASE_*` values are compiled
+into the client bundle by `next build`, so they must be present *as the image is
+built* — build args, via `cloudbuild.yaml`. They cannot be added afterwards, and
+they are not secrets: they ship to every browser, and `firestore.rules` is what
+actually guards the data.
+
+**Runtime, secret.** `GEMINI_API_KEY`, `ADMIN_DASHBOARD_TOKEN`,
+`FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY`, the Cloudflare TURN pair and
+the Twilio pair are read by the server per request. They live on the Cloud Run
+service, set once and left alone — `cloudbuild.yaml` uses `--update-env-vars`,
+which merges, so a deploy does not disturb them.
+
+No `.env` file of any kind reaches the image: `.dockerignore` excludes `.env`
+and `.env.*` deliberately. `.env.production` used to be copied in, which baked a
+live `GEMINI_API_KEY` into every layer — anyone who could pull the image had the
+key, and deleting the file later would not remove it from earlier layers. So
+`.env.production` is a local file for local production builds. To deploy from
+the values in it, point the script at it (`-EnvFile .env.production`); its
+secrets still have to be set on the service separately:
+
+```bash
+gcloud run services update voice-party-roadmap-game --region us-central1 \
+  --update-env-vars GEMINI_API_KEY=...
+```
+
+`FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` are optional on Cloud Run.
+With no private key set, `src/lib/firebase/server.ts` initialises the Admin SDK
+against Application Default Credentials, which on Cloud Run is the service's own
+account — it needs `roles/datastore.user`. That is usually the better choice: no
+PEM key in an environment variable, and nothing to rotate by hand.
+
+
 Firebase Admin needs a service account (`NEXT_PUBLIC_FIREBASE_PROJECT_ID`,
 `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` — see the credential handling
 in `src/lib/firebase/server.ts` for exact formatting pitfalls), plus the
@@ -121,14 +156,65 @@ Project → Settings → Environment Variables, then deploy.
 
 ### Cloud Run
 
-Still works if GCP is ever the target again — `Dockerfile` and
-`.gcloudignore` are kept up to date. The old `--min-instances=1
---max-instances=1` pin is no longer required since state lives in Firestore,
-not the container:
+```bash
+./scripts/deploy-cloudrun.sh --check   # validate, deploy nothing
+./scripts/deploy-cloudrun.sh           # deploy
+```
+
+On Windows, in PowerShell:
+
+```powershell
+.\scripts\deploy-cloudrun.ps1 -Check   # validate, deploy nothing
+.\scripts\deploy-cloudrun.ps1          # deploy
+```
+
+That reads the seven Firebase values from `.env.local`, refuses to run if any
+are missing, shows the branch, commit, project and account, and asks before
+deploying. It is the same command as below with the substitutions filled in
+from the file rather than by hand.
+
+The underlying invocation, if you would rather run it yourself — deploy through
+`cloudbuild.yaml`, not `gcloud run deploy --source .`:
 
 ```bash
-gcloud run deploy voice-party-roadmap-game --source . --region us-central1 --allow-unauthenticated
+gcloud builds submit --config cloudbuild.yaml \
+  --substitutions=_GIT_SHA=$(git rev-parse --short HEAD),\
+_FIREBASE_API_KEY=...,\
+_FIREBASE_AUTH_DOMAIN=...,\
+_FIREBASE_PROJECT_ID=...,\
+_FIREBASE_STORAGE_BUCKET=...,\
+_FIREBASE_MESSAGING_SENDER_ID=...,\
+_FIREBASE_APP_ID=...,\
+_FIREBASE_MEASUREMENT_ID=...
 ```
+
+Two things about that, both of which produce a deploy that looks fine and is
+not.
+
+`--source .` cannot pass `--build-arg`, and this image needs seven of them.
+Next.js inlines `NEXT_PUBLIC_*` into the client bundle **at build time**, so
+they cannot be supplied later as runtime env vars. A `--source .` build
+produces a bundle with an empty Firebase config: the app serves, renders, and
+never reaches Firestore.
+
+`--min-instances=1 --max-instances=1` in `cloudbuild.yaml` is **required**, and
+an earlier version of this file was wrong to say otherwise. Room state does
+live in Firestore — but WebRTC signalling mailboxes do not. They are `Map`s
+held on `globalThis` in `src/lib/server/roomServer.ts`, because signalling is
+far too chatty for a database round trip, and `/api/room/[roomId]/signal`
+reads and writes them directly. On a second instance a player gets a different
+process with its own empty set of mailboxes, so two players who land on
+different containers never exchange offers, answers or ICE candidates. Room
+state syncs, the lobby looks healthy, and **voice silently never connects** —
+the worst way for it to fail, and the hardest to attribute to a deploy flag.
+
+Lifting the pin means moving the mailboxes into Redis first. That work exists
+on the `teams-and-mobile-declutter` branch ("Move WebRTC signalling into Redis
+so the app can run on more than one instance") and is not merged.
+
+`GEMINI_API_KEY`, `ADMIN_DASHBOARD_TOKEN` and the Cloudflare TURN credentials
+are real secrets and stay runtime env vars on the service — never build args,
+which would bake them into an image layer.
 
 ## Voice chat and TURN
 

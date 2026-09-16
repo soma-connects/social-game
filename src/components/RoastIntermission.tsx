@@ -298,9 +298,23 @@ export default function RoastIntermission({
 
         {/* Bombing the task costs a life, so say so here rather than leaving it
             to a heart quietly going dark in the sidebar. */}
+        {turnResult?.micFaultForgiven && (
+          <div className="rounded-2xl border border-partyCyan/40 bg-partyCyan/10 p-4 text-left">
+            <p className="flex items-center gap-2 text-sm font-black text-partyCyan">
+              <Mic className="w-4 h-4 shrink-0" /> MIC DIDN&apos;T OPEN — NO LIFE LOST
+            </p>
+            <p className="text-[11px] text-partyCyan/70 mt-0.5">
+              {isPerformer
+                ? 'Allow the microphone from the padlock in the address bar, then the next round counts normally.'
+                : `${activePlayer.name} never got a turn — the round was not counted against them.`}
+            </p>
+          </div>
+        )}
+
         {(room.roomType ?? 'board_game') !== 'team_battle' &&
           turnResult !== null &&
           turnResult !== undefined &&
+          !turnResult.micFaultForgiven &&
           turnResult.performance <= MINIGAME_FAIL_THRESHOLD && (
             <div className="rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-left">
               <p className="text-sm font-black text-red-300">

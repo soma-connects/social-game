@@ -5,6 +5,7 @@ import {
   BOARD_MINI_GAMES,
   FINISH_NODE,
   MAX_REACTION_BONUS,
+  MIC_FAULT_GRACE,
   MINIGAME_HISTORY_WINDOW,
   MINIGAME_ICONS,
   MINIGAME_LABELS,
@@ -12,6 +13,7 @@ import {
   STARTING_LIVES,
   alternateByTeam,
   boardProgress,
+  forgiveMicFault,
   loseLife,
   performanceToSteps,
   pickMiniGame,
@@ -105,7 +107,7 @@ describe('scoring', () => {
 
 describe('lives', () => {
   it('reads a missing bar as full, so old rooms need no migration', () => {
-    const p = player();
+    const p = player({});
     expect(loseLife(p)).toEqual({ livesLeft: STARTING_LIVES - 1, empty: false });
   });
 
@@ -269,5 +271,51 @@ describe('board movement', () => {
     const outcome = resolveTile(FINISH_NODE);
     expect(outcome.isFinish).toBe(true);
     expect(outcome.position).toBe(FINISH_NODE);
+  });
+});
+
+/**
+ * A voice round that banks nothing costs a life. These decide when that is
+ * fair: a player who was never able to attempt anything because the microphone
+ * did not open should not be charged like one who tried and bombed — but the
+ * claim arrives from the client and nothing can verify it, so it runs out.
+ */
+describe('forgiveMicFault', () => {
+  it('forgives the first faults of a match', () => {
+    const p = player({});
+    expect(forgiveMicFault(p)).toBe(true);
+    expect(forgiveMicFault(p)).toBe(true);
+  });
+
+  it('stops forgiving once the grace is spent', () => {
+    const p = player({});
+    for (let i = 0; i < MIC_FAULT_GRACE; i++) expect(forgiveMicFault(p)).toBe(true);
+    // Everything after this costs a life like any other bombed round, so a
+    // client that simply always claims a fault cannot sit out the voice games.
+    expect(forgiveMicFault(p)).toBe(false);
+    expect(forgiveMicFault(p)).toBe(false);
+  });
+
+  it('counts each forgiveness exactly once', () => {
+    const p = player({});
+    forgiveMicFault(p);
+    expect(p.micFaults).toBe(1);
+    forgiveMicFault(p);
+    expect(p.micFaults).toBe(2);
+  });
+
+  it('does not spend grace on a refusal', () => {
+    // Otherwise the counter climbs forever and a long match carries a
+    // meaningless number that any future rule reading it would misread.
+    const p = player({ micFaults: MIC_FAULT_GRACE });
+    forgiveMicFault(p);
+    forgiveMicFault(p);
+    expect(p.micFaults).toBe(MIC_FAULT_GRACE);
+  });
+
+  it('treats a player who has never had a fault the same as zero', () => {
+    const fresh = player({});
+    const zeroed = player({ micFaults: 0 });
+    expect(forgiveMicFault(fresh)).toBe(forgiveMicFault(zeroed));
   });
 });

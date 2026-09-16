@@ -67,8 +67,6 @@ GROUPS = [
      lambda: [t for t in union_members("src/lib/types.ts", "TileNodeType") if t != "empty"]),
     ("public/themes/icons", "themeArt",
      lambda: union_members("src/lib/types.ts", "MapTheme")),
-    ("public/tiles/journey", "journeyArt",
-     lambda: object_keys("src/lib/boardGraph.ts", "TILE_TYPE_ICONS")),
     ("public/events", "eventArt",
      lambda: object_keys("src/components/TileEventOverlay.tsx", "LOOKS")),
     ("public/dares", "dareArt",
@@ -79,6 +77,12 @@ GROUPS = [
 
 # No single array to check against — these are named from the prompt.
 LOOSE = [
+    # journey art was generated from TILE_TYPE_ICONS in lib/boardGraph.ts, which
+    # has since been deleted as never-imported dead code. Only `finish` is drawn
+    # -- TileNode asks for it by name -- so there is no id list to check the rest
+    # against any more. Kept as a loose group so the per-id report still names
+    # the files nothing reaches, rather than dropping them out of sight.
+    ("public/tiles/journey", "journeyArt", 10),
     ("public/modes", "modeArt", 7),
     ("public/badges", "badgeArt", 6),
     ("public/social", "socialArt", 15),

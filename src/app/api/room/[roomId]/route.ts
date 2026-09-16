@@ -79,7 +79,6 @@ import {
   writeSecrets,
   type RoomSecrets,
 } from '@/lib/server/roomServer';
-import { isPlayableTheme } from '@/lib/themeConfig';
 import { acceptedAnswers, pickTriviaQuestion, rememberTrivia } from '@/lib/triviaBank';
 import { generateTriviaFromAi } from '@/lib/server/aiHost';
 import {

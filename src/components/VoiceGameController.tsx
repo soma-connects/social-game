@@ -75,6 +75,21 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     setMicVolume(0);
   }, []);
 
+  /**
+   * Whether what was heard counts as the answer.
+   *
+   * The engine matches one target, and a maths answer has several spoken forms
+   * — "49" and "forty nine" are the same answer, and which one comes back
+   * depends on the phone. Grading on the numeral alone marked correct answers
+   * wrong and took a life for it.
+   */
+  const heardTheAnswer = useCallback(
+    (res: SpeechMatchResult, item: ChallengeWord): boolean =>
+      res.isMatch ||
+      (item.accept ?? []).some((form) => speechEngine.evaluateMatch(res.transcript, form).isMatch),
+    []
+  );
+
   const pickNextChallenge = useCallback(() => {
     const trap = room.trapWords.find((t) => !t.used);
     if (trap) {
@@ -192,7 +207,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
       language: challenge.language,
       onResult: (res: SpeechMatchResult) => {
         setTranscript(res.transcript);
-        if (res.isMatch) finishRound('matched', res.confidence);
+        if (heardTheAnswer(res, challenge)) finishRound('matched', res.confidence);
       },
       onError: (err) => {
         startFailed = true;
@@ -247,7 +262,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
       language: challenge.language,
       onResult: (res: SpeechMatchResult) => {
         setTranscript(res.transcript);
-        if (res.isMatch) finishRound('matched', res.confidence);
+        if (heardTheAnswer(res, challenge)) finishRound('matched', res.confidence);
       },
       onError: (err) => {
         setError(err);

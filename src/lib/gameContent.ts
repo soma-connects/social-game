@@ -216,6 +216,35 @@ export const LANGUAGE_DECKS: Record<string, ChallengeWord[]> = {
   ],
 };
 
+const ONES = [
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+  'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+  'seventeen', 'eighteen', 'nineteen',
+];
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+
+/**
+ * How a number gets said out loud.
+ *
+ * Speech recognisers are inconsistent about this — the same answer comes back
+ * as "49" from one phone and "forty nine" from another — so a maths round has
+ * to accept both or it marks correct answers wrong.
+ */
+export function spokenNumberForms(n: number): string[] {
+  if (n < 0 || n > 999 || !Number.isInteger(n)) return [];
+
+  const under100 = (v: number): string =>
+    v < 20 ? ONES[v] : `${TENS[Math.floor(v / 10)]}${v % 10 ? ' ' + ONES[v % 10] : ''}`;
+
+  if (n < 100) return [under100(n)];
+
+  const hundreds = `${ONES[Math.floor(n / 100)]} hundred`;
+  const rest = n % 100;
+  if (rest === 0) return [hundreds];
+  // Both, because British and American speakers differ on the "and".
+  return [`${hundreds} and ${under100(rest)}`, `${hundreds} ${under100(rest)}`];
+}
+
 /**
  * A mental-arithmetic challenge for the Voice Arena.
  *
@@ -247,6 +276,7 @@ export function getRandomMathProblem(): ChallengeWord {
     id: `math_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     word: expr,
     answer: String(ans),
+    accept: spokenNumberForms(ans),
     phonetic: 'Say the answer out loud',
     language: 'math',
     type: 'math',

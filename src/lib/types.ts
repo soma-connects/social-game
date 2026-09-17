@@ -93,6 +93,15 @@ export type ChallengeWord = {
    * answer prints the answer on screen, which is the state maths was left in.
    */
   answer?: string;
+  /**
+   * Other spoken forms that count, beyond `answer`.
+   *
+   * A recogniser hands back "49" from one phone and "forty nine" from the next,
+   * and a maths round graded on the numeral alone marks the second one wrong —
+   * costing a life for a correct answer. The trivia bank carries the same list
+   * for the same reason.
+   */
+  accept?: string[];
   phonetic?: string;
   translation?: string;
   language: LanguageCode | 'math' | 'trap';

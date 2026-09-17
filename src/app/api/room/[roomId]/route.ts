@@ -1200,9 +1200,27 @@ async function expireStalledAiMaster(room: RoomState, now: number): Promise<void
   const state = room.aiMasterState;
   if (!state || !aiMasterHasStalled(room, now)) return;
 
+  // Spent before anything else runs, the way expireStalledPhase does it.
+  //
+  // Without this, a branch that fails to change the phase leaves the beat key
+  // unchanged with a deadline still in the past — so this fires again on the
+  // very next heartbeat, and the one after that, forever: a duplicate event and
+  // a full room write every time, and a round that never moves. Which is the
+  // deadlock the clock was added to remove.
+  //
+  // It really is reachable: resolveAiMasterRound returns early at `if (!target)
+  // return` when the target has been kicked or has left mid-vote, and
+  // startAiMasterRound does the same when nobody is left. Clearing here means
+  // the worst case is one wasted beat before syncAiMasterDeadline re-arms.
+  state.deadline = null;
+  state.deadlineFor = null;
+
   const target = room.players.find((p) => p.id === state.targetId);
 
-  if (state.phase === 'announcing') {
+  // 'responding' is declared on the phase union and nothing ever sets it, but
+  // aiMasterWaitMs hands it a deadline all the same. Answering to both means a
+  // beat that somehow lands there is carried rather than left to spin.
+  if (state.phase === 'announcing' || state.phase === 'responding') {
     // Silence is an answer the room is entitled to judge, so this hands them
     // the vote rather than deciding it. Failing them outright here would take a
     // life for a dropped connection.
@@ -2763,14 +2781,23 @@ async function applyAction(
               { status: 409 }
             );
           }
-          await writeSecrets(roomId, secrets);
-
           // The room is told a mine exists but never where. Half the value of
           // the item is everyone walking the next few spaces nervously.
           pushEvent(room, `💥 ${active.name} buried something up the road…`, 'debuff');
+
+          // Secrets are committed only once the room write has landed, the same
+          // way resolveMineLanding does it, and for the same reason: this action
+          // can lose its write race and be replayed against fresh state. Burying
+          // the mine first meant the replay found it already there, returned
+          // "no clear ground", handed the item back — and left a live mine on
+          // the board that nobody had paid for and the planter did not know was
+          // there.
+          const planted = await writeRoom(room);
+          await writeSecrets(roomId, secrets);
+
           // The planter alone gets the space, in the response rather than in
           // room state — the room document is readable by every browser in it.
-          return NextResponse.json({ room: await writeRoom(room), minePlantedAt: mine.nodeId });
+          return NextResponse.json({ room: planted, minePlantedAt: mine.nodeId });
         }
       }
 

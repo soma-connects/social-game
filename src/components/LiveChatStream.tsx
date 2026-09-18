@@ -51,6 +51,22 @@ export default function LiveChatStream({ room, myPlayer }: LiveChatStreamProps) 
    * unrelated write would relaunch the whole feed.
    */
   const launched = useRef<Set<string>>(new Set());
+  /**
+   * Whether this viewer wants things flying across their screen.
+   *
+   * Read once on mount rather than at module scope, because the server has no
+   * matchMedia and rendering differently on the server than on the client is a
+   * hydration mismatch.
+   */
+  const [reducedMotion, setReducedMotion] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => setReducedMotion(query.matches);
+    sync();
+    query.addEventListener('change', sync);
+    return () => query.removeEventListener('change', sync);
+  }, []);
+
   /** True until the first snapshot has been seen, so joining is not a fireworks display. */
   const cold = useRef(true);
 
@@ -64,6 +80,10 @@ export default function LiveChatStream({ room, myPlayer }: LiveChatStreamProps) 
       // On the first render everything in the log is history, not news.
       if (cold.current) continue;
       if (message.kind !== 'emoji') continue;
+      // Put away, or unwanted: the message is still recorded and still scores,
+      // it simply does not fly. Marking it launched above means it will not
+      // ambush the viewer the moment they open the stream again either.
+      if (!open || reducedMotion) continue;
       // A message that has been sitting in the log is not worth animating —
       // this catches a reconnect, where the whole backlog arrives at once.
       if (now - message.at > EMOJI_FLIGHT_MS) continue;
@@ -80,12 +100,26 @@ export default function LiveChatStream({ room, myPlayer }: LiveChatStreamProps) 
     if (fresh.length === 0) return;
 
     setFlyers((current) => [...current, ...fresh]);
-    const timer = setTimeout(() => {
-      const ids = new Set(fresh.map((f) => f.message.id));
-      setFlyers((current) => current.filter((f) => !ids.has(f.message.id)));
-    }, EMOJI_FLIGHT_MS);
-    return () => clearTimeout(timer);
-  }, [log]);
+  }, [log, open, reducedMotion]);
+
+  /**
+   * Clears flyers once they have landed.
+   *
+   * Deliberately its own interval rather than a timeout per batch inside the
+   * effect above. That effect re-runs on every change to the room document —
+   * which is every heartbeat — and a timeout returned as its cleanup is
+   * cancelled by the next run, so batches were never removed and the flyers
+   * piled up for the life of the session, still on screen long after they had
+   * finished animating and still there after the stream was put away.
+   */
+  useEffect(() => {
+    if (flyers.length === 0) return;
+    const sweep = setInterval(() => {
+      const cutoff = Date.now() - EMOJI_FLIGHT_MS;
+      setFlyers((current) => current.filter((f) => f.message.at > cutoff));
+    }, 600);
+    return () => clearInterval(sweep);
+  }, [flyers.length]);
 
   /**
    * Keeps the id set from growing for the life of the room.
@@ -175,9 +209,9 @@ export default function LiveChatStream({ room, myPlayer }: LiveChatStreamProps) 
             </div>
           )}
 
-          {open && (
-            <div className="pointer-events-auto flex items-center gap-1.5">
-              {composing ? (
+          <div className="pointer-events-auto flex items-center gap-1.5">
+            {open ? (
+              composing ? (
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -227,22 +261,24 @@ export default function LiveChatStream({ room, myPlayer }: LiveChatStreamProps) 
                     <MessageCircle className="w-4 h-4" />
                   </button>
                 </>
-              )}
-            </div>
-          )}
+              )
+            ) : (
+              <div className="flex-1" />
+            )}
 
-          {/* A way out. The stream sits over the game, and somebody reading a
-              board or a chess position needs to be able to put it away. */}
-          <div className="pointer-events-auto flex justify-end">
+            {/* A way out, on the same row rather than its own.
+                The stream sits over the game, and somebody reading a board or a
+                chess position needs to be able to put it away — including the
+                emoji, which is the part that covers things. */}
             <button
               onClick={() => {
                 setOpen((v) => !v);
                 setComposing(false);
               }}
               aria-label={open ? 'Hide the live chat' : 'Show the live chat'}
-              className="rounded-full bg-black/50 backdrop-blur-sm border border-white/10 px-2.5 py-1 text-[10px] font-black text-white/70 active:scale-95 transition"
+              className="shrink-0 rounded-full bg-black/50 backdrop-blur-sm border border-white/10 w-9 h-9 flex items-center justify-center text-sm text-white/70 active:scale-90 transition hover:border-partyCyan/60"
             >
-              {open ? <X className="w-3 h-3" /> : '💬'}
+              {open ? <X className="w-4 h-4" /> : '💬'}
             </button>
           </div>
         </div>

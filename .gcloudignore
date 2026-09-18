@@ -16,6 +16,8 @@ PROJECT_GOALS.md
 # Firebase deploy cache — hundreds of MB, rebuilt on every deploy.
 .firebase/
 .firebase/**
+.claude/
+.claude/**
 
 # Env files. The build gets the public Firebase config through --build-arg and
 # the Gemini key at runtime, so no env file ever needs to leave this machine.

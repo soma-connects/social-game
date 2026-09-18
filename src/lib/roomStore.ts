@@ -521,8 +521,12 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'chess_resign', playerId });
   }
 
-  public startLudoMatch(roomId: string) {
-    return this.post(roomId, { action: 'ludo_start_match' });
+  /**
+   * @param humanSeats how many of the four seats are held for people. The rest
+   *   are bots. Omitted means "as many as there are players in the room".
+   */
+  public startLudoMatch(roomId: string, humanSeats?: number) {
+    return this.post(roomId, { action: 'ludo_start_match', humanSeats });
   }
 
   public rollLudoDice(roomId: string) {

@@ -8,9 +8,7 @@ import {
   Globe,
   LockKeyhole,
   MessageCircle,
-  Play,
   CheckCircle2,
-  Sparkles,
   Shirt,
   Users,
   X,
@@ -23,10 +21,11 @@ import { motion } from 'framer-motion';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
 import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState } from '@/lib/types';
-import { MAX_PLAYERS, MINI_GAMES, TEAMS } from '@/lib/gameRules';
-import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
-import { badgeArt, modeArt, vibeArt } from '@/lib/gameIcons';
+import { MAX_PLAYERS, TEAMS } from '@/lib/gameRules';
+import { DEFAULT_ROOM_VIBE, RoomVibeId } from '@/lib/roomVibes';
+import { badgeArt, modeArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
+import ModeSetupModal, { GameModeId, ModeLaunchOptions } from './ModeSetupModal';
 
 import { audioSFX } from '@/lib/audioFeedback';
 import AvatarIllustration from './AvatarIllustration';
@@ -36,7 +35,7 @@ interface RoomLobbyProps {
   room: RoomState;
   myPlayer: Player;
   onStartGame: () => void;
-  onSelectMode?: (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo') => void;
+  onSelectMode?: (mode: GameModeId, options?: ModeLaunchOptions) => void;
 }
 
 const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
@@ -53,8 +52,9 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   const [newPlayerName, setNewPlayerName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
-  const [activeMode, setActiveMode] = useState<'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo'>('board');
-  const [showCustomDecks, setShowCustomDecks] = useState(false);
+  const [activeMode, setActiveMode] = useState<GameModeId>('board');
+  /** The mode whose setup sheet is open. Null means the hub is showing. */
+  const [setupMode, setSetupMode] = useState<GameModeId | null>(null);
   const [isShuffling, setIsShuffling] = useState(false);
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
@@ -84,6 +84,13 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
     const nextIndex = (currentAvatarIndex + direction + AVATARS.length) % AVATARS.length;
     selectAvatar(AVATARS[nextIndex].id);
   };
+
+  /**
+   * Opens the setup sheet for a mode. Everything that shapes a match now lives
+   * behind the mode you picked, instead of one shared drawer at the foot of the
+   * lobby that only ever described the board game.
+   */
+  const openSetup = (mode: GameModeId) => setSetupMode(mode);
 
   const selectVibe = (id: RoomVibeId) => {
     if (!myPlayer.isHost || id === roomVibe) return;
@@ -511,6 +518,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <button
                 onClick={() => {
                   setActiveMode('board');
+                  openSetup('board');
                   audioSFX.playChoiSuccess();
                 }}
                 className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3 ${
@@ -541,6 +549,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <button
                 onClick={() => {
                   setActiveMode('karaoke');
+                  openSetup('karaoke');
                   audioSFX.playChoiSuccess();
                 }}
                 className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
@@ -571,6 +580,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <button
                 onClick={() => {
                   setActiveMode('hangout');
+                  openSetup('hangout');
                   audioSFX.playChoiSuccess();
                 }}
                 className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
@@ -601,6 +611,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <button
                 onClick={() => {
                   setActiveMode('ai_master');
+                  openSetup('ai_master');
                   audioSFX.playChoiSuccess();
                 }}
                 className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
@@ -627,60 +638,11 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 </div>
               </button>
 
-              {/* The vibe only means anything to the AI Master, so it belongs
-                  behind that mode rather than sitting over the whole lobby. */}
-              {activeMode === 'ai_master' && (
-                <div className="rounded-2xl border border-partyYellow/30 bg-partyYellow/[0.06] p-3.5 space-y-3 animate-fadeIn">
-                  <div>
-                    <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-partyYellow" /> WHO IS IN THIS ROOM?
-                    </h4>
-                    <p className="text-[11px] text-gray-400 mt-0.5">
-                      {myPlayer.isHost
-                        ? 'The AI Master reads this to pick its tone and its games.'
-                        : `${ROOM_VIBES[roomVibe].emoji} ${ROOM_VIBES[roomVibe].label} — set by the host.`}
-                    </p>
-                  </div>
-
-                  {myPlayer.isHost && (
-                    <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
-                      {Object.values(ROOM_VIBES).map((vibe) => {
-                        const isSelected = vibe.id === roomVibe;
-                        return (
-                          <button
-                            key={vibe.id}
-                            type="button"
-                            onClick={() => selectVibe(vibe.id)}
-                            className={`p-2.5 rounded-xl border text-left transition-all relative active:scale-95 ${
-                              isSelected
-                                ? 'bg-partyPink/20 border-partyPink text-white shadow-lg'
-                                : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/30'
-                            }`}
-                          >
-                            {vibe.comingSoon && (
-                              <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-0.5 bg-black/50 text-partyYellow text-[8px] font-black px-1.5 py-0.5 rounded-full border border-partyYellow/30">
-                                <LockKeyhole className="w-2 h-2" /> SOON
-                              </span>
-                            )}
-                            <GameIcon src={vibeArt(vibe.id)} emoji={vibe.emoji} className="w-7 h-7 text-lg mx-auto" />
-                            <span className="font-extrabold text-xs block mt-0.5">{vibe.label}</span>
-                            <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{vibe.blurb}</span>
-                            {isSelected && (
-                              <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-partyPink/30 px-2 py-0.5 text-[9px] font-black text-partyPink">
-                                <CheckCircle2 className="w-2.5 h-2.5" /> SELECTED
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
               {/* 5. Team Battle */}
               <button
                 onClick={() => {
                   setActiveMode('team_battle');
+                  openSetup('team_battle');
                   audioSFX.playChoiSuccess();
                 }}
                 className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
@@ -711,6 +673,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <button
                 onClick={() => {
                   setActiveMode('chess');
+                  openSetup('chess');
                   audioSFX.playChoiSuccess();
                 }}
                 className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
@@ -741,6 +704,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <button
                 onClick={() => {
                   setActiveMode('ludo');
+                  openSetup('ludo');
                   audioSFX.playChoiSuccess();
                 }}
                 className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
@@ -769,107 +733,40 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
             </div>
           </div>
 
-          {/* Toggle Button for Custom Deck Settings (HIDDEN BY DEFAULT) */}
-          <div className="pt-2 flex flex-col gap-3 border-t border-white/10">
-            {/* Team Battle takes two presses on purpose: the first switches the
-                room into team mode so the crew roster appears above and people
-                can arrange sides, the second actually starts the series. */}
+          {/* One way in. The mode tiles above each open their own setup sheet,
+              and this repeats it for whatever is currently selected so the
+              primary action is never more than one press away. */}
+          <div className="pt-2 border-t border-white/10">
             <button
-              onClick={() => (onSelectMode ? onSelectMode(activeMode) : onStartGame())}
+              onClick={() => openSetup(activeMode)}
               className="w-full bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-sm sm:text-base py-3 sm:py-3.5 px-6 sm:px-8 rounded-2xl flex items-center justify-center gap-2 sm:gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-yellow"
             >
-              <Play className="w-5 h-5 fill-current" />
-              <span>
-                {activeMode === 'team_battle' && room.roomType !== 'team_battle'
-                  ? 'SET UP THE CREWS'
-                  : 'LAUNCH MATCH NOW'}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setShowCustomDecks(!showCustomDecks)}
-              className="glass-pill hover:bg-white/15 text-partyCyan font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 border border-partyCyan/30 transition-all w-full justify-center"
-            >
-              <Settings className="w-4 h-4 text-partyYellow" />
-              <span>{showCustomDecks ? 'HIDE DECK SETTINGS ▲' : 'CUSTOMIZE GAME DECKS & TEAMS ▼'}</span>
+              <Settings className="w-5 h-5" />
+              <span>SET UP &amp; LAUNCH</span>
             </button>
           </div>
-
-          {/* HIDDEN UNTIL USER OPENS DECK SETTINGS */}
-          {/* pb-8 so the last row clears the fixed mobile action bar. Without it
-              the bottom game in the deck list sat underneath the bar and could
-              not be tapped. */}
-          {showCustomDecks && (
-            <div className="space-y-6 pt-4 pb-8 border-t border-white/10 animate-fadeIn">
-              {/* Language Decks */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
-                    <Globe className="w-4 h-4 text-partyCyan" />
-                    SPEED LANGUAGE DECKS
-                  </h4>
-                  <span className="text-[10px] text-partyPink font-bold">MULTIPLE SELECT</span>
-                </div>
-                <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
-                  {LANGUAGES.map((lang) => {
-                    const isSelected = selectedLangs.includes(lang.id);
-                    return (
-                      <button
-                        key={lang.id}
-                        onClick={() => toggleLang(lang.id)}
-                        className={`p-3 rounded-2xl border text-left transition-all flex items-center justify-between ${
-                          isSelected
-                            ? 'bg-partyCyan/20 border-partyCyan text-white shadow-lg glow-cyan'
-                            : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">{lang.flag}</span>
-                          <span className="font-extrabold text-sm">{lang.name}</span>
-                        </div>
-                        {isSelected && <span className="w-2.5 h-2.5 rounded-full bg-partyCyan animate-pulse" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Mini-Games List */}
-              <div className="space-y-3 pt-2 border-t border-white/10">
-                <div>
-                  <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
-                    <Gamepad2 className="w-4 h-4 text-partyYellow" /> QUALIFYING MINI-GAMES
-                  </h4>
-                  <p className="text-xs text-gray-400">
-                    Pick mini-games to include in random turn rotation.
-                  </p>
-                </div>
-
-                <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
-                  {MINI_GAMES.map((game) => {
-                    const isSelected = selectedGames.includes(game.id);
-                    return (
-                      <button
-                        key={game.id}
-                        onClick={() => toggleMiniGame(game.id)}
-                        className={`p-3.5 rounded-2xl border text-left transition-all ${
-                          isSelected
-                            ? 'bg-partyCyan/20 border-partyYellow text-white shadow-lg glow-cyan'
-                            : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
-                        }`}
-                      >
-                        <span className="text-xl block">{game.icon}</span>
-                        <span className="font-extrabold text-sm block">{game.label}</span>
-                        <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{game.blurb}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
+
+      {setupMode && (
+        <ModeSetupModal
+          mode={setupMode}
+          room={room}
+          isHost={myPlayer.isHost}
+          selectedLangs={selectedLangs}
+          onToggleLang={toggleLang}
+          selectedGames={selectedGames}
+          onToggleMiniGame={toggleMiniGame}
+          roomVibe={roomVibe}
+          onSelectVibe={selectVibe}
+          onClose={() => setSetupMode(null)}
+          onLaunch={(options) => {
+            setSetupMode(null);
+            if (onSelectMode) onSelectMode(setupMode, options);
+            else onStartGame();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -238,6 +238,35 @@ export const MINE_PLANT_DISTANCE = 4;
 /** How far a mine blast throws you back, on top of the life it takes. */
 export const MINE_SETBACK = 3;
 
+// ─── Which chrome belongs around a phase ──────────────────────────
+//
+// Chess and Ludo are self-contained boards that replace the roadmap rather than
+// decorate it. They have no map to re-theme, no powerups to hold and no traps to
+// arm, so the roadmap's chrome around them offers controls that do nothing —
+// a theme picker that redresses a board you cannot see, and an empty inventory.
+
+/** The standalone boards, which bring their own rules and their own surface. */
+const STANDALONE_BOARDS: readonly GamePhase[] = ['chess_match', 'ludo_match'];
+
+export type PhaseChrome = {
+  /** Map themes only ever redress the roadmap board. */
+  themes: boolean;
+  /** Powerups, traps and the orb inventory only exist on the roadmap. */
+  inventory: boolean;
+};
+
+/**
+ * What the header, sidebars and mobile action bar should offer for a phase.
+ *
+ * The roster and the event feed are deliberately absent: those describe the
+ * room rather than the game, so they belong on every screen.
+ */
+export function getPhaseChrome(phase: GamePhase): PhaseChrome {
+  if (phase === 'lobby') return { themes: false, inventory: false };
+  const standalone = STANDALONE_BOARDS.includes(phase);
+  return { themes: !standalone, inventory: !standalone };
+}
+
 // ─── Lives ──────────────────────────────────────────────────────────────────
 //
 // Points are what you win on; lives are what you survive on. They deliberately

@@ -47,7 +47,8 @@ import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
-import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam, micIsLive, isStrangerRoom } from '@/lib/gameRules';
+import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam, micIsLive, isStrangerRoom, getPhaseChrome } from '@/lib/gameRules';
+import { GameModeId, ModeLaunchOptions } from '@/components/ModeSetupModal';
 import PowerupTargetPicker from '@/components/PowerupTargetPicker';
 import MiniGameBriefing, { useMiniGameBriefing } from '@/components/MiniGameBriefing';
 import { MINIGAME_BRIEFINGS } from '@/lib/miniGameBriefings';
@@ -317,23 +318,31 @@ export default function GameRoomPage() {
   const leaderPlayer = [...room.players].sort((a, b) => b.score - a.score)[0] || room.players[0];
   const currentTheme: MapTheme = room.theme || 'forest';
   const isMyTurn = activePlayer?.id === myPlayer.id;
+  /** Which of the roadmap's controls this phase actually has a use for. */
+  const chrome = getPhaseChrome(room.phase);
 
   const handleStartMatch = () => {
     audioSFX.playNollywoodBrass();
     roomStore.startMatch(roomId);
   };
 
-  const handleSelectMode = async (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo') => {
+  const handleSelectMode = async (mode: GameModeId, options?: ModeLaunchOptions) => {
     if (mode === 'board') {
       handleStartMatch();
     } else if (mode === 'chess') {
       audioSFX.playChoiSuccess();
+      // The host picks these in the setup sheet now. The fallback is the old
+      // guess-from-the-roster behaviour, for any caller that launches without one.
       const numPlayers = room.players.length;
-      const chessMode = numPlayers >= 4 ? '2v2' : numPlayers === 1 ? 'vs_ai' : '1v1';
-      await roomStore.startChessMatch(roomId, chessMode, 'blitz_5m', 'navigator');
+      const chess = options?.chess ?? {
+        mode: numPlayers >= 4 ? ('2v2' as const) : numPlayers === 1 ? ('vs_ai' as const) : ('1v1' as const),
+        timeControl: 'blitz_5m' as const,
+        botDifficulty: 'navigator' as const,
+      };
+      await roomStore.startChessMatch(roomId, chess.mode, chess.timeControl, chess.botDifficulty);
     } else if (mode === 'ludo') {
       audioSFX.playChoiSuccess();
-      await roomStore.startLudoMatch(roomId);
+      await roomStore.startLudoMatch(roomId, options?.ludo?.humanSeats);
     } else if (mode === 'team_battle') {
       // Two steps. Switching the room into team mode reveals the crew roster in
       // the lobby; starting immediately would skip past the one chance anybody
@@ -430,7 +439,7 @@ export default function GameRoomPage() {
         onLeaveGame={handleLeaveGame}
         onEndMatch={() => roomStore.endMatch(roomId)}
         canEndMatch={myPlayer.isHost && room.phase !== 'lobby'}
-        showThemeSelector={room.phase !== 'lobby'}
+        showThemeSelector={chrome.themes}
       />
 
       {status === 'error' && error && (
@@ -888,7 +897,7 @@ export default function GameRoomPage() {
           })()}
         </main>
 
-        {room.phase !== 'lobby' && (
+        {chrome.inventory && (
           <RightSidebar
             activePlayer={activePlayer}
             myPlayer={myPlayer}
@@ -919,7 +928,10 @@ export default function GameRoomPage() {
         {/* Replaces the old TRAPS shortcut. Traps are armed from the header and
             almost nobody used the button, while the inventory â€” which decides
             whether you can act on your turn â€” had no route at all on a phone:
-            RightSidebar is `hidden lg:block`, so below 1024px it never renders. */}
+            RightSidebar is `hidden lg:block`, so below 1024px it never renders.
+
+            Hidden on the standalone boards, which have no powerups to hold. */}
+        {chrome.inventory && (
         <button
           onClick={() => setShowMobileInventory(true)}
           className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyPink active:scale-95 transition-all relative"
@@ -930,6 +942,7 @@ export default function GameRoomPage() {
             <span className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-partyPink animate-pulse" />
           )}
         </button>
+        )}
       </div>
 
       {/* Mobile inventory. Same powerups and the same rules as the desktop

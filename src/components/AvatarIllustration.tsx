@@ -7,7 +7,7 @@ import { AVATARS } from '@/lib/gameContent';
 interface AvatarIllustrationProps {
   avatar: AvatarStyle;
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
-  /** 'face' is the square portrait crop; 'card' is the full 2:3 character poster */
+  /** 'face' is the square portrait crop; 'card' is the full character poster */
   variant?: 'face' | 'card';
   isSpeaking?: boolean;
   className?: string;

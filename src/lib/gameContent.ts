@@ -120,6 +120,21 @@ export const AVATARS: AvatarStyle[] = [
     unlockLevel: 4,
     unlockCost: 400,
   },
+  {
+    id: 'david',
+    name: 'David',
+    emoji: '🛡️',
+    headwear: 'Short Curls & Black Frame Glasses',
+    outfit: 'Blue Engineer Coverall & Hi-Vis Stripes',
+    color: '#2563EB',
+    badge: 'Guardian',
+    role: '🛡️ GUARDIAN',
+    faceUrl: '/avatars/david_face.jpg',
+    cardUrl: '/avatars/david.jpg',
+    expression: 'normal',
+    unlockLevel: 5,
+    unlockCost: 600,
+  },
 ];
 
 export const PRESET_TRAPS: PresetTrap[] = [

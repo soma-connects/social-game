@@ -3613,6 +3613,19 @@ async function applyAction(
       const timeControl = (body.timeControl as ChessTimeControl) || 'blitz_5m';
       const botDifficulty = (body.botDifficulty as BotDifficulty) || 'navigator';
 
+      // Each format seats a fixed number of people, filled from the roster in
+      // order, and only a seated player may move their side. One short leaves a
+      // side nobody can move — 2v2 with two players puts both on white — so the
+      // match would stall on black's first turn. The host now picks the format,
+      // so this is checked here rather than trusted from the setup sheet.
+      const seatsNeeded = mode === '2v2' ? 4 : mode === '1v1' ? 2 : 1;
+      if (room.players.length < seatsNeeded) {
+        return NextResponse.json(
+          { error: `${mode} needs ${seatsNeeded} players — this room has ${room.players.length}` },
+          { status: 409 }
+        );
+      }
+
       let baseTimeMs = 300_000;
       let incMs = 0;
       if (timeControl === 'bullet_1m') { baseTimeMs = 60_000; incMs = 0; }
@@ -3866,10 +3879,20 @@ async function applyAction(
       const colors: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
       const players: LudoPlayer[] = [];
 
+      // How many of the four seats are held for people. The host picks this in
+      // the setup sheet; clamped here because the client is not the authority,
+      // and never above the number of people actually in the room — an empty
+      // held seat would stall the turn order waiting on nobody.
+      const requestedSeats = Number(body.humanSeats);
+      const humanSeats = Math.max(
+        1,
+        Math.min(4, room.players.length, Number.isFinite(requestedSeats) ? requestedSeats : room.players.length)
+      );
+
       // Assign existing human players to colors, fill remainder with bots
       for (let i = 0; i < 4; i++) {
         const color = colors[i];
-        if (i < room.players.length) {
+        if (i < humanSeats) {
           const human = room.players[i];
           players.push({
             playerId: human.id,

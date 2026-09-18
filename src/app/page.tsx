@@ -116,7 +116,7 @@ export default function HomePage() {
         </div>
 
         {/* 2D Vector Caricatures Lineup */}
-        <div className="flex justify-center items-center gap-2 sm:gap-4 py-1">
+        <div className="flex flex-wrap justify-center items-center gap-2 sm:gap-4 py-1">
           {AVATARS.map((av) => (
             <div key={av.id} className="flex flex-col items-center">
               <AvatarIllustration avatar={av} size="md" />

@@ -24,7 +24,8 @@ $specs = @(
   @{ id = 'michael';  cx = 0.50; cy = 0.43; side = 0.76 },
   @{ id = 'chibuzor'; cx = 0.50; cy = 0.44; side = 0.80 },
   @{ id = 'friend1';  cx = 0.52; cy = 0.38; side = 0.64 },
-  @{ id = 'friend2';  cx = 0.53; cy = 0.40; side = 0.72 }
+  @{ id = 'friend2';  cx = 0.53; cy = 0.40; side = 0.72 },
+  @{ id = 'david';    cx = 0.55; cy = 0.36; side = 0.60 }
 )
 
 $size = 256

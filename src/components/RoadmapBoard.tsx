@@ -272,8 +272,12 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
         totalTiles={TOTAL_TILES}
       />
 
-      {/* STICKY FLOATING ACTION BUTTON (FAB) IN THE MIDDLE AT THE BOTTOM — MOBILE OPTIMIZED! */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-xs px-4 flex flex-col items-center gap-2">
+      {/* STICKY FLOATING ACTION BUTTON (FAB) IN THE MIDDLE AT THE BOTTOM — MOBILE OPTIMIZED!
+          Sits above the mobile action bar rather than on top of it. The bar is
+          `lg:hidden`, so only below lg does the FAB need lifting — at bottom-6 it
+          covered ROSTER / FEED / ITEMS, and most of the time it is showing the
+          greyed-out WAITING FOR TURN state, so the nav looked broken. */}
+      <div className="fixed bottom-24 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-xs px-4 flex flex-col items-center gap-2">
         {/* What the roll is already worth, before it is thrown.
             The dice reveals earned steps rather than a random number, so this
             is knowable in advance — and telling a trailing player the catch-up

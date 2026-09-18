@@ -79,10 +79,15 @@ signalling mailboxes are backed by Firestore (`src/lib/server/roomServer.ts`,
 via `adminDb` from `src/lib/firebase/server.ts`). `writeRoom` uses a
 transaction keyed on a `rev` counter, so two overlapping requests can't
 silently clobber each other — the loser gets a `RoomConflictError` and the
-route replays the action against fresh state. This is what makes the app safe
-to run across multiple stateless instances (Vercel serverless functions,
-or Cloud Run scaled past one container) — there's no in-memory single-instance
-requirement anymore.
+route replays the action against fresh state. That makes *room state* safe
+across multiple stateless instances — Vercel serverless functions, or Cloud
+Run scaled past one container.
+
+Voice is the exception, and it is not a small one. The signalling mailboxes
+are a per-instance `Map`, so two players served by different containers
+never exchange ICE candidates and never hear each other. See **Cloud Run**
+below: the single-instance pin is still required, and moving signalling into
+Firestore is what would lift it.
 
 Private per-room data (trivia answers, player auth tokens, hidden mines) lives
 in a `rooms/{id}/private` subcollection that `firestore.rules` denies browsers

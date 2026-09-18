@@ -67,7 +67,6 @@ import {
 } from '@/lib/server/roomServer';
 import { isPlayableTheme } from '@/lib/themeConfig';
 import { acceptedAnswers, pickTriviaQuestion, rememberTrivia } from '@/lib/triviaBank';
-import { generateTriviaFromAi } from '@/lib/server/aiHost';
 import {
   PERFORMER_PHASES,
   clearPhaseDeadline,
@@ -78,7 +77,8 @@ import { archiveMatch } from '@/lib/server/matchArchive';
 import { verifyUid } from '@/lib/firebase/server';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES } from '@/lib/roomVibes';
-import { askHost, coerceVibe, generateChallenge } from '@/lib/server/aiHost';
+import { coerceVibe, fallbackChallenge } from '@/lib/server/aiHost';
+import { takeChallenge, takeHostQuip, takeTrivia, warmHostPool, warmTriviaPool } from '@/lib/server/hostLinePool';
 import { AiMasterBribe, AiMasterCategory, AiMasterState } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -1294,7 +1294,13 @@ async function startAiMasterRound(room: RoomState): Promise<void> {
   if (!target) return;
 
   const category = pickCategory(room);
-  const { challenge, hostLine } = await generateChallenge(roomVibeOf(room), category, target.name);
+  // Pre-generated, so the round opens the moment the action lands. A cold
+  // bucket falls through to the curated pools, which is what a failed call
+  // already did — the round never waits on the network either way.
+  const { challenge, hostLine } = takeChallenge(roomVibeOf(room), category, target.name) ?? {
+    hostLine: `${target.name}, you are up. Let's see what you have got!`,
+    challenge: fallbackChallenge(category),
+  };
 
   draft.targetId = target.id;
   draft.category = category;
@@ -1342,7 +1348,7 @@ async function resolveAiMasterRound(room: RoomState): Promise<void> {
     updatePlayerLevel(target);
     pushEvent(room, `✅ ${target.name} survived the round ${passes}–${fails} (+${AI_MASTER_PASS_POINTS} pts)`, 'buff');
     state.hostLine =
-      (await askHost(roomVibeOf(room), `In one short sentence, congratulate ${target.name} for surviving their challenge ${passes} votes to ${fails}.`)) ??
+      takeHostQuip(roomVibeOf(room), 'praise', target.name) ??
       `${target.name} pulls it off! The room says yes.`;
     return;
   }
@@ -1352,7 +1358,7 @@ async function resolveAiMasterRound(room: RoomState): Promise<void> {
     target.eliminated = true;
     pushEvent(room, `☠️ ${target.name} is OUT — no lives left!`, 'debuff');
     state.hostLine =
-      (await askHost(roomVibeOf(room), `In one short sentence, dramatically announce that ${target.name} has run out of lives and is eliminated.`)) ??
+      takeHostQuip(roomVibeOf(room), 'eliminate', target.name) ??
       `That is the end of the road for ${target.name}. Out!`;
   } else {
     pushEvent(
@@ -1361,7 +1367,7 @@ async function resolveAiMasterRound(room: RoomState): Promise<void> {
       'debuff'
     );
     state.hostLine =
-      (await askHost(roomVibeOf(room), `In one short sentence, tease ${target.name} for failing their challenge. They have ${livesLeft} lives left.`)) ??
+      takeHostQuip(roomVibeOf(room), 'taunt', target.name) ??
       `Not good enough, ${target.name}. That costs you a life.`;
   }
 }
@@ -1559,6 +1565,16 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       body.requesterId = callerId;
       body.callerId = callerId;
     }
+
+    // Refilled here rather than inside the round, because here is the only
+    // place with time to spare: heartbeats land every few seconds and a round
+    // lasts minutes, so the lines are always written well before the moment
+    // that spends them. Returns immediately and no-ops on a full bucket, so
+    // the replays this loop does cost nothing.
+    if (room.roomType === 'ai_master' || action === 'ai_master_start') {
+      warmHostPool(coerceVibe(room.roomVibe));
+    }
+    if (room.phase !== 'lobby') warmTriviaPool(coerceVibe(room.roomVibe));
 
     try {
       const response = await applyAction(room, action, body);
@@ -2170,7 +2186,7 @@ async function applyAction(
      */
     case 'trivia_generate': {
       if (!room.triviaState) {
-        const fromAi = await generateTriviaFromAi(roomVibeOf(room));
+        const fromAi = takeTrivia(roomVibeOf(room));
 
         const banked = fromAi ? null : pickTriviaQuestion(room.recentTrivia);
         const question = fromAi?.question ?? banked!.question;
@@ -3059,12 +3075,12 @@ async function applyAction(
           }
         }
         record.hostLine =
-          (await askHost(roomVibeOf(room), `In one short sentence, corruptly accept ${player.name}'s bribe of ${amount} points. Be shameless about it.`)) ??
+          takeHostQuip(roomVibeOf(room), 'bribe_accept', player.name) ??
           `${player.name}, your generosity has been noted. Consider it handled.`;
         pushEvent(room, `🤝 The AI Master took ${player.name}'s ${cost} points…`, 'social');
       } else {
         record.hostLine =
-          (await askHost(roomVibeOf(room), `In one short sentence, publicly refuse ${player.name}'s bribe of ${amount} points and mock them for trying.`)) ??
+          takeHostQuip(roomVibeOf(room), 'bribe_refuse', player.name) ??
           `${player.name} tried to buy me off. Adorable. Keep playing.`;
         pushEvent(room, `🚫 ${player.name} tried to bribe the AI Master and lost ${cost} points`, 'social');
       }

@@ -45,12 +45,65 @@ export function coerceVibe(value: unknown): RoomVibeId {
  * limit or a bad response should cost the room a witty line, never the round.
  * Callers supply their own fallback.
  */
-export async function askHost(vibe: RoomVibeId, task: string): Promise<string | null> {
+/**
+ * How long a line is worth waiting for.
+ *
+ * Every one of these calls sits inside a room action, and the room document is
+ * not written until the action returns — so the whole table stares at an
+ * unchanged screen for as long as this takes. There was no timeout at all,
+ * which meant a slow or hanging Gemini stopped the game outright.
+ */
+export const HOST_LINE_TIMEOUT_MS = 1_500;
+/** The challenge *is* the round, so it is worth waiting a little longer for. */
+export const HOST_CHALLENGE_TIMEOUT_MS = 5_000;
+/** A JSON question is a longer generation, and the bank is right behind it. */
+export const HOST_TRIVIA_TIMEOUT_MS = 4_000;
+
+/**
+ * Stops every round paying the timeout when Gemini is simply unavailable.
+ *
+ * A bad key, an exhausted quota or an outage fails identically on every call,
+ * and without this each one costs another full timeout — so the mode gets
+ * slower exactly when it is already broken. After a few consecutive failures
+ * the calls are skipped outright and the fallbacks are used, and one call is
+ * let through periodically to notice when the service comes back.
+ */
+const BREAKER_TRIP_AFTER = 3;
+const BREAKER_COOLDOWN_MS = 60_000;
+let consecutiveFailures = 0;
+let breakerOpenedAt = 0;
+
+function breakerIsOpen(): boolean {
+  if (consecutiveFailures < BREAKER_TRIP_AFTER) return false;
+  if (Date.now() - breakerOpenedAt > BREAKER_COOLDOWN_MS) {
+    // Let one through to see whether it is back.
+    consecutiveFailures = BREAKER_TRIP_AFTER - 1;
+    return false;
+  }
+  return true;
+}
+
+function noteFailure(): void {
+  consecutiveFailures += 1;
+  if (consecutiveFailures === BREAKER_TRIP_AFTER) breakerOpenedAt = Date.now();
+}
+
+export async function askHost(
+  vibe: RoomVibeId,
+  task: string,
+  timeoutMs: number = HOST_LINE_TIMEOUT_MS
+): Promise<string | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
+  if (breakerIsOpen()) return null;
 
   resolveProvider(vibe);
   const persona = (ROOM_VIBES[vibe] ?? ROOM_VIBES[DEFAULT_ROOM_VIBE]).hostPersona;
+
+  // Abandoned rather than merely ignored: without an abort the fetch keeps the
+  // request alive after we have stopped caring about it.
+  const controller = new AbortController();
+  const bell = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(
@@ -61,30 +114,29 @@ export async function askHost(vibe: RoomVibeId, task: string): Promise<string | 
         body: JSON.stringify({
           contents: [{ parts: [{ text: `${HOST_SYSTEM_PROMPT}\n\nROOM VIBE: ${persona}\n\nTask: ${task}` }] }],
         }),
+        signal: controller.signal,
       }
     );
     if (!response.ok) throw new Error(`Gemini API HTTP ${response.status}`);
 
     const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    consecutiveFailures = 0;
     return typeof text === 'string' && text.length > 0 ? text : null;
   } catch (error) {
-    console.error('aiHost: generation failed', error);
+    noteFailure();
+    // A timeout is the expected case under load, not an incident.
+    if ((error as Error)?.name !== 'AbortError') {
+      console.error('aiHost: generation failed', error);
+    }
     return null;
+  } finally {
+    clearTimeout(bell);
   }
 }
 
-/** What each category actually asks the player to do, for the prompt and the fallback. */
-const CATEGORY_BRIEF: Record<AiMasterCategory, string> = {
-  truth: 'a personal question they have to answer honestly out loud',
-  dare: 'a short performance dare they can do on the spot with just their voice',
-  bluff: 'a prompt to tell one true story and one convincing lie about themselves',
-  trivia: 'a single general-knowledge question with a definite answer',
-  story: 'a one-line story opening they have to continue out loud',
-};
-
 /**
- * Maps a category onto the curated pools, for when Gemini is unavailable.
+ * Maps a category onto the curated pools, for when no generated line is ready.
  *
  * The pools are tagged with their own categories, which only partly overlap —
  * anything without a home falls back to the personality prompts, which suit
@@ -98,50 +150,17 @@ const FALLBACK_POOL: Record<AiMasterCategory, string> = {
   story: 'personality',
 };
 
-function fallbackChallenge(category: AiMasterCategory): string {
+/**
+ * A curated challenge, chosen without touching the network.
+ *
+ * The round is never held up for a generated one: hostLinePool writes those
+ * ahead of time, and this is what plays when its bucket is cold.
+ */
+export function fallbackChallenge(category: AiMasterCategory): string {
   const wanted = FALLBACK_POOL[category];
   const pool = AI_PROMPT_POOLS.filter((p) => p.category === wanted);
   const source = pool.length > 0 ? pool : AI_PROMPT_POOLS;
   return source[Math.floor(Math.random() * source.length)].text;
-}
-
-/**
- * Builds the round's task and the line the host says while setting it.
- *
- * Generated server-side on purpose: a client that writes its own challenge
- * writes itself an easy one, and the whole round is judged by the room on the
- * strength of what was asked.
- */
-export async function generateChallenge(
-  vibe: RoomVibeId,
-  category: AiMasterCategory,
-  playerName: string
-): Promise<{ challenge: string; hostLine: string }> {
-  const brief = CATEGORY_BRIEF[category];
-  const generated = await askHost(
-    vibe,
-    `Set a challenge for the player "${playerName}" in front of the whole room. Give them ${brief}. ` +
-      `Reply with EXACTLY two lines and no labels:\n` +
-      `Line 1: one short sentence you say to the room as you call ${playerName} out.\n` +
-      `Line 2: the challenge itself, addressed directly to ${playerName}.`
-  );
-
-  if (generated) {
-    const lines = generated
-      .split('\n')
-      .map((l) => l.replace(/^\s*(line\s*\d\s*[:.\-]?|[-*])\s*/i, '').trim())
-      .filter(Boolean);
-    if (lines.length >= 2) return { hostLine: lines[0], challenge: lines.slice(1).join(' ') };
-    // One usable line back: it is the challenge, and the call-out is canned.
-    if (lines.length === 1) {
-      return { hostLine: `${playerName}, you are up. Let's see it.`, challenge: lines[0] };
-    }
-  }
-
-  return {
-    hostLine: `${playerName}, you are up. Let's see what you have got!`,
-    challenge: fallbackChallenge(category),
-  };
 }
 
 
@@ -180,7 +199,8 @@ The answer is SPOKEN into a phone and graded by fuzzy text match, so:
 - nothing whose spelling a recogniser would have to guess at
 
 Reply exactly:
-{"question":"...","answer":"...","accept":["...","..."],"funFact":"..."}`
+{"question":"...","answer":"...","accept":["...","..."],"funFact":"..."}`,
+    HOST_TRIVIA_TIMEOUT_MS
   );
   if (!raw) return null;
 

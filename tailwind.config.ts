@@ -36,9 +36,6 @@ const config: Config = {
         'bounce-slow': 'bounce 2s infinite',
         'spin-slow': 'spin 12s linear infinite',
         'fadeIn': 'fadeIn 0.3s ease-out',
-        // Reaction emoji rising off the laugh meter. Needs a real keyframe:
-        // `animate-bounce` plus a static `bottom` just bounces in place.
-        'floatUp': 'floatUp 2s ease-out forwards',
       },
       keyframes: {
         shake: {
@@ -49,11 +46,6 @@ const config: Config = {
         fadeIn: {
           from: { opacity: '0', transform: 'translateY(6px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
-        },
-        floatUp: {
-          '0%':   { opacity: '0', transform: 'translateY(0) scale(0.6) rotate(-8deg)' },
-          '15%':  { opacity: '1', transform: 'translateY(-20px) scale(1.25) rotate(4deg)' },
-          '100%': { opacity: '0', transform: 'translateY(-190px) scale(0.9) rotate(-6deg)' },
         },
       }
     },

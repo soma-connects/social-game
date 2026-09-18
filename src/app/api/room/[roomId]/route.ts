@@ -79,7 +79,13 @@ import { aiGameMaster } from '@/lib/aiGameMaster';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES } from '@/lib/roomVibes';
 import { coerceVibe, fallbackChallenge } from '@/lib/server/aiHost';
 import { takeChallenge, takeHostQuip, takeTrivia, warmHostPool, warmTriviaPool } from '@/lib/server/hostLinePool';
-import { AiMasterBribe, AiMasterCategory, AiMasterState } from '@/lib/types';
+import { AiMasterBribe, AiMasterCategory, AiMasterState, RoomChatMessage } from '@/lib/types';
+import {
+  CHAT_EMOJI_KEPT,
+  CHAT_TEXT_KEPT,
+  MAX_COMMENT_CHARS,
+  findChatEmoji,
+} from '@/lib/chatEmoji';
 
 export const dynamic = 'force-dynamic';
 
@@ -102,17 +108,6 @@ function makePlayer(name: string, index: number, isHost: boolean): Player {
     isHost,
     isReady: true,
   };
-}
-
-const REACTION_LABELS: Record<SocialReactionId, string> = {
-  laugh: 'big laugh',
-  fire: 'fire',
-  almost: 'almost had it',
-  drama: 'drama mode',
-};
-
-function isSocialReaction(value: unknown): value is SocialReactionId {
-  return value === 'laugh' || value === 'fire' || value === 'almost' || value === 'drama';
 }
 
 function updatePlayerLevel(player: Player): void {
@@ -156,6 +151,28 @@ function pickSocialBadge(round: SocialRound | null, performance: number): string
   if (performance >= 0.4) return 'Almost There';
   if (count > 0) return 'Good Sport';
   return 'Voice Rookie';
+}
+
+/**
+ * How often one player may add to the stream.
+ *
+ * Emoji are meant to be tapped fast — that is what a live reaction bar is — so
+ * they are held only to a rate that keeps the room document from being rewritten
+ * on every frame. Comments are slower because they are read.
+ */
+const CHAT_EMOJI_COOLDOWN_MS = 400;
+const CHAT_TEXT_COOLDOWN_MS = 1_200;
+
+/**
+ * Keeps the newest of each kind, then puts them back in order.
+ *
+ * Trimming one shared list would let a burst of emoji push every comment out of
+ * the feed in a couple of seconds, which is exactly what a busy room produces.
+ */
+function trimChat(log: RoomChatMessage[]): RoomChatMessage[] {
+  const text = log.filter((m) => m.kind === 'text').slice(-CHAT_TEXT_KEPT);
+  const emoji = log.filter((m) => m.kind === 'emoji').slice(-CHAT_EMOJI_KEPT);
+  return [...text, ...emoji].sort((a, b) => a.at - b.at);
 }
 
 /** How long a player can go without a heartbeat before we treat them as gone. */
@@ -1754,48 +1771,93 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
-    case 'add_social_reaction': {
-      const voter = room.players.find((p) => p.id === body.voterId);
-      const target = room.players.find((p) => p.id === body.targetPlayerId);
-      if (!voter || !target) {
-        return NextResponse.json({ error: 'Player not found' }, { status: 404 });
-      }
-      if (voter.id === target.id) {
-        return NextResponse.json({ error: 'React to another player, not yourself' }, { status: 400 });
-      }
-      if (!isSocialReaction(body.reaction)) {
-        return NextResponse.json({ error: 'Unknown reaction' }, { status: 400 });
+    /**
+     * Posts an emoji or a comment into the live stream.
+     *
+     * The four scoring emoji go through exactly the same one-per-player-per-kind
+     * gate the reaction buttons used, so the laugh meter and the badge that
+     * reads the reaction mix are unchanged by any amount of spamming. Everything
+     * else is decoration that never reaches a score.
+     */
+    case 'post_chat': {
+      const author = room.players.find((p) => p.id === body.callerId);
+      if (!author) return NextResponse.json({ error: 'Player not found' }, { status: 404 });
+
+      const kind = body.kind === 'emoji' ? 'emoji' : 'text';
+      const emoji = kind === 'emoji' ? findChatEmoji(String(body.body ?? '')) : null;
+      // Anything outside the palette is refused rather than trusted: the glyph
+      // is rendered straight into every other player's screen.
+      if (kind === 'emoji' && !emoji) {
+        return NextResponse.json({ error: 'Unknown emoji' }, { status: 400 });
       }
 
-      if (!room.socialRound || room.socialRound.targetPlayerId !== target.id) {
-        room.socialRound = { targetPlayerId: target.id, reactions: [], judgeVotes: [] };
+      const text = String(body.body ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_COMMENT_CHARS);
+      if (kind === 'text' && text.length === 0) {
+        return NextResponse.json({ error: 'Say something first' }, { status: 400 });
       }
 
-      const alreadyReacted = room.socialRound.reactions.some(
-        (r) => r.voterId === voter.id && r.reaction === body.reaction
-      );
-      if (!alreadyReacted) {
-        room.socialRound.reactions.push({
-          id: `react_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          reaction: body.reaction,
-          voterId: voter.id,
-          voterName: voter.name,
-          targetPlayerId: target.id,
-          timestamp: new Date().toISOString(),
-        });
-        pushEvent(room, `${voter.name} gave ${target.name} a ${REACTION_LABELS[body.reaction]}`, 'social');
+      const now = Date.now();
+      const log = room.chat ?? [];
 
-        // The roast intermission is the moment the room is actually watching and
-        // reacting, but by then the turn is scored and the dice locked. Board
-        // movement stays earned by accuracy — late reactions pay out in vibe,
-        // which drives levels and badges. Without this the roast buttons record
-        // a reaction and award nothing at all.
-        if (room.phase === 'roast_intermission') {
-          target.vibeScore = (target.vibeScore ?? 0) + REACTION_POINTS[body.reaction];
-          updatePlayerLevel(target);
+      /**
+       * Throttled against the room's own log rather than a counter.
+       *
+       * A token bucket kept in memory would be a side effect: this handler is
+       * replayed whenever another write lands first, so a losing attempt would
+       * spend the caller's allowance and the replay would find it gone. Reading
+       * the log instead makes the check a pure function of the room, which is
+       * the rule every action here follows.
+       */
+      const mine = log.filter((m) => m.authorId === author.id && m.kind === kind);
+      const sinceLast = now - (mine[mine.length - 1]?.at ?? 0);
+      const cooldown = kind === 'emoji' ? CHAT_EMOJI_COOLDOWN_MS : CHAT_TEXT_COOLDOWN_MS;
+      if (sinceLast < cooldown) {
+        // Not an error the player should see — they tapped fast, which is
+        // allowed, it just does not need to reach everybody else.
+        return NextResponse.json({ room });
+      }
+
+      const target = room.players[room.activePlayerIndex];
+      const message: RoomChatMessage = {
+        id: `chat_${now}_${Math.random().toString(36).slice(2, 8)}`,
+        kind,
+        body: kind === 'emoji' ? emoji!.glyph : text,
+        authorId: author.id,
+        authorName: author.name,
+        at: now,
+      };
+      if (target && target.id !== author.id) message.targetPlayerId = target.id;
+
+      // Scoring, on exactly the terms the old buttons had.
+      if (emoji?.scoresAs && target && target.id !== author.id) {
+        if (!room.socialRound || room.socialRound.targetPlayerId !== target.id) {
+          room.socialRound = { targetPlayerId: target.id, reactions: [], judgeVotes: [] };
+        }
+        const alreadyReacted = room.socialRound.reactions.some(
+          (r) => r.voterId === author.id && r.reaction === emoji.scoresAs
+        );
+        if (!alreadyReacted) {
+          room.socialRound.reactions.push({
+            id: `react_${now}_${Math.random().toString(36).slice(2, 8)}`,
+            reaction: emoji.scoresAs,
+            voterId: author.id,
+            voterName: author.name,
+            targetPlayerId: target.id,
+            timestamp: new Date(now).toISOString(),
+          });
+          message.scoredAs = emoji.scoresAs;
+
+          // Same rule the reaction buttons had: the roast is the moment the
+          // room is actually watching, but the turn is already scored by then,
+          // so a late reaction pays in vibe rather than in board movement.
+          if (room.phase === 'roast_intermission') {
+            target.vibeScore = (target.vibeScore ?? 0) + REACTION_POINTS[emoji.scoresAs];
+            updatePlayerLevel(target);
+          }
         }
       }
 
+      room.chat = trimChat([...log, message]);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

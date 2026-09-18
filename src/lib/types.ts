@@ -425,6 +425,33 @@ export type SocialReaction = {
   timestamp: string;
 };
 
+/**
+ * One thing somebody put into the live stream beside the game.
+ *
+ * Emoji and comments share a type because they share a feed — the room sees
+ * one running conversation, not two. `kind` is what tells them apart when it
+ * comes to rendering and to trimming.
+ */
+export type RoomChatMessage = {
+  id: string;
+  kind: 'emoji' | 'text';
+  /** The glyph, for an emoji; the comment itself, for text. */
+  body: string;
+  authorId: string;
+  authorName: string;
+  /**
+   * Set when this emoji also counted towards the performer's social bonus.
+   *
+   * Only the first of each kind from each player scores, so most emoji in a
+   * busy stream carry nothing here — which is the point: the feed stays lively
+   * without the laugh meter inflating along with it.
+   */
+  scoredAs?: SocialReactionId;
+  /** Who was on the mic when it was sent, when anybody was. */
+  targetPlayerId?: string;
+  at: number;
+};
+
 export type JudgeVote = {
   voterId: string;
   voterName: string;
@@ -502,6 +529,15 @@ export type RoomState = {
   turnResult?: TurnResult | null;
   /** Laugh meter and peer judge votes for the active voice-related round. */
   socialRound?: SocialRound | null;
+  /**
+   * The live stream beside the game: emoji and comments, newest last.
+   *
+   * On the room document rather than a subcollection because every client is
+   * already subscribed to this document and nothing here is secret — a second
+   * listener would be a second read on every heartbeat for no benefit. Trimmed
+   * per kind on write, so it cannot grow without bound.
+   */
+  chat?: RoomChatMessage[];
   /** What the performer is doing right now, for spectators. */
   liveState?: LiveMiniGameState | null;
   /** The last thing the board did to somebody, for the whole room to watch. */

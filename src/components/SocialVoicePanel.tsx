@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { BadgeCheck, Flame, Laugh, Sparkles, ThumbsDown, ThumbsUp, Theater } from 'lucide-react';
 import { Player, RoomState, SocialReactionId } from '@/lib/types';
 import { sumReactionBonus } from '@/lib/gameRules';
+import { CHAT_EMOJI } from '@/lib/chatEmoji';
 import { roomStore } from '@/lib/roomStore';
 
 interface SocialVoicePanelProps {
@@ -23,6 +24,11 @@ const REACTIONS: {
   { id: 'almost', label: 'Almost', helper: 'Close enough to tease', Icon: Sparkles },
   { id: 'drama', label: 'Drama', helper: 'Nollywood energy', Icon: Theater },
 ];
+
+/** The glyphs that carry the four scoring reactions, shown as a hint. */
+const EMOJI_HINT = CHAT_EMOJI.filter((e) => e.scoresAs)
+  .map((e) => e.glyph)
+  .join(' ');
 
 export default function SocialVoicePanel({ room, activePlayer, myPlayer }: SocialVoicePanelProps) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -45,13 +51,6 @@ export default function SocialVoicePanel({ room, activePlayer, myPlayer }: Socia
   const passVotes = judgeVotes.filter((vote) => vote.vote === 'pass').length;
   const failVotes = judgeVotes.filter((vote) => vote.vote === 'fail').length;
   const myVote = judgeVotes.find((vote) => vote.voterId === myPlayer.id)?.vote ?? null;
-
-  const sendReaction = async (reaction: SocialReactionId) => {
-    if (busy || isPerformer) return;
-    setBusy(reaction);
-    await roomStore.addSocialReaction(room.roomId, reaction, myPlayer.id, myPlayer.name, activePlayer.id);
-    setBusy(null);
-  };
 
   const sendVote = async (vote: 'pass' | 'fail') => {
     if (busy || isPerformer) return;
@@ -106,7 +105,7 @@ export default function SocialVoicePanel({ room, activePlayer, myPlayer }: Socia
             <Laugh className="w-4 h-4 text-partyYellow" /> CROWD JUDGE MODE
           </h3>
           <p className="text-[11px] text-gray-400">
-            React to {activePlayer.name}&apos;s voice moment with laugh, fire, almost or drama.
+            React to {activePlayer.name}&apos;s voice moment from the bar below — the room sees every one.
           </p>
         </div>
         <div className="text-right shrink-0">
@@ -129,29 +128,42 @@ export default function SocialVoicePanel({ room, activePlayer, myPlayer }: Socia
         <p className="text-[11px] text-gray-300">{crowdSummary}</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {REACTIONS.map(({ id, label, helper, Icon }) => {
-          const alreadyUsed = reactions.some((reaction) => reaction.voterId === myPlayer.id && reaction.reaction === id);
-          return (
-            <button
-              key={id}
-              onClick={() => sendReaction(id)}
-              disabled={isPerformer || alreadyUsed || busy !== null}
-              title={helper}
-              className={`rounded-2xl border p-3 text-left transition-all ${
-                alreadyUsed
-                  ? 'bg-partyYellow/20 border-partyYellow text-partyYellow'
-                  : 'bg-white/5 border-white/10 text-gray-300 hover:border-partyCyan hover:bg-partyCyan/10'
-              } disabled:cursor-default disabled:opacity-80`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <Icon className="w-4 h-4 shrink-0" />
-                <span className="text-xs font-black">{reactionCounts[id]}</span>
+      {/* Where the four reaction buttons used to be.
+          They are now the emoji rail along the bottom of the screen, so a
+          reaction is something the room sees somebody make rather than a
+          counter quietly ticking up in a panel. The tally stays here, because
+          what it feeds — the social bonus and the end-of-round badge — is
+          still decided by these four and by nothing else in the stream. */}
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">
+          Scoring reactions
+        </p>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          {REACTIONS.map(({ id, label, helper, Icon }) => {
+            const alreadyUsed = reactions.some(
+              (reaction) => reaction.voterId === myPlayer.id && reaction.reaction === id
+            );
+            return (
+              <div
+                key={id}
+                title={helper}
+                className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl border px-1 py-1.5 ${
+                  alreadyUsed
+                    ? 'border-partyYellow/60 bg-partyYellow/15 text-partyYellow'
+                    : 'border-white/10 text-gray-400'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span className="text-sm font-black leading-none">{reactionCounts[id]}</span>
+                <span className="text-[9px] font-bold uppercase tracking-wide">{label}</span>
               </div>
-              <p className="text-xs font-extrabold mt-1">{label}</p>
-            </button>
-          );
-        })}
+            );
+          })}
+        </div>
+        <p className="mt-2 text-[11px] text-gray-300">
+          Tap {EMOJI_HINT} in the bar below to send one — the first of each kind you send is the
+          one that scores.
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-2">

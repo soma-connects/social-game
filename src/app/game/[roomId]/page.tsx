@@ -8,6 +8,7 @@ import RightSidebar from '@/components/RightSidebar';
 import MapRenderer from '@/components/MapRenderer';
 import RoomLobby from '@/components/RoomLobby';
 import VoiceGameController from '@/components/VoiceGameController';
+import LiveChatStream from '@/components/LiveChatStream';
 import PitchBirdCanvas from '@/components/PitchBirdCanvas';
 import SolfegeGame from '@/components/SolfegeGame';
 import SpellingBeeGame from '@/components/SpellingBeeGame';
@@ -419,7 +420,9 @@ export default function GameRoomPage() {
         </div>
       )}
 
-      <div className="max-w-[1700px] mx-auto w-full p-4 sm:p-6 flex flex-col lg:flex-row gap-5 xl:gap-6 flex-1">
+      {/* The bottom padding is the live stream's bar, which is fixed and would
+          otherwise sit on top of whatever the page ends with. */}
+      <div className="max-w-[1700px] mx-auto w-full p-4 sm:p-6 pb-28 flex flex-col lg:flex-row gap-5 xl:gap-6 flex-1">
         <LeftSidebar
           roomId={roomId}
           players={room.players}
@@ -1145,6 +1148,13 @@ export default function GameRoomPage() {
           onCancel={() => setPendingPowerup(null)}
         />
       )}
+
+      {/* Mounted once at the shell rather than inside any one phase, so the room
+          can react to a chess move, a dice roll or an AI Master verdict with the
+          same feed — and so a comment does not vanish when the phase turns.
+          Fixed positioning, so it must stay out of any transformed ancestor:
+          the board camera scales its subtree, which would trap it. */}
+      <LiveChatStream room={room} myPlayer={myPlayer} />
     </div>
   );
 }

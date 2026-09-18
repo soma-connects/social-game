@@ -5,9 +5,10 @@
 // After every mini-game turn, the room enters this 25-second intermission phase.
 // All players' microphones stay active so everyone can laugh, roast, tease, or
 // hype up the performer's attempt over live audio. Spectators can blast party
-// SFX from the interactive soundboard and send floating reaction badges.
+// SFX from the interactive soundboard. Reactions fly through the room-wide
+// live stream, which runs over every screen rather than only this one.
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Clock,
   Flame,
@@ -23,6 +24,7 @@ import {
 import { Player, RoomState, SocialReactionId } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
+import { glyphForReaction } from '@/lib/chatEmoji';
 import { MINIGAME_FAIL_THRESHOLD, STARTING_LIVES } from '@/lib/gameRules';
 import { VoiceClip } from '@/hooks/useVoiceRecorder';
 import AvatarIllustration from './AvatarIllustration';
@@ -49,23 +51,18 @@ const SOUNDBOARD = [
   { id: 'whaala', name: 'Whaala Buzzer', icon: '🚨', action: () => audioSFX.playWhaalaFailure() },
 ];
 
-const REACTION_EMOJI: Record<SocialReactionId, string> = {
-  laugh: '😂',
-  fire: '🔥',
-  almost: '👏',
-  drama: '🎭',
-};
-
 const REACTION_BUTTONS: {
   id: SocialReactionId;
   label: string;
   badge: string;
   icon: string;
 }[] = [
-  { id: 'laugh', label: 'Try Again Boss', badge: '🤣 Flawless Comedy', icon: '😂' },
-  { id: 'fire', label: 'Clean!', badge: '🔥 Fire Delivery', icon: '🔥' },
-  { id: 'almost', label: 'Almost There', badge: '✨ Pure Vibe', icon: '👏' },
-  { id: 'drama', label: 'Oscar Performance', badge: '🎭 Nollywood Legend', icon: '🎭' },
+  // The icon is the glyph that is actually sent, so the button shows what the
+  // room will see fly past.
+  { id: 'laugh', label: 'Try Again Boss', badge: '🤣 Flawless Comedy', icon: glyphForReaction('laugh') },
+  { id: 'fire', label: 'Clean!', badge: '🔥 Fire Delivery', icon: glyphForReaction('fire') },
+  { id: 'almost', label: 'Almost There', badge: '✨ Pure Vibe', icon: glyphForReaction('almost') },
+  { id: 'drama', label: 'Oscar Performance', badge: '🎭 Nollywood Legend', icon: glyphForReaction('drama') },
 ];
 
 export default function RoastIntermission({
@@ -77,9 +74,6 @@ export default function RoastIntermission({
 }: RoastIntermissionProps) {
   const [timeLeft, setTimeLeft] = useState<number>(ROAST_SECONDS);
   const [busyReaction, setBusyReaction] = useState<string | null>(null);
-  const [floatingEmojis, setFloatingEmojis] = useState<{ id: number; emoji: string; x: number }[]>([]);
-  /** Reaction ids already animated, so polling does not replay them each tick. */
-  const seenReactionIds = useRef<Set<string>>(new Set());
 
   const isPerformer = activePlayer.id === myPlayer.id;
   const isHost = myPlayer.isHost;
@@ -118,39 +112,19 @@ export default function RoastIntermission({
     action();
   };
 
-  const spawnEmoji = useCallback((emoji: string) => {
-    const id = Date.now() + Math.random();
-    setFloatingEmojis((prev) => [...prev, { id, emoji, x: Math.random() * 80 + 10 }]);
-    window.setTimeout(() => {
-      setFloatingEmojis((prev) => prev.filter((item) => item.id !== id));
-    }, 2000);
-  }, []);
-
-  // Float an emoji for reactions arriving from *other* players too. Without
-  // this the laugh meter only animates for whoever tapped, so nobody sees the
-  // room react — which is the whole point of the meter.
-  useEffect(() => {
-    for (const reaction of reactions) {
-      if (seenReactionIds.current.has(reaction.id)) continue;
-      seenReactionIds.current.add(reaction.id);
-      // Skip our own — those already floated optimistically on tap.
-      if (reaction.voterId === myPlayer.id) continue;
-      spawnEmoji(REACTION_EMOJI[reaction.reaction]);
-    }
-  }, [reactions, myPlayer.id, spawnEmoji]);
-
-  const handleSendReaction = async (reactionId: SocialReactionId, emoji: string) => {
+  /**
+   * Sends the reaction as a stream message.
+   *
+   * This screen grew its own floating-emoji system before there was one, and
+   * kept its own copy of which glyph meant what. Both now live in
+   * LiveChatStream, which runs over every screen — so the roast is no longer
+   * the one place in the game where the room can see itself react, and there
+   * is no second set of emoji flying up alongside the first.
+   */
+  const handleSendReaction = async (reactionId: SocialReactionId) => {
     if (isPerformer || busyReaction) return;
     setBusyReaction(reactionId);
-
-    spawnEmoji(emoji); // optimistic, so the tap feels instant
-    await roomStore.addSocialReaction(
-      room.roomId,
-      reactionId,
-      myPlayer.id,
-      myPlayer.name,
-      activePlayer.id
-    );
+    await roomStore.postChat(room.roomId, 'emoji', glyphForReaction(reactionId));
     setBusyReaction(null);
   };
 
@@ -159,16 +133,6 @@ export default function RoastIntermission({
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6 relative overflow-hidden">
       {/* Floating Emojis Overlay */}
-      {floatingEmojis.map(({ id, emoji, x }) => (
-        <div
-          key={id}
-          className="absolute z-50 text-4xl animate-floatUp pointer-events-none drop-shadow-lg"
-          style={{ left: `${x}%`, bottom: '18%' }}
-        >
-          {emoji}
-        </div>
-      ))}
-
       {/* Top Banner & Timer */}
       <div className="glass-card rounded-3xl p-6 border border-partyYellow/50 text-center relative overflow-hidden backdrop-blur-xl bg-slate-900/85 space-y-5 shadow-2xl">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -292,7 +256,7 @@ export default function RoastIntermission({
               {REACTION_BUTTONS.map((btn) => (
                 <button
                   key={btn.id}
-                  onClick={() => handleSendReaction(btn.id, btn.icon)}
+                  onClick={() => handleSendReaction(btn.id)}
                   className="glass-pill hover:bg-partyYellow/20 active:scale-95 text-white font-bold text-xs py-3 px-3 rounded-2xl border border-partyYellow/40 flex items-center justify-between gap-2 transition-all shadow-lg"
                 >
                   <span className="flex items-center gap-2">

@@ -614,20 +614,16 @@ class RoomStoreManager {
     }
   }
 
-  public addSocialReaction(
-    roomId: string,
-    reaction: SocialReactionId,
-    voterId: string,
-    voterName: string,
-    targetPlayerId: string
-  ) {
-    return this.post(roomId, {
-      action: 'add_social_reaction',
-      reaction,
-      voterId,
-      voterName,
-      targetPlayerId,
-    });
+  /**
+   * Drops an emoji or a comment into the live stream.
+   *
+   * Deliberately fire-and-forget at the call site: a tap that has to wait for a
+   * round trip before it feels like anything is a tap that feels broken, and
+   * the server's answer carries nothing the caller needs — the room snapshot
+   * brings the message back to everybody, sender included.
+   */
+  public postChat(roomId: string, kind: 'emoji' | 'text', body: string) {
+    return this.post(roomId, { action: 'post_chat', kind, body });
   }
 
   public addJudgeVote(

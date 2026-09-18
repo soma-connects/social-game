@@ -26,6 +26,7 @@ import { DEFAULT_ROOM_VIBE, RoomVibeId } from '@/lib/roomVibes';
 import { badgeArt, modeArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
 import ModeSetupModal, { GameModeId, ModeLaunchOptions } from './ModeSetupModal';
+import MicCheck from './MicCheck';
 
 import { audioSFX } from '@/lib/audioFeedback';
 import AvatarIllustration from './AvatarIllustration';
@@ -277,6 +278,11 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <span>CHANGE AVATAR</span>
             </button>
           </div>
+
+          {/* Before the match, not during a scored round. Half this game is
+              voice, and the first thing that used to tell a player their mic
+              was blocked was a mini-game they had just scored zero in. */}
+          <MicCheck />
 
           {/* Avatar Selection Pop-up Modal */}
           {showAvatarModal && (

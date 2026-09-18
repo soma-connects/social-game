@@ -106,14 +106,39 @@ TURN** below) under Project → Settings → Environment Variables, then deploy.
 
 ### Cloud Run
 
-Still works if GCP is ever the target again — `Dockerfile` and
-`.gcloudignore` are kept up to date. The old `--min-instances=1
---max-instances=1` pin is no longer required since state lives in Firestore,
-not the container:
+`Dockerfile`, `.gcloudignore` and `cloudbuild.yaml` are kept up to date.
+
+Deploy through Cloud Build, not `run deploy --source .`. The public Firebase
+config has to reach the client bundle as build args, and `--source .` cannot
+pass them — it used to work only because the old Dockerfile copied
+`.env.production` into the image, which also baked `GEMINI_API_KEY` into a
+layer:
 
 ```bash
-gcloud run deploy voice-party-roadmap-game --source . --region us-central1 --allow-unauthenticated
+gcloud builds submit --config cloudbuild.yaml \
+  --substitutions=_GIT_SHA=$(git rev-parse --short HEAD),\
+_FIREBASE_API_KEY=...,_FIREBASE_AUTH_DOMAIN=...,_FIREBASE_PROJECT_ID=...,\
+_FIREBASE_STORAGE_BUCKET=...,_FIREBASE_MESSAGING_SENDER_ID=...,\
+_FIREBASE_APP_ID=...,_FIREBASE_MEASUREMENT_ID=...
 ```
+
+Only `NEXT_PUBLIC_*` values go in there. They are compiled into the client
+bundle and shipped to every browser regardless, so they are not secrets —
+`firestore.rules` is what guards the data. `GEMINI_API_KEY` is a real secret
+and stays a runtime environment variable on the service.
+
+**The `--min-instances=1 --max-instances=1` pin in `cloudbuild.yaml` is
+required, and this file used to say it was not.** Room state is indeed in
+Firestore and would survive any number of containers, but the WebRTC
+signalling mailboxes are not: `enqueueSignal` and `drainSignals` in
+`src/lib/server/roomServer.ts` read and write a plain in-process `Map`,
+because signalling is far too chatty for a database round trip. A second
+container holds its own separate set, so players who land on different
+instances never exchange ICE candidates and simply never hear each other.
+Room state stays perfectly consistent while voice fails silently, which is
+the worst way for it to fail. `hostLinePool` is in memory for the same
+reason and is fine either way — an unwarmed instance costs a canned line,
+not a broken call.
 
 ## Voice chat and TURN
 

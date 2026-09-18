@@ -63,23 +63,36 @@ export default function ChessGame({ room, myPlayer, roomId }: ChessGameProps) {
     let cancelled = false;
     setIsAiThinking(true);
 
-    const timer = setTimeout(async () => {
+    // The pause is a floor, not an addition.
+    //
+    // This used to wait out a fixed 0.8-1.4s and only then start searching, so
+    // the player waited for the pause *plus* however long the engine took —
+    // which at the top difficulty was several seconds more. Timing the search
+    // against the same beat means a quick move still lands with a beat of
+    // suspense and a slow one no longer pays for it twice.
+    const BOT_BEAT_MS = 700;
+
+    (async () => {
+      const startedAt = Date.now();
       try {
-        const botMove = getBotMove(cs.fen, cs.botDifficulty || 'navigator');
-        if (botMove && !cancelled) {
-          await roomStore.makeChessMove(roomId, myPlayer.id, botMove.from, botMove.to, botMove.promotion);
-          audioSFX.playPop();
-        }
+        const botMove = await getBotMove(cs.fen, cs.botDifficulty || 'navigator');
+        if (cancelled || !botMove) return;
+
+        const remaining = BOT_BEAT_MS - (Date.now() - startedAt);
+        if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+        if (cancelled) return;
+
+        await roomStore.makeChessMove(roomId, myPlayer.id, botMove.from, botMove.to, botMove.promotion);
+        audioSFX.playPop();
       } catch (e) {
         console.error('Bot move failed:', e);
       } finally {
         if (!cancelled) setIsAiThinking(false);
       }
-    }, 800 + Math.random() * 600);
+    })();
 
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
   }, [isVsAi, drivesBot, cs?.fen, cs?.turn, cs?.winner, roomId, cs?.botDifficulty, myPlayer.id]);
 

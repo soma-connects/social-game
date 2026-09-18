@@ -23,6 +23,14 @@ export default function ChessGame({ room, myPlayer, roomId }: ChessGameProps) {
 
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
+  /**
+   * A piece the player picked up that has nowhere legal to go.
+   *
+   * Tapping one lit nothing up and said nothing, which reads as the app being
+   * broken rather than as the rules doing their job — and it happens most often
+   * in check, when every piece but a few is frozen.
+   */
+  const [stuckPiece, setStuckPiece] = useState<Square | null>(null);
 
   const chess = useMemo(() => new Chess(cs?.fen || undefined), [cs?.fen]);
 
@@ -106,6 +114,7 @@ export default function ChessGame({ room, myPlayer, roomId }: ChessGameProps) {
       // If clicking own piece, select it
       if (piece && piece.color === myColor) {
         setSelectedSquare(sq);
+        setStuckPiece(chess.moves({ square: sq }).length === 0 ? sq : null);
         return;
       }
 
@@ -156,11 +165,47 @@ export default function ChessGame({ room, myPlayer, roomId }: ChessGameProps) {
   // A new position means a new clock, so the guard resets.
   useEffect(() => {
     flagReported.current = false;
+    setStuckPiece(null);
   }, [cs?.fen]);
+
+  /**
+   * Who is in check, and whether that is you.
+   *
+   * The server has recorded this on every move since the mode was written —
+   * isCheck, isCheckmate, isDraw, isStalemate — and nothing in the UI ever read
+   * any of it. The only sign you were in check was a line scrolling past in the
+   * event feed, which is no use at all: being in check is not a notification,
+   * it is a rule about what you are allowed to play next.
+   */
+  const checkedColor = cs?.isCheck && !cs?.winner ? cs.turn : null;
+  const myKingIsChecked = !isSpectator && checkedColor === myColor;
+
+  /**
+   * Says it out loud, once per position.
+   *
+   * Keyed on the FEN rather than on the check flag, so a check that survives
+   * several moves does not re-announce itself and a second check later in the
+   * game still does.
+   */
+  const announcedFen = useRef<string | null>(null);
+  useEffect(() => {
+    if (!cs?.fen || announcedFen.current === cs.fen) return;
+    announcedFen.current = cs.fen;
+
+    if (cs.winner) {
+      if (isSpectator || cs.winner === 'draw') audioSFX.playStreetVendorBell();
+      else if (cs.winner === myColor) audioSFX.playNollywoodBrass();
+      else audioSFX.playWhaalaFailure();
+      return;
+    }
+    if (cs.isCheck) audioSFX.playTireScrape();
+  }, [cs?.fen, cs?.isCheck, cs?.winner, myColor, isSpectator]);
 
   // Names for clocks
   const whiteName = cs?.whitePlayers.map((p) => p.name).join(' & ') || 'White';
   const blackName = cs?.blackPlayers.map((p) => p.name).join(' & ') || 'Black';
+  const checkedName = checkedColor === 'w' ? whiteName : blackName;
+  const winnerName = cs?.winner === 'w' ? whiteName : cs?.winner === 'b' ? blackName : null;
 
   if (!cs) {
     return (
@@ -213,6 +258,68 @@ export default function ChessGame({ room, myPlayer, roomId }: ChessGameProps) {
         onFlagFall={handleFlagFall}
       />
 
+      {/* How the game ended, stated plainly.
+          A checkmate used to show as a chip in the corner of the header,
+          the same size and weight as the turn indicator it replaced — so the
+          game could be over for several seconds before anyone noticed. */}
+      {cs.winner && (
+        <div
+          className={`w-full rounded-xl border p-3 text-center shadow-lg ${
+            cs.winner === 'draw'
+              ? 'bg-slate-500/15 border-slate-400/40'
+              : !isSpectator && cs.winner === myColor
+                ? 'bg-emerald-500/15 border-emerald-400/50'
+                : 'bg-rose-500/15 border-rose-400/50'
+          }`}
+          role="status"
+        >
+          <p className="text-lg font-black tracking-wide text-white">
+            {cs.winner === 'draw'
+              ? `🤝 Drawn — ${cs.winReason}`
+              : cs.winReason === 'Checkmate'
+                ? `👑 Checkmate — ${winnerName} wins`
+                : `🏆 ${winnerName} wins — ${cs.winReason}`}
+          </p>
+          {!isSpectator && cs.winner !== 'draw' && (
+            <p className="mt-0.5 text-xs font-bold text-slate-300">
+              {cs.winner === myColor ? 'That is the game. Well played.' : 'Your king has nowhere left to go.'}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Check warning.
+          Deliberately loud and above the board rather than beside it: in check
+          you are not choosing between good moves and bad ones, you are choosing
+          between legal moves and illegal ones, and the board alone never said
+          so. */}
+      {checkedColor && (
+        <div
+          className={`w-full rounded-xl border p-3 flex items-center gap-3 shadow-lg ${
+            myKingIsChecked
+              ? 'bg-red-600/25 border-red-400/60 animate-pulse'
+              : 'bg-amber-500/15 border-amber-400/40'
+          }`}
+          role="alert"
+        >
+          <ShieldAlert
+            className={`w-6 h-6 shrink-0 ${myKingIsChecked ? 'text-red-300' : 'text-amber-300'}`}
+          />
+          <div className="min-w-0">
+            <p className="text-sm font-black tracking-wide text-white">
+              {myKingIsChecked ? 'YOUR KING IS IN CHECK' : `CHECK — ${checkedName}'s king is under attack`}
+            </p>
+            <p className="text-[11px] font-semibold text-slate-200/90">
+              {myKingIsChecked
+                ? 'You must move out of it, block it, or take the attacker — nothing else is legal.'
+                : isSpectator
+                  ? 'They have to answer it this move.'
+                  : 'They have to answer it — keep the pressure on.'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* 2v2 Teammate Consultation Prompt (if any) */}
       {is2v2Mode && myTeamProposal && (
         <div className="w-full bg-gradient-to-r from-purple-900/50 to-indigo-900/50 border border-purple-400/40 rounded-xl p-3 flex items-center justify-between shadow-lg">
@@ -257,7 +364,17 @@ export default function ChessGame({ room, myPlayer, roomId }: ChessGameProps) {
         lastMove={cs.lastMove}
         onSquareClick={handleSquareClick}
         flipBoard={myColor === 'b' && !isSpectator}
+        isCheckmate={cs.isCheckmate}
       />
+
+      {/* Why nothing lit up. */}
+      {stuckPiece && !cs.winner && (
+        <p className="w-full text-center text-xs font-bold text-amber-300/90">
+          {myKingIsChecked
+            ? `The piece on ${stuckPiece} cannot answer the check — try the king, a blocker, or the attacker itself.`
+            : `The piece on ${stuckPiece} has no legal move right now.`}
+        </p>
+      )}
 
       {/* Move History / SAN ticker */}
       <div className="w-full flex items-center gap-2 overflow-x-auto py-1 px-2 rounded-lg bg-slate-950/60 border border-white/5 text-xs text-slate-400 no-scrollbar">

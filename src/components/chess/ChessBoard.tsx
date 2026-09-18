@@ -14,6 +14,8 @@ interface ChessBoardProps {
   lastMove?: { from: string; to: string } | null;
   onSquareClick: (square: Square) => void;
   flipBoard?: boolean;
+  /** Marks the trapped king, so mate does not look like an ordinary check. */
+  isCheckmate?: boolean;
 }
 
 /**
@@ -143,6 +145,7 @@ export default function ChessBoard({
   lastMove,
   onSquareClick,
   flipBoard = false,
+  isCheckmate = false,
 }: ChessBoardProps) {
   const chess = useMemo(() => new Chess(fen), [fen]);
 
@@ -210,10 +213,20 @@ export default function ChessBoard({
                   <div className="absolute inset-0 pointer-events-none" style={{ backgroundColor: 'rgba(250, 204, 21, 0.35)' }} />
                 )}
                 {isCheckedKing && (
-                  <div
-                    className="absolute inset-0 pointer-events-none animate-pulse"
-                    style={{ background: 'radial-gradient(circle, rgba(239,68,68,0.85) 10%, rgba(239,68,68,0.15) 75%)' }}
-                  />
+                  <>
+                    <div
+                      className={`absolute inset-0 pointer-events-none ${isCheckmate ? '' : 'animate-pulse'}`}
+                      style={{
+                        background: isCheckmate
+                          ? 'radial-gradient(circle, rgba(220,38,38,0.95) 15%, rgba(127,29,29,0.55) 80%)'
+                          : 'radial-gradient(circle, rgba(239,68,68,0.85) 10%, rgba(239,68,68,0.15) 75%)',
+                      }}
+                    />
+                    {/* A hard edge as well as the glow. The gradient alone
+                        faded into a dark square and could be missed entirely
+                        on a small screen in daylight. */}
+                    <div className="absolute inset-0 pointer-events-none ring-2 ring-inset ring-red-400" />
+                  </>
                 )}
 
                 {/* Coordinate labels, tinted against their own square so they

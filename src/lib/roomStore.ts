@@ -7,6 +7,8 @@ import {
   RoomState,
   SocialReactionId,
   TeamId,
+  TruthOrDareCategoryId,
+  TruthOrDareSelectionMode,
   TurnResult,
 } from './types';
 import { RoomVibeId } from './roomVibes';
@@ -368,6 +370,35 @@ class RoomStoreManager {
 
   public aiMasterBribe(roomId: string, amount: number, ask: 'skip' | 'life' | 'redirect') {
     return this.post(roomId, { action: 'ai_master_bribe', amount, ask });
+  }
+
+  // ── Truth or Dare game ───────────────────────────────────────────────────
+
+  public updateTruthOrDareSettings(
+    roomId: string,
+    settings: { categories: TruthOrDareCategoryId[]; spicyEnabled: boolean; selectionModes: TruthOrDareSelectionMode[] }
+  ) {
+    return this.post(roomId, { action: 'update_truth_or_dare_settings', ...settings });
+  }
+
+  public startTruthOrDare(roomId: string) {
+    return this.post(roomId, { action: 'truth_or_dare_start' });
+  }
+
+  public truthOrDareSelect(roomId: string) {
+    return this.post(roomId, { action: 'truth_or_dare_select' });
+  }
+
+  public truthOrDareChoose(roomId: string, choice: 'truth' | 'dare') {
+    return this.post(roomId, { action: 'truth_or_dare_choose', choice });
+  }
+
+  public truthOrDareResolve(roomId: string, completed: boolean) {
+    return this.post(roomId, { action: 'truth_or_dare_resolve', completed });
+  }
+
+  public truthOrDareNextRound(roomId: string) {
+    return this.post(roomId, { action: 'truth_or_dare_next_round' });
   }
 
   // ── Teams ─────────────────────────────────────────────────────────────────

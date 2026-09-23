@@ -99,6 +99,13 @@ import { aiGameMaster } from '@/lib/aiGameMaster';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES } from '@/lib/roomVibes';
 import { askHost, coerceVibe, generateChallenge } from '@/lib/server/aiHost';
 import { AiMasterBribe, AiMasterCategory, AiMasterState } from '@/lib/types';
+import { TruthOrDareCategoryId, TruthOrDareSelectionMode, TruthOrDareSettings, TruthOrDareState } from '@/lib/types';
+import {
+  DEFAULT_TRUTH_OR_DARE_SETTINGS,
+  TRUTH_OR_DARE_CATEGORIES,
+  isSpicyCategory,
+  pickTruthOrDarePrompt,
+} from '@/lib/truthOrDareContent';
 
 export const dynamic = 'force-dynamic';
 
@@ -552,6 +559,9 @@ const HOST_ONLY_ACTIONS = new Set([
   'ai_master_start',
   'ai_master_verdict',
   'ai_master_next_round',
+  'truth_or_dare_start',
+  'truth_or_dare_next_round',
+  'update_truth_or_dare_settings',
   'update_phase',
   'start_match',
   'end_match',
@@ -585,6 +595,9 @@ const ACTIVE_PLAYER_ACTIONS = new Set([
   // answer it — nobody could act and the round was stuck. The two now agree on
   // whose round it is.
   'trivia_buzz',
+  // The wheel spin / card flip is turn-order-driven, same as the dice: only
+  // whoever the round has called on may set it in motion.
+  'truth_or_dare_select',
 ]);
 
 /**
@@ -627,6 +640,7 @@ const SELF_PLAYER_ID_ACTIONS = new Set([
   'ai_master_respond',
   'ai_master_vote',
   'ai_master_bribe',
+  'truth_or_dare_choose',
 ]);
 
 type Caller = { player: Player; isHost: boolean };
@@ -1514,6 +1528,193 @@ function judgeBribe(state: AiMasterState, player: Player, amount: number): boole
   if (player.id === state.favorId) odds += 0.2;
   if (player.id === state.grudgeId) odds -= 0.25;
   return Math.random() < Math.max(0.05, Math.min(0.9, odds));
+}
+
+// ─── Truth or Dare game ─────────────────────────────────────────────────────
+
+/** Points a completed dare is worth. Higher than truth — it's the bolder ask. */
+const TRUTH_OR_DARE_DARE_POINTS = 100;
+const TRUTH_OR_DARE_TRUTH_POINTS = 60;
+
+/** Settings default to the shipped library until the host changes them. */
+function truthOrDareSettingsOf(room: RoomState): TruthOrDareSettings {
+  return room.truthOrDareSettings ?? DEFAULT_TRUTH_OR_DARE_SETTINGS;
+}
+
+/** A random player other than the spinner — the bottle-spin mechanic. */
+function pickTruthOrDareTarget(room: RoomState, excludeId: string): Player | null {
+  const pool = activePlayers(room).filter((p) => p.id !== excludeId);
+  if (pool.length === 0) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** Round-robins the caller through the room's active players, same idea as the board's turn order. */
+function advanceTruthOrDareCaller(room: RoomState): Player | null {
+  const pool = activePlayers(room);
+  if (pool.length === 0) return null;
+
+  const order = room.players.filter((p) => pool.some((ap) => ap.id === p.id));
+  const currentId = room.players[room.activePlayerIndex]?.id;
+  const at = order.findIndex((p) => p.id === currentId);
+  const next = order[(at + 1) % order.length] ?? order[0];
+  room.activePlayerIndex = room.players.findIndex((p) => p.id === next.id);
+  return next;
+}
+
+/**
+ * Opens the next round: picks the caller, the mechanic, and — for a card flip
+ * — the target too, since a card flip is the caller answering their own card
+ * rather than picking somebody else.
+ */
+function startTruthOrDareTurn(room: RoomState): void {
+  const previous = room.truthOrDareState ?? null;
+  const caller = advanceTruthOrDareCaller(room);
+  if (!caller) return;
+
+  const settings = truthOrDareSettingsOf(room);
+  const modes = settings.selectionModes.length > 0 ? settings.selectionModes : DEFAULT_TRUTH_OR_DARE_SETTINGS.selectionModes;
+  const round = (previous?.round ?? 0) + 1;
+  // Alternates when the room offers both, so a party gets some of each rather
+  // than the host's first pick winning every round by default.
+  const mode: TruthOrDareSelectionMode = modes.length > 1 ? (round % 2 === 1 ? 'wheel' : 'card') : modes[0];
+
+  room.truthOrDareState = {
+    round,
+    selectionMode: mode,
+    callerId: caller.id,
+    targetId: mode === 'card' ? caller.id : '',
+    phase: 'selecting',
+    choice: null,
+    category: null,
+    promptId: null,
+    promptText: null,
+    spicy: false,
+    completed: null,
+    usedPromptIds: previous?.usedPromptIds ?? [],
+    forfeits: previous?.forfeits ?? {},
+    selectedAt: null,
+    revealedAt: null,
+    deadline: null,
+    deadlineFor: null,
+  };
+  room.phase = 'truth_or_dare_round';
+  pushEvent(
+    room,
+    mode === 'wheel' ? `🎡 ${caller.name} spins the wheel!` : `🃏 ${caller.name} flips a card!`,
+    'system'
+  );
+}
+
+/** Books the target's own report of what happened — the app trusts the room, not a vote. */
+function resolveTruthOrDareTurn(room: RoomState, target: Player, completed: boolean): void {
+  const state = room.truthOrDareState;
+  if (!state) return;
+
+  state.completed = completed;
+  state.phase = 'resolved';
+  state.revealedAt = Date.now();
+
+  if (completed) {
+    const points = state.choice === 'dare' ? TRUTH_OR_DARE_DARE_POINTS : TRUTH_OR_DARE_TRUTH_POINTS;
+    target.score += points;
+    target.vibeScore = (target.vibeScore ?? 0) + 10;
+    updatePlayerLevel(target);
+    pushEvent(room, `✅ ${target.name} pulled it off (+${points} pts)`, 'buff');
+  } else {
+    state.forfeits = { ...state.forfeits, [target.id]: (state.forfeits[target.id] ?? 0) + 1 };
+    pushEvent(room, `🙈 ${target.name} forfeited — settle it the old-fashioned way!`, 'debuff');
+  }
+}
+
+// ── Truth or Dare's clock — same shape as the AI Master's, see its own
+// section above for why this cannot just be the board's shared phaseDeadline:
+// each beat waits on a different person (the caller to spin, the target to
+// choose, the target to resolve), so one flat per-phase deadline cannot tell
+// whose silence it is timing out.
+
+const TRUTH_OR_DARE_SELECT_MS = 20_000;
+const TRUTH_OR_DARE_CHOOSE_MS = 25_000;
+const TRUTH_OR_DARE_PROMPT_MS = 120_000;
+const TRUTH_OR_DARE_RESOLVED_MS = 20_000;
+
+function truthOrDareWaitMs(phase: TruthOrDareState['phase']): number {
+  if (phase === 'selecting') return TRUTH_OR_DARE_SELECT_MS;
+  if (phase === 'choosing') return TRUTH_OR_DARE_CHOOSE_MS;
+  if (phase === 'resolved') return TRUTH_OR_DARE_RESOLVED_MS;
+  return TRUTH_OR_DARE_PROMPT_MS;
+}
+
+function truthOrDareBeat(state: TruthOrDareState): string {
+  return `${state.round}:${state.phase}`;
+}
+
+function syncTruthOrDareDeadline(room: RoomState, now: number): void {
+  const state = room.truthOrDareState;
+  if (!state || room.phase !== 'truth_or_dare_round') return;
+
+  const beat = truthOrDareBeat(state);
+  if (state.deadlineFor !== beat || !state.deadline) {
+    state.deadline = now + truthOrDareWaitMs(state.phase);
+    state.deadlineFor = beat;
+  }
+}
+
+function truthOrDareHasStalled(room: RoomState, now: number): boolean {
+  const state = room.truthOrDareState;
+  if (!state || room.phase !== 'truth_or_dare_round') return false;
+  if (state.deadlineFor !== truthOrDareBeat(state)) return false;
+  return !!state.deadline && now >= state.deadline;
+}
+
+/**
+ * Moves a stalled round on without whoever it was waiting for — "if you
+ * didn't flip on your own turn, it flips randomly for you" from the design,
+ * and the same courtesy for choosing and for closing out a dare nobody ever
+ * marked done. Ridden on the heartbeat, like the AI Master's own clock.
+ */
+async function expireStalledTruthOrDare(room: RoomState, now: number): Promise<void> {
+  const state = room.truthOrDareState;
+  if (!state || !truthOrDareHasStalled(room, now)) return;
+
+  if (state.phase === 'selecting') {
+    if (state.selectionMode === 'wheel') {
+      const target = pickTruthOrDareTarget(room, state.callerId);
+      if (target) state.targetId = target.id;
+    }
+    state.phase = 'choosing';
+    state.selectedAt = now;
+    pushEvent(room, `⏳ Time's up — it spins itself!`, 'system');
+    return;
+  }
+
+  if (state.phase === 'choosing') {
+    const target = room.players.find((p) => p.id === state.targetId);
+    const choice: 'truth' | 'dare' = Math.random() < 0.5 ? 'truth' : 'dare';
+    const settings = truthOrDareSettingsOf(room);
+    const prompt = pickTruthOrDarePrompt(choice, settings.categories, settings.spicyEnabled, state.usedPromptIds);
+    if (!prompt) return;
+
+    state.choice = choice;
+    state.category = prompt.category;
+    state.promptId = prompt.id;
+    state.promptText = prompt.text;
+    state.spicy = isSpicyCategory(prompt.category);
+    state.usedPromptIds = [...state.usedPromptIds, prompt.id].slice(-200);
+    state.phase = 'prompt';
+    pushEvent(room, `⏳ ${target?.name ?? 'They'} took too long — the app picked ${choice.toUpperCase()} for them`, 'system');
+    return;
+  }
+
+  if (state.phase === 'prompt') {
+    const target = room.players.find((p) => p.id === state.targetId);
+    if (target) resolveTruthOrDareTurn(room, target, false);
+    pushEvent(room, `⏳ Time ran out before it was marked done`, 'system');
+    return;
+  }
+
+  if (state.phase === 'resolved') {
+    startTruthOrDareTurn(room);
+  }
 }
 
 /** Ends the match. In team mode one player crossing wins it for their whole crew. */
@@ -3285,6 +3486,118 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    case 'update_truth_or_dare_settings': {
+      const categoriesInput = Array.isArray(body.categories) ? body.categories : [];
+      const validCategories = (categoriesInput as unknown[]).filter((c): c is TruthOrDareCategoryId =>
+        TRUTH_OR_DARE_CATEGORIES.some((cat) => cat.id === c)
+      );
+      const categories = validCategories.length > 0 ? validCategories : DEFAULT_TRUTH_OR_DARE_SETTINGS.categories;
+
+      const modesInput = Array.isArray(body.selectionModes) ? body.selectionModes : [];
+      const validModes = (modesInput as unknown[]).filter(
+        (m): m is TruthOrDareSelectionMode => m === 'wheel' || m === 'card'
+      );
+      const selectionModes = validModes.length > 0 ? validModes : DEFAULT_TRUTH_OR_DARE_SETTINGS.selectionModes;
+
+      room.truthOrDareSettings = {
+        categories,
+        spicyEnabled: body.spicyEnabled === true,
+        selectionModes,
+      };
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'truth_or_dare_start': {
+      if (room.players.length < 2) {
+        return NextResponse.json({ error: 'Truth or Dare needs at least 2 players' }, { status: 409 });
+      }
+      room.roomType = 'truth_or_dare';
+      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      room.matchStartedAt = Date.now();
+      room.matchArchived = false;
+      room.winner = null;
+      room.truthOrDareState = null;
+      if (!room.truthOrDareSettings) room.truthOrDareSettings = DEFAULT_TRUTH_OR_DARE_SETTINGS;
+      await recordSessionStarted(room);
+      for (const player of room.players) {
+        resetMatchStats(player);
+      }
+      pushEvent(room, `🎯 Truth or Dare begins!`, 'system');
+      startTruthOrDareTurn(room);
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'truth_or_dare_select': {
+      const state = room.truthOrDareState;
+      if (!state || state.phase !== 'selecting') {
+        return NextResponse.json({ error: 'Nothing to spin or flip right now' }, { status: 409 });
+      }
+      if (state.selectionMode === 'wheel') {
+        const target = pickTruthOrDareTarget(room, state.callerId);
+        if (!target) return NextResponse.json({ error: 'No one to challenge' }, { status: 409 });
+        state.targetId = target.id;
+      }
+      state.phase = 'choosing';
+      state.selectedAt = Date.now();
+      const target = room.players.find((p) => p.id === state.targetId);
+      pushEvent(
+        room,
+        `${state.selectionMode === 'wheel' ? '🎡' : '🃏'} ${target?.name ?? 'Someone'} is up!`,
+        'system'
+      );
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'truth_or_dare_choose': {
+      const state = room.truthOrDareState;
+      if (!state || state.phase !== 'choosing') {
+        return NextResponse.json({ error: 'No choice to make right now' }, { status: 409 });
+      }
+      if (body.playerId !== state.targetId) {
+        return NextResponse.json({ error: 'It is not your challenge' }, { status: 403 });
+      }
+      const choice: 'truth' | 'dare' = body.choice === 'dare' ? 'dare' : 'truth';
+      const settings = truthOrDareSettingsOf(room);
+      const prompt = pickTruthOrDarePrompt(choice, settings.categories, settings.spicyEnabled, state.usedPromptIds);
+      if (!prompt) {
+        return NextResponse.json({ error: 'No prompts available for the categories in this room' }, { status: 409 });
+      }
+      state.choice = choice;
+      state.category = prompt.category;
+      state.promptId = prompt.id;
+      state.promptText = prompt.text;
+      state.spicy = isSpicyCategory(prompt.category);
+      state.usedPromptIds = [...state.usedPromptIds, prompt.id].slice(-200);
+      state.phase = 'prompt';
+      const target = room.players.find((p) => p.id === state.targetId);
+      pushEvent(room, `${choice === 'dare' ? '🎭' : '🫢'} ${target?.name ?? 'Someone'} picked ${choice.toUpperCase()}`, 'system');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'truth_or_dare_resolve': {
+      const state = room.truthOrDareState;
+      if (!state || state.phase !== 'prompt') {
+        return NextResponse.json({ error: 'No challenge to resolve right now' }, { status: 409 });
+      }
+      const isHostCaller = body.callerId === room.hostId;
+      if (body.callerId !== state.targetId && !isHostCaller) {
+        return NextResponse.json({ error: 'Only they — or the host — can close this out' }, { status: 403 });
+      }
+      const target = room.players.find((p) => p.id === state.targetId);
+      if (!target) return NextResponse.json({ error: 'Player not found' }, { status: 404 });
+
+      resolveTruthOrDareTurn(room, target, body.completed !== false);
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'truth_or_dare_next_round': {
+      if (!room.truthOrDareState) {
+        return NextResponse.json({ error: 'No Truth or Dare game in progress' }, { status: 409 });
+      }
+      startTruthOrDareTurn(room);
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
     case 'update_room_vibe': {
       const vibe = body.roomVibe;
       if (typeof vibe !== 'string' || !(vibe in ROOM_VIBES)) {
@@ -3478,6 +3791,7 @@ async function applyAction(
       room.triviaState = null;
       room.guessTheVoiceState = null;
       room.aiMasterState = null;
+      room.truthOrDareState = null;
 
       pushEvent(room, `🏁 ${room.players.find((p) => p.id === body.callerId)?.name ?? 'The host'} ended the match — back to the lobby`, 'system');
       return NextResponse.json({ room: await writeRoom(room) });
@@ -3522,8 +3836,9 @@ async function applyAction(
       // the room sitting there for up to PRESENCE_TIMEOUT_MS/3 longer.
       const phaseStalled = phaseHasStalled(room, now);
       const aiStalled = aiMasterHasStalled(room, now);
+      const truthOrDareStalled = truthOrDareHasStalled(room, now);
 
-      if (!wasAway && !needsRefresh && !rollStalled && !phaseStalled && !aiStalled) {
+      if (!wasAway && !needsRefresh && !rollStalled && !phaseStalled && !aiStalled && !truthOrDareStalled) {
         return NextResponse.json({ ok: true });
       }
 
@@ -3536,11 +3851,13 @@ async function applyAction(
       expireStalledRoll(room, now);
       expireStalledPhase(room, now);
       await expireStalledAiMaster(room, now);
+      await expireStalledTruthOrDare(room, now);
       // Arm the clock for whatever the room is waiting on now. Last, so it sees
       // the phase the expiries above may have just moved it into, and so a
       // fresh wait is never handed a deadline that has already passed.
       syncPhaseDeadline(room, now);
       syncAiMasterDeadline(room, now);
+      syncTruthOrDareDeadline(room, now);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

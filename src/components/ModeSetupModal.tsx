@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bot, Gamepad2, Globe, Play, Sparkles, Swords, Timer, Users, X } from 'lucide-react';
-import { LanguageCode, MiniGameId, RoomState } from '@/lib/types';
+import { Bot, Dices, Gamepad2, Globe, Play, Sparkles, Swords, Timer, Users, X } from 'lucide-react';
+import { LanguageCode, MiniGameId, RoomState, TruthOrDareCategoryId, TruthOrDareSelectionMode, TruthOrDareSettings } from '@/lib/types';
 import { MINI_GAMES } from '@/lib/gameRules';
 import { ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
+import { TRUTH_OR_DARE_CATEGORIES, TRUTH_OR_DARE_SELECTION_LABELS } from '@/lib/truthOrDareContent';
 import { BotDifficulty, ChessGameMode, ChessTimeControl } from '@/lib/chess/chessTypes';
 import { vibeArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
@@ -14,6 +15,7 @@ export type GameModeId =
   | 'karaoke'
   | 'hangout'
   | 'ai_master'
+  | 'truth_or_dare'
   | 'team_battle'
   | 'chess'
   | 'ludo';
@@ -71,6 +73,7 @@ const MODE_TITLES: Record<GameModeId, { title: string; blurb: string }> = {
   karaoke: { title: 'Karaoke Arcade', blurb: 'Not open yet.' },
   hangout: { title: 'Roast & Open-Mic Lounge', blurb: 'Not open yet.' },
   ai_master: { title: 'AI Game Master', blurb: 'Tell the host who it is playing to.' },
+  truth_or_dare: { title: 'Truth or Dare', blurb: 'Pick the categories and how a target gets picked.' },
   team_battle: { title: 'Team Battle', blurb: 'Two crews, one series.' },
   chess: { title: 'Chess', blurb: 'Choose your opponent and your clock.' },
   ludo: { title: 'Ludo', blurb: 'Choose how many seats are human.' },
@@ -86,6 +89,10 @@ interface ModeSetupModalProps {
   onToggleMiniGame: (id: MiniGameId) => void;
   roomVibe: RoomVibeId;
   onSelectVibe: (id: RoomVibeId) => void;
+  truthOrDareSettings: TruthOrDareSettings;
+  onToggleTruthOrDareCategory: (id: TruthOrDareCategoryId) => void;
+  onToggleTruthOrDareSpicy: () => void;
+  onToggleTruthOrDareSelectionMode: (mode: TruthOrDareSelectionMode) => void;
   onClose: () => void;
   onLaunch: (options: ModeLaunchOptions) => void;
 }
@@ -149,6 +156,10 @@ export default function ModeSetupModal({
   onToggleMiniGame,
   roomVibe,
   onSelectVibe,
+  truthOrDareSettings,
+  onToggleTruthOrDareCategory,
+  onToggleTruthOrDareSpicy,
+  onToggleTruthOrDareSelectionMode,
   onClose,
   onLaunch,
 }: ModeSetupModalProps) {
@@ -173,7 +184,12 @@ export default function ModeSetupModal({
   const seats = Math.min(humanSeats, maxSeats);
 
   const comingSoon = mode === 'karaoke' || mode === 'hangout';
-  const blocked = comingSoon || (mode === 'chess' && !chessReady);
+  const blocked =
+    comingSoon ||
+    (mode === 'chess' && !chessReady) ||
+    // Mirrors the server's own floor for truth_or_dare_start — a target needs
+    // at least one other person in the room to call on.
+    (mode === 'truth_or_dare' && humanCount < 2);
   const teamSetupStep = mode === 'team_battle' && room.roomType !== 'team_battle';
   const { title, blurb } = MODE_TITLES[mode];
 
@@ -362,6 +378,92 @@ export default function ModeSetupModal({
                 </div>
               )}
             </div>
+          )}
+
+          {/* ── Truth or Dare ─────────────────────────────────────────────── */}
+          {mode === 'truth_or_dare' && (
+            <>
+              {humanCount < 2 && (
+                <p className="text-[11px] text-amber-300">
+                  Needs at least 2 players — this room has {humanCount}.
+                </p>
+              )}
+
+              <div className="space-y-3">
+                <SectionHeading
+                  icon={<Sparkles className="w-4 h-4 text-partyPink" />}
+                  title="CATEGORIES"
+                  hint={isHost ? 'Pick what the room draws from. At least one stays on.' : 'Set by the host.'}
+                />
+                <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
+                  {TRUTH_OR_DARE_CATEGORIES.filter((c) => !c.spicy).map((category) => (
+                    <OptionTile
+                      key={category.id}
+                      accent="pink"
+                      selected={truthOrDareSettings.categories.includes(category.id)}
+                      disabled={!isHost}
+                      onClick={() => onToggleTruthOrDareCategory(category.id)}
+                    >
+                      <span className="font-extrabold text-xs block">
+                        {category.emoji} {category.label}
+                      </span>
+                      <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{category.blurb}</span>
+                    </OptionTile>
+                  ))}
+                </div>
+
+                {/* Its own toggle rather than just another category — turning it
+                    off by accident should not silently declaw the deck, so it
+                    needs the deliberate second switch this puts on top. */}
+                {TRUTH_OR_DARE_CATEGORIES.filter((c) => c.spicy).map((category) => {
+                  const isOn = truthOrDareSettings.spicyEnabled && truthOrDareSettings.categories.includes(category.id);
+                  return (
+                    <OptionTile
+                      key={category.id}
+                      accent="pink"
+                      selected={isOn}
+                      disabled={!isHost}
+                      onClick={() => {
+                        onToggleTruthOrDareSpicy();
+                        if (!truthOrDareSettings.categories.includes(category.id)) {
+                          onToggleTruthOrDareCategory(category.id);
+                        }
+                      }}
+                    >
+                      <span className="font-extrabold text-xs block">
+                        {category.emoji} {category.label} {isOn ? '— ON' : '— OFF'}
+                      </span>
+                      <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{category.blurb}</span>
+                    </OptionTile>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-3">
+                <SectionHeading icon={<Dices className="w-4 h-4 text-partyCyan" />} title="SELECTION MECHANIC" />
+                <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
+                  {(Object.keys(TRUTH_OR_DARE_SELECTION_LABELS) as TruthOrDareSelectionMode[]).map((selMode) => {
+                    const info = TRUTH_OR_DARE_SELECTION_LABELS[selMode];
+                    return (
+                      <OptionTile
+                        key={selMode}
+                        selected={truthOrDareSettings.selectionModes.includes(selMode)}
+                        disabled={!isHost}
+                        onClick={() => onToggleTruthOrDareSelectionMode(selMode)}
+                      >
+                        <span className="font-extrabold text-xs block">
+                          {info.emoji} {info.label}
+                        </span>
+                        <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{info.blurb}</span>
+                      </OptionTile>
+                    );
+                  })}
+                </div>
+                {truthOrDareSettings.selectionModes.length > 1 && (
+                  <p className="text-[10px] text-gray-500">Both on — rounds alternate between them.</p>
+                )}
+              </div>
+            </>
           )}
 
           {/* ── Board & Team Battle: the qualifying rounds ─────────────────── */}

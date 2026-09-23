@@ -216,6 +216,7 @@ export type GamePhase =
   | 'chess_match'
   | 'ludo_match'
   | 'ai_master_round'
+  | 'truth_or_dare_round'
   | 'game_over';
 
 /** The qualifying mini-games that feed the main board game. */
@@ -350,6 +351,70 @@ export type AiMasterState = {
    */
   deadline?: number | null;
   /** Which beat the deadline was armed for, as round and phase. */
+  deadlineFor?: string | null;
+};
+
+/** A category of Truth or Dare prompt, shown as a chip the host toggles on/off at setup. */
+export type TruthOrDareCategoryId =
+  | 'confessions'
+  | 'silly'
+  | 'deep'
+  | 'hot_takes'
+  | 'knowledge'
+  | 'money_career'
+  | 'spicy';
+
+/**
+ * How the round decides who is up.
+ *
+ * `wheel` is the spin-the-bottle mechanic: the current caller spins and it
+ * lands on a random *other* player. `card` is turn-order instead: the caller
+ * flips their own card and answers it themselves. When a room enables both,
+ * the round alternates between them so the party gets some of each.
+ */
+export type TruthOrDareSelectionMode = 'wheel' | 'card';
+
+/** Host-configured setup for a Truth or Dare match, chosen in the lobby before it starts. */
+export type TruthOrDareSettings = {
+  categories: TruthOrDareCategoryId[];
+  /** Unlocks the 'spicy' category — bold and teasing, never explicit. Off by default. */
+  spicyEnabled: boolean;
+  selectionModes: TruthOrDareSelectionMode[];
+};
+
+/** State for a Truth or Dare round. */
+export type TruthOrDareState = {
+  round: number;
+  /** Wheel spin or card flip — whichever mechanic this particular round uses. */
+  selectionMode: TruthOrDareSelectionMode;
+  /** Whoever spun the wheel or flipped the card this round. */
+  callerId: string;
+  /**
+   * Who has to answer. Set immediately for a card flip (the caller answers
+   * their own card); empty until the spin lands for a wheel round.
+   */
+  targetId: string;
+  phase: 'selecting' | 'choosing' | 'prompt' | 'resolved';
+  choice?: 'truth' | 'dare' | null;
+  category?: TruthOrDareCategoryId | null;
+  /**
+   * Which prompt was drawn, kept as an id as well as the text so a match never
+   * repeats one until the whole pool for that category has been served.
+   */
+  promptId?: string | null;
+  promptText?: string | null;
+  spicy?: boolean;
+  /** Self-reported by the target once they're done — the app trusts the room. */
+  completed?: boolean | null;
+  usedPromptIds: string[];
+  /** playerId -> how many times they've forfeited, shown at the end for fun. */
+  forfeits: Record<string, number>;
+  /** Epoch ms the target/caller landed on, so the client knows to play a fresh reveal. */
+  selectedAt?: number | null;
+  revealedAt?: number | null;
+  /** Epoch ms by which the current phase must move on, or somebody/something does it for them. */
+  deadline?: number | null;
+  /** Which beat `deadline` was armed for, as round and phase — see AiMasterState for why. */
   deadlineFor?: string | null;
 };
 
@@ -527,7 +592,7 @@ export type RoomState = {
   } | null;
   winner: Player | null;
   /** The high-level mode the room is running in. */
-  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master';
+  roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master' | 'truth_or_dare';
   /** The social vibe the host picked, steering the AI Master's tone and mini-game mix. Undefined reads as classic_party. */
   roomVibe?: RoomVibeId;
   /**
@@ -677,6 +742,10 @@ export type RoomState = {
   ludoState?: import('./ludo/ludoTypes').LudoRoomState | null;
   /** AI Master game state. */
   aiMasterState?: AiMasterState | null;
+  /** Host's chosen categories, spicy toggle and selection mechanics for Truth or Dare. Persists across matches in the room. */
+  truthOrDareSettings?: TruthOrDareSettings | null;
+  /** Truth or Dare round state (active during truth_or_dare_round phase). */
+  truthOrDareState?: TruthOrDareState | null;
   /**
    * The closing awards, computed once when the match ends.
    *

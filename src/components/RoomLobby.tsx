@@ -20,9 +20,10 @@ import {
 import { motion } from 'framer-motion';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
-import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState } from '@/lib/types';
+import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState, TruthOrDareCategoryId, TruthOrDareSelectionMode } from '@/lib/types';
 import { MAX_PLAYERS, TEAMS } from '@/lib/gameRules';
 import { DEFAULT_ROOM_VIBE, RoomVibeId } from '@/lib/roomVibes';
+import { DEFAULT_TRUTH_OR_DARE_SETTINGS } from '@/lib/truthOrDareContent';
 import { badgeArt, modeArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
 import ModeSetupModal, { GameModeId, ModeLaunchOptions } from './ModeSetupModal';
@@ -61,6 +62,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
   );
   const roomVibe: RoomVibeId = room.roomVibe ?? DEFAULT_ROOM_VIBE;
+  const truthOrDareSettings = room.truthOrDareSettings ?? DEFAULT_TRUTH_OR_DARE_SETTINGS;
   const currentAvatarIndex = Math.max(
     0,
     AVATARS.findIndex((avatar) => avatar.id === myPlayer.avatar.id)
@@ -97,6 +99,35 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
     if (!myPlayer.isHost || id === roomVibe) return;
     roomStore.setRoomVibe(room.roomId, id);
     audioSFX.playChoiSuccess();
+  };
+
+  const toggleTruthOrDareCategory = (id: TruthOrDareCategoryId) => {
+    if (!myPlayer.isHost) return;
+    const next = truthOrDareSettings.categories.includes(id)
+      ? truthOrDareSettings.categories.filter((c) => c !== id)
+      : [...truthOrDareSettings.categories, id];
+    if (next.length === 0) return; // at least one category must stay on
+    audioSFX.playChoiSuccess();
+    roomStore.updateTruthOrDareSettings(room.roomId, { ...truthOrDareSettings, categories: next });
+  };
+
+  const toggleTruthOrDareSpicy = () => {
+    if (!myPlayer.isHost) return;
+    audioSFX.playChoiSuccess();
+    roomStore.updateTruthOrDareSettings(room.roomId, {
+      ...truthOrDareSettings,
+      spicyEnabled: !truthOrDareSettings.spicyEnabled,
+    });
+  };
+
+  const toggleTruthOrDareSelectionMode = (mode: TruthOrDareSelectionMode) => {
+    if (!myPlayer.isHost) return;
+    const next = truthOrDareSettings.selectionModes.includes(mode)
+      ? truthOrDareSettings.selectionModes.filter((m) => m !== mode)
+      : [...truthOrDareSettings.selectionModes, mode];
+    if (next.length === 0) return; // at least one mechanic must stay on
+    audioSFX.playChoiSuccess();
+    roomStore.updateTruthOrDareSettings(room.roomId, { ...truthOrDareSettings, selectionModes: next });
   };
 
   const toggleMiniGame = (id: MiniGameId) => {
@@ -644,6 +675,37 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 </div>
               </button>
 
+              {/* 4b. Truth or Dare */}
+              <button
+                onClick={() => {
+                  setActiveMode('truth_or_dare');
+                  openSetup('truth_or_dare');
+                  audioSFX.playChoiSuccess();
+                }}
+                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
+                  activeMode === 'truth_or_dare'
+                    ? 'bg-gradient-to-r from-fuchsia-950/80 via-slate-900/90 to-pink-900/50 border-partyPink text-white shadow-xl'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                }`}
+              >
+                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyPink/15 border border-partyPink/30 shrink-0">
+                  <GameIcon src={modeArt('truth_or_dare')} emoji="🎯" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
+                    TRUTH OR DARE
+                    {activeMode === 'truth_or_dare' && (
+                      <span className="bg-partyPink text-white text-[9px] px-2 py-0.5 rounded-full font-black">
+                        SELECTED
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-gray-300 mt-1 leading-snug">
+                    Spin the wheel 🎡 or flip a card 🃏 — classic Truth or Dare, curated categories, spicy toggle.
+                  </p>
+                </div>
+              </button>
+
               {/* 5. Team Battle */}
               <button
                 onClick={() => {
@@ -765,6 +827,10 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
           onToggleMiniGame={toggleMiniGame}
           roomVibe={roomVibe}
           onSelectVibe={selectVibe}
+          truthOrDareSettings={truthOrDareSettings}
+          onToggleTruthOrDareCategory={toggleTruthOrDareCategory}
+          onToggleTruthOrDareSpicy={toggleTruthOrDareSpicy}
+          onToggleTruthOrDareSelectionMode={toggleTruthOrDareSelectionMode}
           onClose={() => setSetupMode(null)}
           onLaunch={(options) => {
             setSetupMode(null);

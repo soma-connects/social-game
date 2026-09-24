@@ -27,7 +27,18 @@ export interface StreamingOptions {
   keyterms?: string[];
   /** BCP-47-ish language for Deepgram, e.g. 'en'. */
   language?: string;
-  onTranscript: (text: string, isFinal: boolean) => void;
+  /**
+   * 'command' ends an utterance on a 100 ms pause — right for shouting single
+   * words. 'dictation' waits longer, so a spoken sentence is not cut off at the
+   * first breath. Defaults to 'command'.
+   */
+  mode?: 'command' | 'dictation';
+  /**
+   * `isFinal` means this stretch of text will not be revised. `speechFinal`
+   * means the speaker has paused — the end of an utterance, which is what the
+   * browser recogniser's own `isFinal` meant.
+   */
+  onTranscript: (text: string, isFinal: boolean, speechFinal: boolean) => void;
   /** Fired when the session moves to another provider mid-round. */
   onProviderChange?: (provider: StreamingProvider) => void;
   /** Fired once every provider has failed after the session was running. */
@@ -133,10 +144,13 @@ function connectDeepgram(
     sample_rate: String(TARGET_SAMPLE_RATE),
     channels: '1',
     interim_results: 'true',
-    // Short, because a single shouted word is the whole utterance here.
-    endpointing: '100',
+    // Short for commands, where a single shouted word is the whole utterance;
+    // long enough for dictation that a mid-sentence breath is not an ending.
+    endpointing: opts.mode === 'dictation' ? '700' : '100',
     smart_format: 'false',
-    punctuate: 'false',
+    punctuate: opts.mode === 'dictation' ? 'true' : 'false',
+    // "49", not "forty nine" — the maths rounds match against digits.
+    numerals: 'true',
   });
   for (const term of opts.keyterms ?? []) params.append('keyterm', term);
 
@@ -169,7 +183,9 @@ function connectDeepgram(
         const msg = JSON.parse(await messageText(event.data));
         if (msg.type !== 'Results') return;
         const text: string = msg.channel?.alternatives?.[0]?.transcript ?? '';
-        if (text) opts.onTranscript(text, !!msg.is_final);
+        const speechFinal = !!msg.speech_final;
+        // An empty speech_final still matters: it is the pause that ends the utterance.
+        if (text || speechFinal) opts.onTranscript(text, !!msg.is_final, speechFinal);
       } catch {
         /* a malformed frame is not worth ending the round over */
       }
@@ -243,8 +259,10 @@ function connectGemini(
           return;
         }
         const content = msg.serverContent;
-        if (content?.inputTranscription?.text) opts.onTranscript(content.inputTranscription.text, true);
-        else if (content?.interimInputTranscription?.text) opts.onTranscript(content.interimInputTranscription.text, false);
+        // Gemini only finalises once the speaker pauses, so final and end of
+        // utterance arrive together.
+        if (content?.inputTranscription?.text) opts.onTranscript(content.inputTranscription.text, true, true);
+        else if (content?.interimInputTranscription?.text) opts.onTranscript(content.interimInputTranscription.text, false, false);
       } catch {
         /* ignore malformed frames */
       }

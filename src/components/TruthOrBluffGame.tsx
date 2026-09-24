@@ -121,7 +121,9 @@ export default function TruthOrBluffGame({
       }
 
       let session: any = null;
-      session = speechEngine.listenForSpeech({
+      session = speechEngine.listen({
+        roomId: roomId,
+        mode: 'dictation',
         targetWord: '',
         language: 'en-US',
         onResult: (result: any) => {

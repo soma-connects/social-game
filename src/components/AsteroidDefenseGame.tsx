@@ -539,6 +539,7 @@ export default function AsteroidDefenseGame({
       roomId: room.roomId,
       keyterms: WORDS,
       onTranscript: (text) => {
+        if (!text) return;
         setTranscript(text);
         handleSpeech(text);
       },

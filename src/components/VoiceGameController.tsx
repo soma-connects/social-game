@@ -187,7 +187,9 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     const target = challenge.answer ?? challenge.word;
 
     let startFailed = false;
-    const session = speechEngine.listenForSpeech({
+    const session = speechEngine.listen({
+      roomId: room.roomId,
+      mode: 'command',
       targetWord: target,
       language: challenge.language,
       onResult: (res: SpeechMatchResult) => {
@@ -242,7 +244,9 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     // A pronunciation challenge is its own answer; maths carries a separate
     // one, so the prompt on screen is the sum rather than the sum and its result.
     const target = challenge.answer ?? challenge.word;
-    sessionRef.current = speechEngine.listenForSpeech({
+    sessionRef.current = speechEngine.listen({
+      roomId: room.roomId,
+      mode: 'command',
       targetWord: target,
       language: challenge.language,
       onResult: (res: SpeechMatchResult) => {

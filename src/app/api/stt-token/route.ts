@@ -63,10 +63,14 @@ async function mintGemini(): Promise<SttTokenResponse | { error: string }> {
       expireTime: new Date(now + 30 * 60_000).toISOString(),
       newSessionExpireTime: new Date(now + 60_000).toISOString(),
       // Locks the token to transcription on this one model, so a leaked token
-      // cannot be spent on anything more expensive.
-      liveConnectConstraints: {
+      // cannot be spent on anything more expensive. The REST field is
+      // `bidiGenerateContentSetup`; `liveConnectConstraints` is only the SDK's
+      // name for it and the raw API rejects it. Must match the setup message
+      // the client sends in streamingSpeech.ts.
+      bidiGenerateContentSetup: {
         model: `models/${GEMINI_TRANSCRIBE_MODEL}`,
-        config: { responseModalities: ['TEXT'] },
+        generationConfig: { responseModalities: ['TEXT'] },
+        inputAudioTranscription: {},
       },
     }),
   });

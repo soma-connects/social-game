@@ -7,6 +7,7 @@ import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
 import { SpeechDiagnostics, speechEngine } from '@/lib/speechService';
 import { isMobileAudioPlatform, micStream } from '@/lib/micStream';
+import { StreamingProvider, startStreamingRecognition } from '@/lib/streamingSpeech';
 import { measurePixelText } from '@/lib/pixelFont';
 import { BakedSprite, ROCK_PALETTES, makeAsteroidSprite, makeHeartSprite } from '@/lib/pixelSprites';
 import {
@@ -101,6 +102,8 @@ export default function AsteroidDefenseGame({
   const [micError, setMicError] = useState<string | null>(null);
   const [speechDiag, setSpeechDiag] = useState<SpeechDiagnostics | null>(null);
   const [speechPriority, setSpeechPriority] = useState(false);
+  /** Which recogniser is listening. 'browser' is the old Web Speech path, kept as the last fallback. */
+  const [engine, setEngine] = useState<StreamingProvider | 'browser' | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sessionRef = useRef<{ stop: () => void } | null>(null);
@@ -503,6 +506,16 @@ export default function AsteroidDefenseGame({
       });
     }
 
+    // Seed the first rock so the screen is never empty on start.
+    spawnAsteroid();
+    rafRef.current = requestAnimationFrame(step);
+
+    await startListening();
+  };
+
+  /** The old recogniser: its own private mic, so on a phone it fights the call. */
+  const startBrowserListening = () => {
+    setEngine('browser');
     sessionRef.current = speechEngine.listenForSpeech({
       targetWord: '',
       language: 'en-US',
@@ -514,10 +527,38 @@ export default function AsteroidDefenseGame({
         /* the recogniser restarts itself; a dropped phrase is not fatal */
       },
     });
+  };
 
-    // Seed the first rock so the screen is never empty on start.
-    spawnAsteroid();
-    rafRef.current = requestAnimationFrame(step);
+  /**
+   * Streams the shared call microphone to Deepgram (Gemini Live as backup), so
+   * the room keeps hearing the player while the game does too. Falls back to
+   * the browser recogniser only when neither provider can be reached.
+   */
+  const startListening = async () => {
+    const session = await startStreamingRecognition({
+      roomId: room.roomId,
+      keyterms: WORDS,
+      onTranscript: (text) => {
+        setTranscript(text);
+        handleSpeech(text);
+      },
+      onProviderChange: setEngine,
+      onFatal: () => {
+        if (game.current.active) startBrowserListening();
+      },
+    });
+
+    // The round may have ended while we were connecting.
+    if (!game.current.active) {
+      session?.stop();
+      return;
+    }
+    if (session) {
+      setEngine(session.provider);
+      sessionRef.current = session;
+    } else {
+      startBrowserListening();
+    }
   };
 
   /**
@@ -529,7 +570,9 @@ export default function AsteroidDefenseGame({
    * with a cause attached.
    */
   useEffect(() => {
-    if (status !== 'playing') {
+    // These counters belong to the browser recogniser; a streaming session
+    // never touches them and would read as "heard nothing" forever.
+    if (status !== 'playing' || engine !== 'browser') {
       setSpeechDiag(null);
       return;
     }
@@ -539,7 +582,7 @@ export default function AsteroidDefenseGame({
       setSpeechDiag(d.results === 0 && silentFor > 7000 ? d : null);
     }, 2000);
     return () => clearInterval(timer);
-  }, [status]);
+  }, [status, engine]);
 
   const toggleMic = () => setIsMicMuted(speechEngine.toggleMicMute());
 
@@ -729,6 +772,20 @@ export default function AsteroidDefenseGame({
           <span className="text-gray-500 shrink-0">HEARD</span>
           <span className="flex-1 truncate rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-cyan-300">
             {transcript || 'â€¦'}
+          </span>
+          <span
+            title={
+              engine === 'browser'
+                ? 'Browser speech recognition — on a phone it cannot share the mic with the call'
+                : 'Streaming recognition on the shared mic — the call keeps your voice'
+            }
+            className={`shrink-0 rounded-md border px-1.5 py-1 text-[9px] font-black tracking-wider ${
+              engine === 'browser'
+                ? 'border-amber-500/40 text-amber-300'
+                : 'border-emerald-500/40 text-emerald-300'
+            }`}
+          >
+            {engine === 'deepgram' ? 'DEEPGRAM' : engine === 'gemini' ? 'GEMINI' : engine === 'browser' ? 'BROWSER' : 'CONNECTING'}
           </span>
         </div>
       )}

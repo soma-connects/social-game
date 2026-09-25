@@ -30,12 +30,40 @@ export default function GuessTheVoiceGame({
   );
   const [isRecording, setIsRecording] = useState(false);
   const [selectedVotedId, setSelectedVotedId] = useState<string | null>(null);
+  /** This round's recording, fetched from server memory — it is never in the room document. */
+  const [clipUrl, setClipUrl] = useState<string | null>(null);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   
   const isPerformer = state?.performerId === myPlayer.id;
+
+  // Fetch the take whenever a new one lands. Keyed on clipAt so a re-record
+  // replaces the old audio instead of replaying it.
+  const clipAt = state?.clipAt ?? null;
+  useEffect(() => {
+    setClipUrl(null);
+    audioRef.current = null;
+    if (!clipAt) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/room/${roomId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'guess_voice_clip', token: roomStore.getMyToken(roomId) ?? '' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && typeof data.clip === 'string') setClipUrl(data.clip);
+      } catch {
+        /* the play button stays on "processing"; the round can still be voted on */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clipAt, roomId]);
 
   // Sync server phase to local phase
   useEffect(() => {
@@ -96,9 +124,9 @@ export default function GuessTheVoiceGame({
   };
 
   const playDisguisedAudio = () => {
-    if (state?.audioBlobUrl) {
+    if (clipUrl) {
       if (!audioRef.current) {
-        audioRef.current = new Audio(state.audioBlobUrl);
+        audioRef.current = new Audio(clipUrl);
         // Distort the audio using standard HTML5 Audio attributes
         audioRef.current.preservesPitch = false;
         audioRef.current.playbackRate = 0.6; // Deep voice distortion
@@ -158,12 +186,20 @@ export default function GuessTheVoiceGame({
             </div>
             
             {localPhase === 'prompting' ? (
-              <button
-                onClick={() => setLocalPhase('recording')}
-                className="px-8 py-4 bg-gradient-to-r from-pink-500 to-purple-600 rounded-full font-bold text-xl shadow-lg hover:shadow-pink-500/50 transition-all flex items-center justify-center gap-3 mx-auto"
-              >
-                Ready to Record
-              </button>
+              // The consent moment. Nobody is recorded without first being told
+              // exactly who hears it and what happens to it afterwards.
+              <div className="space-y-3 max-w-sm mx-auto">
+                <p className="text-xs text-white/70 leading-relaxed bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                  Your recording is played, disguised, only to the players in this room. It is deleted
+                  when the round ends and is never saved.
+                </p>
+                <button
+                  onClick={() => setLocalPhase('recording')}
+                  className="px-8 py-4 bg-gradient-to-r from-pink-500 to-purple-600 rounded-full font-bold text-lg shadow-lg hover:shadow-pink-500/50 transition-all flex items-center justify-center gap-3 mx-auto"
+                >
+                  I agree, ready to record
+                </button>
+              </div>
             ) : (
               <button
                 onMouseDown={startRecording}
@@ -207,7 +243,7 @@ export default function GuessTheVoiceGame({
         {/* Playback & Voting */}
         {(localPhase === 'playback' || localPhase === 'voting') && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md mx-auto space-y-6 text-center">
-            {state.audioBlobUrl ? (
+            {clipUrl ? (
               <button 
                 onClick={playDisguisedAudio}
                 className="w-24 h-24 mx-auto bg-gradient-to-r from-purple-500 to-indigo-600 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(139,92,246,0.4)] hover:scale-105 transition-transform"

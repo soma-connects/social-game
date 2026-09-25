@@ -76,6 +76,9 @@ import {
   readRoom,
   readSecrets,
   writeRoom,
+  setRoomClip,
+  getRoomClip,
+  clearRoomClip,
   writeSecrets,
   type RoomSecrets,
 } from '@/lib/server/roomServer';
@@ -1774,6 +1777,7 @@ function startNextRound(room: RoomState): void {
   room.debateState = null;
   room.triviaState = null;
   room.guessTheVoiceState = null;
+  clearRoomClip(room.roomId);
   pushEvent(room, `🔄 Round ${room.roundNumber} — back to the mini-games`, 'system');
   advanceRoundOrOpenShop(room);
 }
@@ -2440,22 +2444,30 @@ async function applyAction(
 
       const clip = typeof body.audioBlobUrl === 'string' ? body.audioBlobUrl : '';
       if (clip) {
-        // The clip rides inside the room document, and Firestore caps a document
-        // at 1 MiB total — players, events and every other mini-game's state
-        // share that budget. Reject an oversized take rather than letting the
-        // write fail and take the whole room down with it.
+        // Held in server memory for the round, so an unbounded take is memory
+        // anyone in a room could fill. A party prompt is a few seconds.
         if (clip.length > MAX_CLIP_CHARS) {
           return NextResponse.json(
             { error: 'That take is too long — keep it under about 10 seconds' },
             { status: 413 }
           );
         }
-        state.audioBlobUrl = clip;
+        // Held in memory for this round only — never written into the room
+        // document, which anyone with the code can read and nothing cleared.
+        state.clipAt = setRoomClip(roomId, clip);
+        state.audioBlobUrl = null;
         if (body.playerId) state.performerId = String(body.playerId);
         if (!body.phase) state.phase = 'playback';
       }
       if (body.phase) state.phase = body.phase;
       return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /** Read-only: hands this round's clip to a player in the room. */
+    case 'guess_voice_clip': {
+      const clip = room.guessTheVoiceState ? getRoomClip(roomId) : null;
+      if (!clip) return NextResponse.json({ error: 'No clip for this round' }, { status: 404 });
+      return NextResponse.json({ clip }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     case 'guess_voice_vote': {
@@ -2767,6 +2779,8 @@ async function applyAction(
       // the client here would let a PitchBird score be graded on the voice scale
       // and buy a full six-node move.
       const game: MiniGameId = room.currentMiniGame ?? 'voice_arena';
+      // The round is banked, so its recording has served its purpose.
+      if (game === 'guess_the_voice') clearRoomClip(roomId);
       const basePoints = Math.max(0, Number(body.pointsEarned) || 0);
       const socialRound = room.socialRound?.targetPlayerId === active.id ? room.socialRound : null;
       const reactionBonus = sumReactionBonus(socialRound?.reactions ?? []);
@@ -3709,7 +3723,8 @@ async function applyAction(
         room.debateState = { player1Id: '', player2Id: '', topic: '', side1: '', side2: '', phase: 'intro', votes: {} };
       }
       if (room.enabledMiniGames?.includes('guess_the_voice')) {
-        room.guessTheVoiceState = { performerId: '', prompt: '', audioBlobUrl: null, phase: 'prompting', votes: {} };
+        room.guessTheVoiceState = { performerId: '', prompt: '', audioBlobUrl: null, clipAt: null, phase: 'prompting', votes: {} };
+        clearRoomClip(room.roomId);
       }
 
       if (room.roomType === 'team_battle') {
@@ -3790,6 +3805,7 @@ async function applyAction(
       room.debateState = null;
       room.triviaState = null;
       room.guessTheVoiceState = null;
+      clearRoomClip(room.roomId);
       room.aiMasterState = null;
       room.truthOrDareState = null;
 

@@ -55,7 +55,9 @@ async function mintGemini(): Promise<SttTokenResponse | { error: string }> {
   if (!key) return { error: 'Gemini is not configured' };
 
   const now = Date.now();
-  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/auth_tokens', {
+  // v1alpha, matching the Live endpoint the browser opens with this token (see
+  // streamingSpeech.ts) — ephemeral tokens are only supported there.
+  const res = await fetch('https://generativelanguage.googleapis.com/v1alpha/auth_tokens', {
     method: 'POST',
     headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
     body: JSON.stringify({

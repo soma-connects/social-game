@@ -193,10 +193,12 @@ function connectDeepgram(
     ws.onerror = () => {
       /* onclose follows and decides what happens */
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       window.clearTimeout(timer);
-      if (!opened) resolve(null);
-      else onClosed();
+      if (!opened) {
+        console.warn(`[speech] Deepgram refused the connection (${event.code} ${event.reason || 'no reason'})`);
+        resolve(null);
+      } else onClosed();
     };
   });
 }
@@ -208,9 +210,12 @@ function connectGemini(
   onClosed: () => void
 ): Promise<ProviderLink | null> {
   // Ephemeral tokens connect to the "Constrained" endpoint and ride in the query
-  // string, since browsers cannot set headers on a WebSocket.
+  // string, since browsers cannot set headers on a WebSocket. v1alpha, not
+  // v1beta: Google's own SDK only supports ephemeral tokens there and warns
+  // otherwise, and this path used v1beta — so the Gemini fallback never got a
+  // session and every attempt fell through to the browser recogniser.
   const url =
-    'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained' +
+    'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained' +
     `?access_token=${encodeURIComponent(token)}`;
 
   return new Promise((resolve) => {
@@ -270,10 +275,14 @@ function connectGemini(
     ws.onerror = () => {
       /* onclose follows */
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       window.clearTimeout(timer);
-      if (!ready) resolve(null);
-      else onClosed();
+      if (!ready) {
+        // Gemini closes with a reason ("invalid token", "setup mismatch") when it
+        // turns a session down — the only clue a phone will ever give about why.
+        console.warn(`[speech] Gemini Live refused the session (${event.code} ${event.reason || 'no reason'})`);
+        resolve(null);
+      } else onClosed();
     };
   });
 }

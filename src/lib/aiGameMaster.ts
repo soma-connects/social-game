@@ -136,8 +136,29 @@ class AiGameMasterEngine {
    * Returns the text immediately so callers can show it while it is spoken.
    */
   public speak(text: string): string {
-    void this.speakWithGemini(text);
+    if (!this.voiceMuted) void this.speakWithGemini(text);
     return text;
+  }
+
+  private voiceMuted = false;
+
+  /**
+   * Silences the host until unmuted — the current line and every one after it.
+   *
+   * The banner's mute used to call speechSynthesis.cancel() directly, which
+   * stopped only the line already playing: the next line spoke regardless, and
+   * a Gemini line was not stopped at all.
+   */
+  public isVoiceMuted(): boolean {
+    return this.voiceMuted;
+  }
+
+  public setVoiceMuted(muted: boolean): void {
+    this.voiceMuted = muted;
+    if (muted) {
+      this.speakToken++;
+      this.stopSpeaking();
+    }
   }
 
   private getAudioContext(): AudioContext | null {

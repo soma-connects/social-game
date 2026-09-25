@@ -48,7 +48,7 @@ export default function GuessTheVoiceGame({
     if (isPerformer && localPhase === 'prompting' && state?.prompt) {
       aiGameMaster.speak("You are the secret voice! Get ready to read the prompt...");
     } else if (!isPerformer && localPhase === 'prompting') {
-      aiGameMaster.speak("Someone's voice is disguised â€” get ready to guess who it is!");
+      aiGameMaster.speak("Someone's voice is disguised — get ready to guess who it is!");
     }
   }, [isPerformer, localPhase, state?.prompt]);
 

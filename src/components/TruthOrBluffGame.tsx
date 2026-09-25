@@ -59,7 +59,7 @@ export default function TruthOrBluffGame({
     if (isMyTurn && localPhase === 'prompting' && !promptText) {
       const prompt = aiGameMaster.getRandomChallenge('truth_bluff');
       setPromptText(prompt.text);
-      aiGameMaster.speak("Truth or Bluff! Tell us two things â€” one true, one false!");
+      aiGameMaster.speak("Truth or Bluff! Tell us two things — one true, one false!");
     }
   }, [isMyTurn, localPhase, promptText]);
 

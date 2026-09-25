@@ -454,6 +454,7 @@ export default function GameRoomPage() {
           myPlayerId={myPlayer.id}
           canManage={myPlayer.isHost}
           roomType={room.roomType}
+          inMatch={room.phase !== 'lobby'}
           onKickPlayer={(p) => roomStore.kickPlayer(roomId, p.id, myPlayer.id)}
         />
 

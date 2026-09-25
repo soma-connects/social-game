@@ -36,6 +36,7 @@ import VoiceCallBar from '@/components/VoiceCallBar';
 import AiGameMasterBanner from '@/components/AiGameMasterBanner';
 import GeminiAiMasterStage from '@/components/GeminiAiMasterStage';
 import AiMasterGame from '@/components/AiMasterGame';
+import TruthOrDareGame from '@/components/TruthOrDareGame';
 import SocialVoicePanel from '@/components/SocialVoicePanel';
 import SpectatorView from '@/components/SpectatorView';
 import RoastIntermission from '@/components/RoastIntermission';
@@ -323,7 +324,9 @@ export default function GameRoomPage() {
     roomStore.startMatch(roomId);
   };
 
-  const handleSelectMode = async (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo') => {
+  const handleSelectMode = async (
+    mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'truth_or_dare' | 'team_battle' | 'chess' | 'ludo'
+  ) => {
     if (mode === 'board') {
       handleStartMatch();
     } else if (mode === 'chess') {
@@ -346,6 +349,9 @@ export default function GameRoomPage() {
     } else if (mode === 'ai_master') {
       audioSFX.playNollywoodBrass();
       await roomStore.startAiMaster(roomId);
+    } else if (mode === 'truth_or_dare') {
+      audioSFX.playNollywoodBrass();
+      await roomStore.startTruthOrDare(roomId);
     } else if (mode === 'karaoke') {
       setComingSoonTitle('ðŸŽ¤ Karaoke & Pitch Arcade Mode');
     } else if (mode === 'hangout') {
@@ -730,6 +736,13 @@ export default function GameRoomPage() {
           {room.phase === 'ai_master_round' && (
             <div className="space-y-6">
               <AiMasterGame room={room} myPlayer={myPlayer} roomId={roomId} />
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+            </div>
+          )}
+
+          {room.phase === 'truth_or_dare_round' && (
+            <div className="space-y-6">
+              <TruthOrDareGame room={room} myPlayer={myPlayer} roomId={roomId} />
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
             </div>
           )}

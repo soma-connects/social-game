@@ -43,7 +43,9 @@ export default function MicContentionNotice({ active, onClaimPriority }: MicCont
       const d = speechEngine.getDiagnostics();
       const silentFor = d.startedAt ? Date.now() - d.startedAt : 0;
       setStalled(
-        d.results === 0 &&
+        // Streaming engines share the call's mic, so there is no contention to report.
+        d.engine === 'browser' &&
+          d.results === 0 &&
           silentFor > STALL_MS &&
           !d.suspendedMic &&
           micStream.isCallActive() &&

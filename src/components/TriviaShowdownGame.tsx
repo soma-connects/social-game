@@ -228,7 +228,9 @@ export default function TriviaShowdownGame({
 
   /** The actual session start, unconditional — startListening's guard lives above it. */
   const beginListening = () => {
-    sessionRef.current = speechEngine.listenForSpeech({
+    sessionRef.current = speechEngine.listen({
+      roomId: room.roomId,
+      mode: 'dictation',
       language: 'en-US',
       // No target word: the client is not told the answer, so it cannot match
       // against it. The player submits when they finish, or the timer does.

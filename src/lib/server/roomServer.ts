@@ -12,10 +12,12 @@ import { ROOM_TTL_MS } from '../gameRules';
 
 /** A WebRTC signalling message, relayed verbatim between two players. */
 export type SignalMessage =
-  | { kind: 'offer'; from: string; to: string; sdp: unknown }
-  | { kind: 'answer'; from: string; to: string; sdp: unknown }
-  | { kind: 'ice'; from: string; to: string; candidate: unknown }
-  | { kind: 'bye'; from: string; to: string };
+  | { kind: 'offer'; from: string; to: string; sdp: unknown; session?: string; offerId?: string }
+  | { kind: 'answer'; from: string; to: string; sdp: unknown; session?: string; offerId?: string }
+  | { kind: 'ice'; from: string; to: string; candidate: unknown; session?: string }
+  | { kind: 'bye'; from: string; to: string }
+  /** "Start our connection over" — sent by the answering side, which cannot offer itself. */
+  | { kind: 'reset'; from: string; to: string };
 
 /** Undelivered signals are worthless once stale — an offer that old is dead anyway. */
 const SIGNAL_TTL_MS = 30 * 1000;

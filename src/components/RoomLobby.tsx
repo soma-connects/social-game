@@ -18,13 +18,15 @@ import {
   Shuffle,
   Bot,
   Settings,
+  Dices,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
-import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState } from '@/lib/types';
+import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState, TruthOrDareCategoryId, TruthOrDareSelectionMode } from '@/lib/types';
 import { MAX_PLAYERS, MINI_GAMES, TEAMS } from '@/lib/gameRules';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
+import { DEFAULT_TRUTH_OR_DARE_SETTINGS, TRUTH_OR_DARE_CATEGORIES, TRUTH_OR_DARE_SELECTION_LABELS } from '@/lib/truthOrDareContent';
 import { badgeArt, modeArt, vibeArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
 import MicCheck from './MicCheck';
@@ -37,7 +39,9 @@ interface RoomLobbyProps {
   room: RoomState;
   myPlayer: Player;
   onStartGame: () => void;
-  onSelectMode?: (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo') => void;
+  onSelectMode?: (
+    mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'truth_or_dare' | 'team_battle' | 'chess' | 'ludo'
+  ) => void;
 }
 
 const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
@@ -54,13 +58,16 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   const [newPlayerName, setNewPlayerName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
-  const [activeMode, setActiveMode] = useState<'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo'>('board');
+  const [activeMode, setActiveMode] = useState<
+    'board' | 'karaoke' | 'hangout' | 'ai_master' | 'truth_or_dare' | 'team_battle' | 'chess' | 'ludo'
+  >('board');
   const [showCustomDecks, setShowCustomDecks] = useState(false);
   const [isShuffling, setIsShuffling] = useState(false);
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
   );
   const roomVibe: RoomVibeId = room.roomVibe ?? DEFAULT_ROOM_VIBE;
+  const truthOrDareSettings = room.truthOrDareSettings ?? DEFAULT_TRUTH_OR_DARE_SETTINGS;
   const currentAvatarIndex = Math.max(
     0,
     AVATARS.findIndex((avatar) => avatar.id === myPlayer.avatar.id)
@@ -90,6 +97,35 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
     if (!myPlayer.isHost || id === roomVibe) return;
     roomStore.setRoomVibe(room.roomId, id);
     audioSFX.playChoiSuccess();
+  };
+
+  const toggleTruthOrDareCategory = (id: TruthOrDareCategoryId) => {
+    if (!myPlayer.isHost) return;
+    const next = truthOrDareSettings.categories.includes(id)
+      ? truthOrDareSettings.categories.filter((c) => c !== id)
+      : [...truthOrDareSettings.categories, id];
+    if (next.length === 0) return; // at least one category must stay on
+    audioSFX.playChoiSuccess();
+    roomStore.updateTruthOrDareSettings(room.roomId, { ...truthOrDareSettings, categories: next });
+  };
+
+  const toggleTruthOrDareSpicy = () => {
+    if (!myPlayer.isHost) return;
+    audioSFX.playChoiSuccess();
+    roomStore.updateTruthOrDareSettings(room.roomId, {
+      ...truthOrDareSettings,
+      spicyEnabled: !truthOrDareSettings.spicyEnabled,
+    });
+  };
+
+  const toggleTruthOrDareSelectionMode = (mode: TruthOrDareSelectionMode) => {
+    if (!myPlayer.isHost) return;
+    const next = truthOrDareSettings.selectionModes.includes(mode)
+      ? truthOrDareSettings.selectionModes.filter((m) => m !== mode)
+      : [...truthOrDareSettings.selectionModes, mode];
+    if (next.length === 0) return; // at least one mechanic must stay on
+    audioSFX.playChoiSuccess();
+    roomStore.updateTruthOrDareSettings(room.roomId, { ...truthOrDareSettings, selectionModes: next });
   };
 
   const toggleMiniGame = (id: MiniGameId) => {
@@ -683,6 +719,137 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   )}
                 </div>
               )}
+              {/* 4b. Truth or Dare */}
+              <button
+                onClick={() => {
+                  setActiveMode('truth_or_dare');
+                  audioSFX.playChoiSuccess();
+                }}
+                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
+                  activeMode === 'truth_or_dare'
+                    ? 'bg-gradient-to-r from-fuchsia-950/80 via-slate-900/90 to-pink-900/50 border-partyPink text-white shadow-xl'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                }`}
+              >
+                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyPink/15 border border-partyPink/30 shrink-0">
+                  <GameIcon src={modeArt('truth_or_dare')} emoji="🎯" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
+                    TRUTH OR DARE
+                    {activeMode === 'truth_or_dare' && (
+                      <span className="bg-partyPink text-white text-[9px] px-2 py-0.5 rounded-full font-black">
+                        SELECTED
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-gray-300 mt-1 leading-snug">
+                    Spin the wheel 🎡 or flip a card 🃏 — classic Truth or Dare, curated categories, spicy toggle.
+                  </p>
+                </div>
+              </button>
+
+              {/* Setup only means anything to Truth or Dare, so it lives behind
+                  that mode card rather than sitting over the whole lobby. */}
+              {activeMode === 'truth_or_dare' && (
+                <div className="rounded-2xl border border-partyPink/30 bg-partyPink/[0.06] p-3.5 space-y-4 animate-fadeIn">
+                  <div>
+                    <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-partyPink" /> CATEGORIES
+                    </h4>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {myPlayer.isHost
+                        ? 'Pick what the room draws from. At least one stays on.'
+                        : 'Set by the host.'}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
+                    {TRUTH_OR_DARE_CATEGORIES.filter((c) => !c.spicy).map((category) => {
+                      const isOn = truthOrDareSettings.categories.includes(category.id);
+                      return (
+                        <button
+                          key={category.id}
+                          type="button"
+                          onClick={() => toggleTruthOrDareCategory(category.id)}
+                          disabled={!myPlayer.isHost}
+                          className={`p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
+                            isOn
+                              ? 'bg-partyPink/20 border-partyPink text-white shadow-lg'
+                              : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                          }`}
+                        >
+                          <span className="font-extrabold text-xs block">
+                            {category.emoji} {category.label}
+                          </span>
+                          <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{category.blurb}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {TRUTH_OR_DARE_CATEGORIES.filter((c) => c.spicy).map((category) => {
+                    const isOn = truthOrDareSettings.spicyEnabled && truthOrDareSettings.categories.includes(category.id);
+                    return (
+                      <button
+                        key={category.id}
+                        type="button"
+                        onClick={() => {
+                          toggleTruthOrDareSpicy();
+                          if (!truthOrDareSettings.categories.includes(category.id)) {
+                            toggleTruthOrDareCategory(category.id);
+                          }
+                        }}
+                        disabled={!myPlayer.isHost}
+                        className={`w-full p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
+                          isOn
+                            ? 'bg-orange-500/20 border-orange-400 text-white shadow-lg'
+                            : 'bg-white/5 border-orange-400/20 text-gray-400 hover:border-orange-400/40'
+                        }`}
+                      >
+                        <span className="font-extrabold text-xs block">
+                          {category.emoji} {category.label} {isOn ? '— ON' : '— OFF'}
+                        </span>
+                        <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{category.blurb}</span>
+                      </button>
+                    );
+                  })}
+
+                  <div>
+                    <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                      <Dices className="w-3.5 h-3.5 text-partyPink" /> SELECTION MECHANIC
+                    </h4>
+                    <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))] mt-2">
+                      {(Object.keys(TRUTH_OR_DARE_SELECTION_LABELS) as TruthOrDareSelectionMode[]).map((mode) => {
+                        const info = TRUTH_OR_DARE_SELECTION_LABELS[mode];
+                        const isOn = truthOrDareSettings.selectionModes.includes(mode);
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => toggleTruthOrDareSelectionMode(mode)}
+                            disabled={!myPlayer.isHost}
+                            className={`p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
+                              isOn
+                                ? 'bg-partyCyan/20 border-partyCyan text-white shadow-lg'
+                                : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                            }`}
+                          >
+                            <span className="font-extrabold text-xs block">
+                              {info.emoji} {info.label}
+                            </span>
+                            <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{info.blurb}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {truthOrDareSettings.selectionModes.length > 1 && (
+                      <p className="text-[10px] text-gray-500 mt-1.5">Both on — rounds alternate between them.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* 5. Team Battle */}
               <button
                 onClick={() => {

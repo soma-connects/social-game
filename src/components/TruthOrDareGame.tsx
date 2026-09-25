@@ -159,7 +159,7 @@ export default function TruthOrDareGame({ room, myPlayer, roomId }: TruthOrDareG
                     onClick={() => choose('truth')}
                     className="flex-1 bg-partyCyan/15 hover:bg-partyCyan/25 border border-partyCyan/40 text-partyCyan font-black text-sm py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95"
                   >
-                    🫢 TRUTH
+                    🤫 TRUTH
                   </button>
                   <button
                     onClick={() => choose('dare')}
@@ -198,11 +198,18 @@ export default function TruthOrDareGame({ room, myPlayer, roomId }: TruthOrDareG
                       : 'text-partyCyan border-partyCyan/40 bg-partyCyan/10'
                   }`}
                 >
-                  {state.choice === 'dare' ? '🎭 DARE' : '🫢 TRUTH'}
+                  {state.choice === 'dare' ? '🎭 DARE' : '🤫 TRUTH'}
                 </span>
                 {categoryInfo && (
                   <span className="text-[10px] font-black text-gray-300 px-2 py-0.5 rounded-full border border-white/15 bg-white/5">
                     {categoryInfo.emoji} {categoryInfo.label}
+                  </span>
+                )}
+                {/* One of the room's own ideas has no category to show. Says whose
+                    it is not — nobody learns who wrote it. */}
+                {state.promptOrigin === 'player' && (
+                  <span className="text-[10px] font-black text-partyYellow px-2 py-0.5 rounded-full border border-partyYellow/30 bg-partyYellow/10">
+                    💡 FROM THE ROOM
                   </span>
                 )}
                 {state.spicy && (

@@ -39,6 +39,8 @@ import {
   STREAK_KEEP_THRESHOLD,
   DARE_BLOCKED_MESSAGE,
   personalDaresAllowed,
+  TRUTH_OR_DARE_BLOCKED_MESSAGE,
+  truthOrDareAllowed,
   PRESENCE_TIMEOUT_MS,
   isPresent,
   leaderProgressOf,
@@ -104,8 +106,11 @@ import {
   DEFAULT_TRUTH_OR_DARE_SETTINGS,
   TRUTH_OR_DARE_CATEGORIES,
   isSpicyCategory,
+  isTruthOrDarePromptSource,
+  normalizeTruthOrDareSettings,
   pickTruthOrDarePrompt,
 } from '@/lib/truthOrDareContent';
+import { addIdea, countIdeas, ideasBy, removeIdea, withoutAuthors } from '@/lib/truthOrDareIdeas';
 
 export const dynamic = 'force-dynamic';
 
@@ -1538,7 +1543,28 @@ const TRUTH_OR_DARE_TRUTH_POINTS = 60;
 
 /** Settings default to the shipped library until the host changes them. */
 function truthOrDareSettingsOf(room: RoomState): TruthOrDareSettings {
-  return room.truthOrDareSettings ?? DEFAULT_TRUTH_OR_DARE_SETTINGS;
+  return normalizeTruthOrDareSettings(room.truthOrDareSettings);
+}
+
+/**
+ * Draws this turn's prompt, from wherever the host said prompts come from.
+ *
+ * The room's ideas are only read when the source can use them, so a room on the
+ * built-in deck never touches the private state.
+ */
+async function drawTruthOrDarePrompt(
+  room: RoomState,
+  choice: 'truth' | 'dare',
+  usedIds: string[]
+): Promise<ReturnType<typeof pickTruthOrDarePrompt>> {
+  const settings = truthOrDareSettingsOf(room);
+  const source = settings.promptSource ?? 'both';
+  const playerPrompts =
+    source === 'library' ? [] : withoutAuthors((await readSecrets(room.roomId)).truthOrDareIdeas ?? []);
+  return pickTruthOrDarePrompt(choice, settings.categories, settings.spicyEnabled, usedIds, {
+    source,
+    playerPrompts,
+  });
 }
 
 /** A random player other than the spinner — the bottle-spin mechanic. */
@@ -1588,6 +1614,7 @@ function startTruthOrDareTurn(room: RoomState): void {
     category: null,
     promptId: null,
     promptText: null,
+    promptOrigin: null,
     spicy: false,
     completed: null,
     usedPromptIds: previous?.usedPromptIds ?? [],
@@ -1690,14 +1717,14 @@ async function expireStalledTruthOrDare(room: RoomState, now: number): Promise<v
   if (state.phase === 'choosing') {
     const target = room.players.find((p) => p.id === state.targetId);
     const choice: 'truth' | 'dare' = Math.random() < 0.5 ? 'truth' : 'dare';
-    const settings = truthOrDareSettingsOf(room);
-    const prompt = pickTruthOrDarePrompt(choice, settings.categories, settings.spicyEnabled, state.usedPromptIds);
+    const prompt = await drawTruthOrDarePrompt(room, choice, state.usedPromptIds);
     if (!prompt) return;
 
     state.choice = choice;
     state.category = prompt.category;
     state.promptId = prompt.id;
     state.promptText = prompt.text;
+    state.promptOrigin = prompt.origin;
     state.spicy = isSpicyCategory(prompt.category);
     state.usedPromptIds = [...state.usedPromptIds, prompt.id].slice(-200);
     state.phase = 'prompt';
@@ -3503,11 +3530,66 @@ async function applyAction(
         categories,
         spicyEnabled: body.spicyEnabled === true,
         selectionModes,
+        // This handler rebuilds the settings from scratch, so a field it does
+        // not name is a field it deletes. A body that leaves the source out
+        // (an older tab) keeps what the host had chosen rather than resetting it.
+        promptSource: isTruthOrDarePromptSource(body.promptSource)
+          ? body.promptSource
+          : truthOrDareSettingsOf(room).promptSource,
       };
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    // ── The room's own truths and dares ──────────────────────────────────
+    //
+    // Any player, not just the host: the point is that everyone brings some. The
+    // caller is whoever the token says they are — `callerId` is overwritten on
+    // the way in, never read from the body.
+
+    case 'truth_or_dare_my_ideas': {
+      const { truthOrDareIdeas } = await readSecrets(roomId);
+      return NextResponse.json({ ideas: ideasBy(truthOrDareIdeas ?? [], body.callerId) });
+    }
+
+    case 'truth_or_dare_add_idea': {
+      if (!truthOrDareAllowed(room)) {
+        return NextResponse.json({ error: TRUTH_OR_DARE_BLOCKED_MESSAGE }, { status: 409 });
+      }
+      if (room.phase !== 'lobby') {
+        return NextResponse.json({ error: 'Ideas can only be added from the lobby.' }, { status: 409 });
+      }
+
+      const secrets = await readSecrets(roomId);
+      const result = addIdea(secrets.truthOrDareIdeas ?? [], body.callerId, body.type, body.text);
+      if (result.status === 'refused') return NextResponse.json({ error: result.error }, { status: 400 });
+
+      // The private pool is the truth; the room only carries its headcount, and
+      // recomputes it here so a replayed add cannot leave the two disagreeing.
+      secrets.truthOrDareIdeas = result.pool;
+      await writeSecrets(roomId, secrets);
+      room.truthOrDareIdeas = countIdeas(result.pool);
+      return NextResponse.json({ room: await writeRoom(room), ideas: ideasBy(result.pool, body.callerId) });
+    }
+
+    case 'truth_or_dare_remove_idea': {
+      if (room.phase !== 'lobby') {
+        return NextResponse.json({ error: 'Ideas can only be changed from the lobby.' }, { status: 409 });
+      }
+
+      const secrets = await readSecrets(roomId);
+      const pool = removeIdea(secrets.truthOrDareIdeas ?? [], body.callerId, body.ideaId);
+      secrets.truthOrDareIdeas = pool;
+      await writeSecrets(roomId, secrets);
+      room.truthOrDareIdeas = countIdeas(pool);
+      return NextResponse.json({ room: await writeRoom(room), ideas: ideasBy(pool, body.callerId) });
+    }
+
     case 'truth_or_dare_start': {
+      // Checked first, so a public room with one player is told why it cannot
+      // play rather than that it needs a friend.
+      if (!truthOrDareAllowed(room)) {
+        return NextResponse.json({ error: TRUTH_OR_DARE_BLOCKED_MESSAGE }, { status: 409 });
+      }
       if (room.players.length < 2) {
         return NextResponse.json({ error: 'Truth or Dare needs at least 2 players' }, { status: 409 });
       }
@@ -3557,8 +3639,7 @@ async function applyAction(
         return NextResponse.json({ error: 'It is not your challenge' }, { status: 403 });
       }
       const choice: 'truth' | 'dare' = body.choice === 'dare' ? 'dare' : 'truth';
-      const settings = truthOrDareSettingsOf(room);
-      const prompt = pickTruthOrDarePrompt(choice, settings.categories, settings.spicyEnabled, state.usedPromptIds);
+      const prompt = await drawTruthOrDarePrompt(room, choice, state.usedPromptIds);
       if (!prompt) {
         return NextResponse.json({ error: 'No prompts available for the categories in this room' }, { status: 409 });
       }
@@ -3566,11 +3647,12 @@ async function applyAction(
       state.category = prompt.category;
       state.promptId = prompt.id;
       state.promptText = prompt.text;
+      state.promptOrigin = prompt.origin;
       state.spicy = isSpicyCategory(prompt.category);
       state.usedPromptIds = [...state.usedPromptIds, prompt.id].slice(-200);
       state.phase = 'prompt';
       const target = room.players.find((p) => p.id === state.targetId);
-      pushEvent(room, `${choice === 'dare' ? '🎭' : '🫢'} ${target?.name ?? 'Someone'} picked ${choice.toUpperCase()}`, 'system');
+      pushEvent(room, `${choice === 'dare' ? '🎭' : '🤫'} ${target?.name ?? 'Someone'} picked ${choice.toUpperCase()}`, 'system');
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

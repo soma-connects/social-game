@@ -2,13 +2,26 @@
 
 import React, { useState } from 'react';
 import { Bot, Dices, Gamepad2, Globe, Play, Sparkles, Swords, Timer, Users, X } from 'lucide-react';
-import { LanguageCode, MiniGameId, RoomState, TruthOrDareCategoryId, TruthOrDareSelectionMode, TruthOrDareSettings } from '@/lib/types';
-import { MINI_GAMES } from '@/lib/gameRules';
+import {
+  LanguageCode,
+  MiniGameId,
+  RoomState,
+  TruthOrDareCategoryId,
+  TruthOrDarePromptSource,
+  TruthOrDareSelectionMode,
+  TruthOrDareSettings,
+} from '@/lib/types';
+import { MINI_GAMES, TRUTH_OR_DARE_BLOCKED_MESSAGE, truthOrDareAllowed } from '@/lib/gameRules';
 import { ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
-import { TRUTH_OR_DARE_CATEGORIES, TRUTH_OR_DARE_SELECTION_LABELS } from '@/lib/truthOrDareContent';
+import {
+  TRUTH_OR_DARE_CATEGORIES,
+  TRUTH_OR_DARE_PROMPT_SOURCES,
+  TRUTH_OR_DARE_SELECTION_LABELS,
+} from '@/lib/truthOrDareContent';
 import { BotDifficulty, ChessGameMode, ChessTimeControl } from '@/lib/chess/chessTypes';
 import { vibeArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
+import TruthOrDareIdeas from './TruthOrDareIdeas';
 
 export type GameModeId =
   | 'board'
@@ -73,7 +86,7 @@ const MODE_TITLES: Record<GameModeId, { title: string; blurb: string }> = {
   karaoke: { title: 'Karaoke Arcade', blurb: 'Not open yet.' },
   hangout: { title: 'Roast & Open-Mic Lounge', blurb: 'Not open yet.' },
   ai_master: { title: 'AI Game Master', blurb: 'Tell the host who it is playing to.' },
-  truth_or_dare: { title: 'Truth or Dare', blurb: 'Pick the categories and how a target gets picked.' },
+  truth_or_dare: { title: 'Truth or Dare', blurb: 'The built-in deck, your own ideas, or both.' },
   team_battle: { title: 'Team Battle', blurb: 'Two crews, one series.' },
   chess: { title: 'Chess', blurb: 'Choose your opponent and your clock.' },
   ludo: { title: 'Ludo', blurb: 'Choose how many seats are human.' },
@@ -93,6 +106,7 @@ interface ModeSetupModalProps {
   onToggleTruthOrDareCategory: (id: TruthOrDareCategoryId) => void;
   onToggleTruthOrDareSpicy: () => void;
   onToggleTruthOrDareSelectionMode: (mode: TruthOrDareSelectionMode) => void;
+  onSetTruthOrDarePromptSource: (source: TruthOrDarePromptSource) => void;
   onClose: () => void;
   onLaunch: (options: ModeLaunchOptions) => void;
 }
@@ -160,6 +174,7 @@ export default function ModeSetupModal({
   onToggleTruthOrDareCategory,
   onToggleTruthOrDareSpicy,
   onToggleTruthOrDareSelectionMode,
+  onSetTruthOrDarePromptSource,
   onClose,
   onLaunch,
 }: ModeSetupModalProps) {
@@ -187,9 +202,9 @@ export default function ModeSetupModal({
   const blocked =
     comingSoon ||
     (mode === 'chess' && !chessReady) ||
-    // Mirrors the server's own floor for truth_or_dare_start — a target needs
-    // at least one other person in the room to call on.
-    (mode === 'truth_or_dare' && humanCount < 2);
+    // Both mirror the server's own checks on truth_or_dare_start: a target needs
+    // at least one other person to call on, and it is off in public rooms.
+    (mode === 'truth_or_dare' && (humanCount < 2 || !truthOrDareAllowed(room)));
   const teamSetupStep = mode === 'team_battle' && room.roomType !== 'team_battle';
   const { title, blurb } = MODE_TITLES[mode];
 
@@ -381,7 +396,17 @@ export default function ModeSetupModal({
           )}
 
           {/* ── Truth or Dare ─────────────────────────────────────────────── */}
-          {mode === 'truth_or_dare' && (
+          {mode === 'truth_or_dare' && !truthOrDareAllowed(room) && (
+            // The whole sheet, not one greyed-out tile: nothing on it applies, and
+            // showing categories and an idea box in a room where the match cannot
+            // start would invite people to fill in a form that goes nowhere.
+            <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 space-y-1.5">
+              <p className="text-sm font-extrabold text-amber-200">Friends only</p>
+              <p className="text-xs text-amber-100/90">{TRUTH_OR_DARE_BLOCKED_MESSAGE}</p>
+            </div>
+          )}
+
+          {mode === 'truth_or_dare' && truthOrDareAllowed(room) && (
             <>
               {humanCount < 2 && (
                 <p className="text-[11px] text-amber-300">
@@ -391,9 +416,47 @@ export default function ModeSetupModal({
 
               <div className="space-y-3">
                 <SectionHeading
+                  icon={<Sparkles className="w-4 h-4 text-partyYellow" />}
+                  title="PROMPTS FROM"
+                  hint={isHost ? 'Where each truth and dare comes from.' : 'Set by the host.'}
+                />
+                <div className="grid grid-cols-3 gap-2">
+                  {(Object.keys(TRUTH_OR_DARE_PROMPT_SOURCES) as TruthOrDarePromptSource[]).map((source) => {
+                    const info = TRUTH_OR_DARE_PROMPT_SOURCES[source];
+                    return (
+                      <OptionTile
+                        key={source}
+                        accent="yellow"
+                        selected={truthOrDareSettings.promptSource === source}
+                        disabled={!isHost}
+                        onClick={() => onSetTruthOrDarePromptSource(source)}
+                      >
+                        <span className="text-lg block">{info.emoji}</span>
+                        <span className="font-extrabold text-xs block mt-0.5">{info.label}</span>
+                        <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{info.blurb}</span>
+                      </OptionTile>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <TruthOrDareIdeas
+                roomId={room.roomId}
+                counts={room.truthOrDareIdeas ?? { truth: 0, dare: 0 }}
+                promptSource={truthOrDareSettings.promptSource ?? 'both'}
+              />
+
+              <div className="space-y-3">
+                <SectionHeading
                   icon={<Sparkles className="w-4 h-4 text-partyPink" />}
                   title="CATEGORIES"
-                  hint={isHost ? 'Pick what the room draws from. At least one stays on.' : 'Set by the host.'}
+                  hint={
+                    !isHost
+                      ? 'Set by the host.'
+                      : truthOrDareSettings.promptSource === 'players'
+                      ? 'For the built-in deck, which only steps in if the room runs out of its own ideas.'
+                      : 'Pick what the built-in deck draws from. At least one stays on.'
+                  }
                 />
                 <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
                   {TRUTH_OR_DARE_CATEGORIES.filter((c) => !c.spicy).map((category) => (

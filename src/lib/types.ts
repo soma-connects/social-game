@@ -374,12 +374,39 @@ export type TruthOrDareCategoryId =
  */
 export type TruthOrDareSelectionMode = 'wheel' | 'card';
 
+/**
+ * Where a round's prompt is drawn from.
+ *
+ * `library` is the curated deck that ships with the app. `players` is the pool
+ * the room wrote itself, before the match. `both` mixes them, so the room's own
+ * ideas turn up between the library's rather than waiting behind it.
+ */
+export type TruthOrDarePromptSource = 'library' | 'players' | 'both';
+
 /** Host-configured setup for a Truth or Dare match, chosen in the lobby before it starts. */
 export type TruthOrDareSettings = {
   categories: TruthOrDareCategoryId[];
   /** Unlocks the 'spicy' category — bold and teasing, never explicit. Off by default. */
   spicyEnabled: boolean;
   selectionModes: TruthOrDareSelectionMode[];
+  /**
+   * Optional because rooms saved before this existed do not have it; read it
+   * through normalizeTruthOrDareSettings, which supplies the default.
+   */
+  promptSource?: TruthOrDarePromptSource;
+};
+
+/**
+ * A truth or dare a player wrote for the room, as its author sees it.
+ *
+ * The room only ever learns how many there are. What they say, and who wrote
+ * them, lives in the room's private state until one is drawn — which is what
+ * keeps a pool of ideas a surprise instead of something to read off the wire.
+ */
+export type TruthOrDareIdea = {
+  id: string;
+  type: 'truth' | 'dare';
+  text: string;
 };
 
 /** State for a Truth or Dare round. */
@@ -403,6 +430,8 @@ export type TruthOrDareState = {
    */
   promptId?: string | null;
   promptText?: string | null;
+  /** Whether the drawn prompt came from the shipped library or from the room itself. */
+  promptOrigin?: 'library' | 'player' | null;
   spicy?: boolean;
   /** Self-reported by the target once they're done — the app trusts the room. */
   completed?: boolean | null;
@@ -744,6 +773,11 @@ export type RoomState = {
   aiMasterState?: AiMasterState | null;
   /** Host's chosen categories, spicy toggle and selection mechanics for Truth or Dare. Persists across matches in the room. */
   truthOrDareSettings?: TruthOrDareSettings | null;
+  /**
+   * How many ideas the room has written for Truth or Dare. Counts only — the
+   * ideas themselves are private until drawn, see TruthOrDareIdea.
+   */
+  truthOrDareIdeas?: { truth: number; dare: number } | null;
   /** Truth or Dare round state (active during truth_or_dare_round phase). */
   truthOrDareState?: TruthOrDareState | null;
   /**

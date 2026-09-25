@@ -11,10 +11,13 @@ import {
   MINIGAME_LABELS,
   MINI_GAMES,
   STARTING_LIVES,
+  TRUTH_OR_DARE_BLOCKED_MESSAGE,
   alternateByTeam,
   boardProgress,
   forgiveMicFault,
+  isStrangerRoom,
   loseLife,
+  personalDaresAllowed,
   performanceToSteps,
   pickMiniGame,
   rememberMiniGame,
@@ -23,6 +26,7 @@ import {
   scoreToPerformance,
   sumReactionBonus,
   shuffleTeams,
+  truthOrDareAllowed,
   walkBack,
   walkForward,
 } from './gameRules';
@@ -317,5 +321,38 @@ describe('forgiveMicFault', () => {
     const fresh = player({});
     const zeroed = player({ micFaults: 0 });
     expect(forgiveMicFault(fresh)).toBe(forgiveMicFault(zeroed));
+  });
+});
+
+describe('public rooms', () => {
+  const private_ = {};
+  const listed = { isPublic: true };
+  // Listed, then delisted before the match. Still a room strangers had a way into.
+  const delisted = { isPublic: false, wasEverPublic: true };
+
+  it('treats a room as strangers once it has ever been public, not only while it is', () => {
+    expect(isStrangerRoom(private_)).toBe(false);
+    expect(isStrangerRoom({ isPublic: false })).toBe(false);
+    expect(isStrangerRoom(listed)).toBe(true);
+    expect(isStrangerRoom(delisted)).toBe(true);
+  });
+
+  it('lets a private room play Truth or Dare, and nobody else', () => {
+    expect(truthOrDareAllowed(private_)).toBe(true);
+    expect(truthOrDareAllowed({ isPublic: false })).toBe(true);
+    expect(truthOrDareAllowed(listed)).toBe(false);
+    expect(truthOrDareAllowed(delisted)).toBe(false);
+  });
+
+  it('gives Truth or Dare the same answer as the dares the lobby says are off', () => {
+    // The lobby promises "dares are off" in a public room. If these two ever
+    // disagree, one of them is breaking that promise.
+    for (const room of [private_, { isPublic: false }, listed, delisted, { isPublic: true, wasEverPublic: true }]) {
+      expect(truthOrDareAllowed(room)).toBe(personalDaresAllowed(room));
+    }
+  });
+
+  it('has something to tell the person who tried anyway', () => {
+    expect(TRUTH_OR_DARE_BLOCKED_MESSAGE).toMatch(/public rooms/i);
   });
 });

@@ -1,4 +1,10 @@
-import type { TruthOrDareCategoryId, TruthOrDareSelectionMode, TruthOrDareSettings } from './types';
+import type {
+  TruthOrDareCategoryId,
+  TruthOrDareIdea,
+  TruthOrDarePromptSource,
+  TruthOrDareSelectionMode,
+  TruthOrDareSettings,
+} from './types';
 
 export type TruthOrDareCategoryInfo = {
   id: TruthOrDareCategoryId;
@@ -71,9 +77,9 @@ export type TruthOrDarePrompt = {
 };
 
 /**
- * The curated deck. Player-submitted prompts (anonymised, pooled per room) are
- * a planned follow-up — this is the library a room can play from immediately,
- * with nothing to set up beyond picking categories.
+ * The curated deck — what a room can play from immediately, with nothing to set
+ * up beyond picking categories. The room's own ideas sit alongside it rather
+ * than replacing it, see TruthOrDarePromptSource and truthOrDareIdeas.ts.
  */
 export const TRUTH_OR_DARE_PROMPTS: TruthOrDarePrompt[] = [
   // ── confessions ────────────────────────────────────────────────────────
@@ -179,34 +185,120 @@ export const DEFAULT_TRUTH_OR_DARE_SETTINGS: TruthOrDareSettings = {
   categories: ['confessions', 'silly', 'deep', 'hot_takes', 'knowledge', 'money_career'],
   spicyEnabled: false,
   selectionModes: ['wheel', 'card'],
+  // A room that never writes an idea plays exactly as it did before this
+  // existed, so mixing is the safe default — and one that writes some sees them.
+  promptSource: 'both',
+};
+
+export const TRUTH_OR_DARE_PROMPT_SOURCES: Record<
+  TruthOrDarePromptSource,
+  { label: string; emoji: string; blurb: string }
+> = {
+  library: { label: 'Platform prompts', emoji: '📚', blurb: 'The built-in deck, picked by category.' },
+  players: { label: 'Our own ideas', emoji: '💡', blurb: 'Only what the room wrote. Falls back to the deck if nobody wrote any.' },
+  both: { label: 'Mix them', emoji: '🎲', blurb: 'The built-in deck and your own ideas, drawn together.' },
+};
+
+export function isTruthOrDarePromptSource(value: unknown): value is TruthOrDarePromptSource {
+  return value === 'library' || value === 'players' || value === 'both';
+}
+
+/**
+ * Settings with every field filled in.
+ *
+ * A room saved before `promptSource` existed has settings without it, and a
+ * missing field must read as the default rather than as "off" or as a crash.
+ */
+export function normalizeTruthOrDareSettings(settings?: TruthOrDareSettings | null): TruthOrDareSettings {
+  const base = DEFAULT_TRUTH_OR_DARE_SETTINGS;
+  if (!settings) return base;
+  return {
+    categories: settings.categories?.length ? settings.categories : base.categories,
+    spicyEnabled: settings.spicyEnabled === true,
+    selectionModes: settings.selectionModes?.length ? settings.selectionModes : base.selectionModes,
+    promptSource: isTruthOrDarePromptSource(settings.promptSource) ? settings.promptSource : base.promptSource,
+  };
+}
+
+/** A prompt as it comes out of the draw, wherever it came from. */
+export type DrawnTruthOrDarePrompt = {
+  id: string;
+  type: 'truth' | 'dare';
+  text: string;
+  /** Null for a room's own idea, which belongs to no category. */
+  category: TruthOrDareCategoryId | null;
+  origin: 'library' | 'player';
+};
+
+export type PickPromptOptions = {
+  /** Defaults to the library alone, which is how the draw behaved before rooms could write their own. */
+  source?: TruthOrDarePromptSource;
+  /** The room's ideas, authors already removed. */
+  playerPrompts?: readonly TruthOrDareIdea[];
+  /** Injectable so a test can pin the coin flip. */
+  random?: () => number;
 };
 
 /**
  * Draws a random unused prompt for this turn.
  *
- * Recycles the whole pool once it runs dry rather than stalling the round —
- * a match easily outlasts a curated deck, and "no prompts left" is a worse
- * party experience than an occasional repeat.
+ * Categories and the spicy switch shape the library and nothing else: an idea a
+ * player wrote has no category, and a room that wrote it did so on purpose.
+ *
+ * Recycles rather than stalling once a pool runs dry — a match easily outlasts a
+ * curated deck, and "no prompts left" is a worse party than an occasional repeat.
+ * With `players` alone it recycles the room's own ideas before touching the
+ * library, since choosing that source means wanting their words, but it does use
+ * the library when the room wrote none of this kind, so a round can never stall
+ * on an empty pool.
  */
 export function pickTruthOrDarePrompt(
   type: 'truth' | 'dare',
   categories: TruthOrDareCategoryId[],
   spicyEnabled: boolean,
-  usedIds: string[]
-): TruthOrDarePrompt | null {
-  const allowedCategories = categories.filter((c) => spicyEnabled || c !== 'spicy');
-  const matching = TRUTH_OR_DARE_PROMPTS.filter(
-    (p) => p.type === type && allowedCategories.includes(p.category)
-  );
-  if (matching.length === 0) return null;
+  usedIds: string[],
+  options: PickPromptOptions = {}
+): DrawnTruthOrDarePrompt | null {
+  const { source = 'library', playerPrompts = [], random = Math.random } = options;
 
-  const fresh = matching.filter((p) => !usedIds.includes(p.id));
-  const pool = fresh.length > 0 ? fresh : matching;
-  return pool[Math.floor(Math.random() * pool.length)];
+  const allowedCategories = categories.filter((c) => spicyEnabled || c !== 'spicy');
+  const library: DrawnTruthOrDarePrompt[] = TRUTH_OR_DARE_PROMPTS.filter(
+    (p) => p.type === type && allowedCategories.includes(p.category)
+  ).map((p) => ({ id: p.id, type: p.type, text: p.text, category: p.category, origin: 'library' as const }));
+
+  const own: DrawnTruthOrDarePrompt[] =
+    source === 'library'
+      ? []
+      : playerPrompts
+          .filter((p) => p.type === type)
+          .map((p) => ({ id: p.id, type: p.type, text: p.text, category: null, origin: 'player' as const }));
+
+  const unused = (list: DrawnTruthOrDarePrompt[]) => list.filter((p) => !usedIds.includes(p.id));
+  const freshOwn = unused(own);
+  const freshLibrary = unused(library);
+
+  let pool: DrawnTruthOrDarePrompt[];
+  if (source === 'players') {
+    pool = freshOwn.length > 0 ? freshOwn : own.length > 0 ? own : freshLibrary.length > 0 ? freshLibrary : library;
+  } else if (source === 'both') {
+    // Even odds between the two decks while both have something fresh, rather
+    // than one pool of forty and four — at that ratio the room's own ideas
+    // would almost never come up, which is the reason anyone wrote one.
+    if (freshOwn.length > 0 && freshLibrary.length > 0) {
+      pool = random() < 0.5 ? freshOwn : freshLibrary;
+    } else {
+      pool = freshOwn.length > 0 ? freshOwn : freshLibrary.length > 0 ? freshLibrary : [...own, ...library];
+    }
+  } else {
+    pool = freshLibrary.length > 0 ? freshLibrary : library;
+  }
+
+  if (pool.length === 0) return null;
+  return pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
 }
 
 /** Whether a category only shows up once the host has switched spice on. */
-export function isSpicyCategory(category: TruthOrDareCategoryId): boolean {
+export function isSpicyCategory(category: TruthOrDareCategoryId | null | undefined): boolean {
   return TRUTH_OR_DARE_CATEGORIES.find((c) => c.id === category)?.spicy ?? false;
 }
 

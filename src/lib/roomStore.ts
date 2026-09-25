@@ -8,6 +8,8 @@ import {
   SocialReactionId,
   TeamId,
   TruthOrDareCategoryId,
+  TruthOrDareIdea,
+  TruthOrDarePromptSource,
   TruthOrDareSelectionMode,
   TurnResult,
 } from './types';
@@ -376,9 +378,40 @@ class RoomStoreManager {
 
   public updateTruthOrDareSettings(
     roomId: string,
-    settings: { categories: TruthOrDareCategoryId[]; spicyEnabled: boolean; selectionModes: TruthOrDareSelectionMode[] }
+    settings: {
+      categories: TruthOrDareCategoryId[];
+      spicyEnabled: boolean;
+      selectionModes: TruthOrDareSelectionMode[];
+      promptSource?: TruthOrDarePromptSource;
+    }
   ) {
     return this.post(roomId, { action: 'update_truth_or_dare_settings', ...settings });
+  }
+
+  // The room's own truths and dares. Each of these answers with the caller's own
+  // list and nobody else's — the pool is private until an idea is drawn, so the
+  // room document carries only counts and this is the one way to see your own.
+
+  public async getMyTruthOrDareIdeas(roomId: string): Promise<TruthOrDareIdea[]> {
+    const data = await this.post(roomId, { action: 'truth_or_dare_my_ideas' });
+    return Array.isArray(data.ideas) ? (data.ideas as TruthOrDareIdea[]) : [];
+  }
+
+  public async addTruthOrDareIdea(
+    roomId: string,
+    type: 'truth' | 'dare',
+    text: string
+  ): Promise<{ ideas?: TruthOrDareIdea[]; error?: string }> {
+    const data = await this.post(roomId, { action: 'truth_or_dare_add_idea', type, text });
+    return { ideas: Array.isArray(data.ideas) ? (data.ideas as TruthOrDareIdea[]) : undefined, error: data.error };
+  }
+
+  public async removeTruthOrDareIdea(
+    roomId: string,
+    ideaId: string
+  ): Promise<{ ideas?: TruthOrDareIdea[]; error?: string }> {
+    const data = await this.post(roomId, { action: 'truth_or_dare_remove_idea', ideaId });
+    return { ideas: Array.isArray(data.ideas) ? (data.ideas as TruthOrDareIdea[]) : undefined, error: data.error };
   }
 
   public startTruthOrDare(roomId: string) {

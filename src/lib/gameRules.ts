@@ -403,6 +403,28 @@ export function personalDaresAllowed(room: {
 export const DARE_BLOCKED_MESSAGE =
   'Dares are off in public rooms — they only work with people you actually know.';
 
+/**
+ * Whether Truth or Dare may run in this room.
+ *
+ * It answers exactly as personalDaresAllowed does, on purpose. The lobby tells a
+ * host that dares are off in a public room, and this mode is a game of dares: a
+ * wheel picks somebody and the app tells them what to do in front of everyone.
+ * It is also the one mode where players write the prompts, which between
+ * strangers is text from people nobody has vetted, read out to the room.
+ *
+ * Its own name rather than a bare call to personalDaresAllowed, so the day the
+ * two need to differ there is one place to say so.
+ */
+export function truthOrDareAllowed(room: {
+  isPublic?: boolean;
+  wasEverPublic?: boolean;
+}): boolean {
+  return personalDaresAllowed(room);
+}
+
+export const TRUTH_OR_DARE_BLOCKED_MESSAGE =
+  'Truth or Dare is off in public rooms — it only works with people you actually know.';
+
 /** Minimum age the acknowledgement asks the player to confirm. */
 export const PUBLIC_ROOM_MIN_AGE = 16;
 

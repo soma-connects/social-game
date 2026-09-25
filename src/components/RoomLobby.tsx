@@ -20,10 +20,19 @@ import {
 import { motion } from 'framer-motion';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
-import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState, TruthOrDareCategoryId, TruthOrDareSelectionMode } from '@/lib/types';
-import { MAX_PLAYERS, TEAMS } from '@/lib/gameRules';
+import {
+  AvatarStyle,
+  LanguageCode,
+  MiniGameId,
+  Player,
+  RoomState,
+  TruthOrDareCategoryId,
+  TruthOrDarePromptSource,
+  TruthOrDareSelectionMode,
+} from '@/lib/types';
+import { MAX_PLAYERS, TEAMS, truthOrDareAllowed } from '@/lib/gameRules';
 import { DEFAULT_ROOM_VIBE, RoomVibeId } from '@/lib/roomVibes';
-import { DEFAULT_TRUTH_OR_DARE_SETTINGS } from '@/lib/truthOrDareContent';
+import { normalizeTruthOrDareSettings } from '@/lib/truthOrDareContent';
 import { badgeArt, modeArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
 import ModeSetupModal, { GameModeId, ModeLaunchOptions } from './ModeSetupModal';
@@ -62,7 +71,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
   );
   const roomVibe: RoomVibeId = room.roomVibe ?? DEFAULT_ROOM_VIBE;
-  const truthOrDareSettings = room.truthOrDareSettings ?? DEFAULT_TRUTH_OR_DARE_SETTINGS;
+  const truthOrDareSettings = normalizeTruthOrDareSettings(room.truthOrDareSettings);
   const currentAvatarIndex = Math.max(
     0,
     AVATARS.findIndex((avatar) => avatar.id === myPlayer.avatar.id)
@@ -118,6 +127,12 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
       ...truthOrDareSettings,
       spicyEnabled: !truthOrDareSettings.spicyEnabled,
     });
+  };
+
+  const setTruthOrDarePromptSource = (source: TruthOrDarePromptSource) => {
+    if (!myPlayer.isHost || source === truthOrDareSettings.promptSource) return;
+    audioSFX.playChoiSuccess();
+    roomStore.updateTruthOrDareSettings(room.roomId, { ...truthOrDareSettings, promptSource: source });
   };
 
   const toggleTruthOrDareSelectionMode = (mode: TruthOrDareSelectionMode) => {
@@ -694,6 +709,11 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
                     TRUTH OR DARE
+                    {!truthOrDareAllowed(room) && (
+                      <span className="bg-amber-500/20 text-amber-200 border border-amber-400/30 text-[9px] px-2 py-0.5 rounded-full font-black">
+                        FRIENDS ONLY
+                      </span>
+                    )}
                     {activeMode === 'truth_or_dare' && (
                       <span className="bg-partyPink text-white text-[9px] px-2 py-0.5 rounded-full font-black">
                         SELECTED
@@ -831,6 +851,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
           onToggleTruthOrDareCategory={toggleTruthOrDareCategory}
           onToggleTruthOrDareSpicy={toggleTruthOrDareSpicy}
           onToggleTruthOrDareSelectionMode={toggleTruthOrDareSelectionMode}
+          onSetTruthOrDarePromptSource={setTruthOrDarePromptSource}
           onClose={() => setSetupMode(null)}
           onLaunch={(options) => {
             setSetupMode(null);

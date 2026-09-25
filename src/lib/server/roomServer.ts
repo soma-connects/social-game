@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { EventLog, RoomState } from '../types';
 import { ROOM_TTL_MS } from '../gameRules';
+import type { StoredTruthOrDareIdea } from '../truthOrDareIdeas';
 
 // Shared in-process state for the room API and the WebRTC signalling API.
 //
@@ -165,6 +166,15 @@ export type RoomSecrets = {
    * public: a mine everyone can see on the board is just a tile to walk around.
    */
   mines?: { nodeId: number; ownerId: string; ownerName: string }[];
+  /**
+   * The truths and dares the room wrote for Truth or Dare, with who wrote each.
+   *
+   * Private for two reasons that are the same reason: an idea nobody can read
+   * ahead of time is a surprise when it is drawn, and an idea nobody can trace
+   * to its author is one somebody is willing to write. The room document only
+   * carries how many there are.
+   */
+  truthOrDareIdeas?: StoredTruthOrDareIdea[];
 };
 
 const EMPTY_SECRETS: RoomSecrets = { tokens: {} };

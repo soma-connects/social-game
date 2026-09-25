@@ -61,24 +61,22 @@ export default function PlayerToken({
   const prevPosRef = useRef(player.boardPosition);
 
   /**
-   * Where the token sits before any animation has run.
+   * Where the token sits before anything animates.
    *
-   * This used to be left entirely to `controls.set()` in the effect below, and
-   * that never landed: with `initial={false}` there is no declarative starting
-   * position, and the imperative set is dropped if it runs before the element
-   * has subscribed to the controls. The result was that on every page load —
-   * every refresh, every player joining — all the tokens rendered stacked in the
-   * board's top-left corner instead of on their tiles, and only sorted
-   * themselves out once somebody moved.
+   * This has to be handed to `initial`, not set from the effect below. The
+   * effect's no-change branch called `controls.set()` on mount, which quietly
+   * did nothing — the element rendered with no `left` or `top` at all and every
+   * token piled up in the corner of the board, outside it, until its player
+   * first moved. Opening a board therefore showed no tokens on it.
    *
-   * Giving the element a real starting position fixes the load, and the effect
-   * below still owns the walking animation.
+   * `initial` is read once, on mount, so it fixes the first paint without
+   * fighting the walk animation on every later re-render.
    */
   const startNode = BOARD_GRAPH[player.boardPosition];
-  const initialPosition = {
+  const startRef = useRef({
     left: `${(startNode?.x ?? 50) + spreadX}%`,
     top: `${(startNode?.y ?? 50) + spreadY}%`,
-  };
+  });
 
   useEffect(() => {
     const prevPos = prevPosRef.current;
@@ -111,10 +109,16 @@ export default function PlayerToken({
       
       prevPosRef.current = currPos;
     } else {
-      // Just snap to current if it's the first render or no change
+      // No move, but the fan-out can still shift a token sideways when someone
+      // else lands on or leaves the same tile. A zero-length `start` rather
+      // than `set`, because `set` does not reach the element here.
       const node = BOARD_GRAPH[currPos];
       if (node) {
-        controls.set({ left: `${node.x + spreadX}%`, top: `${node.y + spreadY}%` });
+        controls.start({
+          left: `${node.x + spreadX}%`,
+          top: `${node.y + spreadY}%`,
+          transition: { duration: 0 },
+        });
       }
     }
   }, [player.boardPosition, spreadX, spreadY, controls]);
@@ -123,7 +127,7 @@ export default function PlayerToken({
     <motion.div
       key={player.id}
       animate={controls}
-      initial={initialPosition}
+      initial={startRef.current}
       className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none ${
         isActive ? 'z-40' : 'z-30'
       }`}

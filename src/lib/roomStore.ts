@@ -7,9 +7,12 @@ import {
   RoomState,
   SocialReactionId,
   TeamId,
+  TruthOrDareCategoryId,
+  TruthOrDareSelectionMode,
   TurnResult,
 } from './types';
 import { RoomVibeId } from './roomVibes';
+import type { PublicRoomSummary } from '@/app/api/rooms/public/route';
 import { getIdToken } from './firebase/auth';
 
 const ROOM_CACHE_PREFIX = 'voice_party_room_';
@@ -369,6 +372,35 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'ai_master_bribe', amount, ask });
   }
 
+  // ── Truth or Dare game ───────────────────────────────────────────────────
+
+  public updateTruthOrDareSettings(
+    roomId: string,
+    settings: { categories: TruthOrDareCategoryId[]; spicyEnabled: boolean; selectionModes: TruthOrDareSelectionMode[] }
+  ) {
+    return this.post(roomId, { action: 'update_truth_or_dare_settings', ...settings });
+  }
+
+  public startTruthOrDare(roomId: string) {
+    return this.post(roomId, { action: 'truth_or_dare_start' });
+  }
+
+  public truthOrDareSelect(roomId: string) {
+    return this.post(roomId, { action: 'truth_or_dare_select' });
+  }
+
+  public truthOrDareChoose(roomId: string, choice: 'truth' | 'dare') {
+    return this.post(roomId, { action: 'truth_or_dare_choose', choice });
+  }
+
+  public truthOrDareResolve(roomId: string, completed: boolean) {
+    return this.post(roomId, { action: 'truth_or_dare_resolve', completed });
+  }
+
+  public truthOrDareNextRound(roomId: string) {
+    return this.post(roomId, { action: 'truth_or_dare_next_round' });
+  }
+
   // ── Teams ─────────────────────────────────────────────────────────────────
 
   public setTeamMode(roomId: string, teamMode: boolean) {
@@ -411,8 +443,20 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'start_match' });
   }
 
-  /** Finishing a mini-game banks points and sets the movement for the board. */
-  public async completeMiniGame(roomId: string, game: MiniGameId, pointsEarned: number) {
+  /**
+   * Finishing a mini-game banks points and sets the movement for the board.
+   *
+   * `micFault` says the microphone never opened for this round — a blocked
+   * permission, no device, or a browser that cannot do speech. Banking zero
+   * normally costs a life, and that is unfair when the player was never able to
+   * attempt anything. The server decides how often to honour it.
+   */
+  public async completeMiniGame(
+    roomId: string,
+    game: MiniGameId,
+    pointsEarned: number,
+    micFault = false
+  ) {
     const ACTION: Record<MiniGameId, string> = {
       pitch_bird: 'complete_pitch_bird',
       solfege: 'complete_solfege',
@@ -428,6 +472,7 @@ class RoomStoreManager {
     const data = await this.post(roomId, {
       action: ACTION[game] ?? 'complete_voice_turn',
       pointsEarned,
+      micFault,
     });
     return {
       result: (data.result as TurnResult) ?? null,
@@ -643,7 +688,15 @@ class RoomStoreManager {
   public async rollDice(roomId: string) {
     const data = await this.post(roomId, { action: 'roll_dice' });
     return {
+      /** Total steps travelled — what the token actually walks. */
       roll: typeof data.roll === 'number' ? data.roll : null,
+      /**
+       * The same number split into what earned it. Returned by the roll rather
+       * than read from the room snapshot: snapshots arrive on a ~1.5s poll, so
+       * at the moment the dice is thrown the snapshot still describes the
+       * previous player's move.
+       */
+      move: (data.move as RoomState['lastMove']) ?? null,
       outcome: (data.outcome as { banner: string | null; message: string; triggersDare: boolean }) ?? null,
       waitingForBranch: !!data.waitingForBranch,
       error: data.error,
@@ -661,6 +714,67 @@ class RoomStoreManager {
 
   public advanceTurn(roomId: string) {
     return this.post(roomId, { action: 'advance_turn' });
+  }
+
+  // ─── Public rooms and safety ──────────────────────────────────────────────
+
+  /** Host-only. Lists or delists the room in the public browser. */
+  public setVisibility(roomId: string, isPublic: boolean) {
+    return this.post(roomId, { action: 'set_visibility', isPublic });
+  }
+
+  /**
+   * This player's own microphone consent.
+   *
+   * Sends the player id explicitly rather than relying on the active player,
+   * because everybody must be able to reach their own mic switch at any point
+   * in the round, including during somebody else's turn.
+   */
+  public setMicOptIn(roomId: string, micOptIn: boolean) {
+    return this.post(roomId, {
+      action: 'set_mic_opt_in',
+      playerId: this.getMyPlayerId(roomId),
+      micOptIn,
+    });
+  }
+
+  /**
+   * The public room browser's feed.
+   *
+   * Not a Firestore query: firestore.rules refuses to let a browser list the
+   * rooms collection, because doing so would hand out every private room's code
+   * along with the names and transcripts inside it.
+   */
+  public async listPublicRooms(): Promise<{ rooms: PublicRoomSummary[]; error?: string }> {
+    try {
+      const response = await fetch('/api/rooms/public', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) return { rooms: [], error: data.error ?? 'Could not load rooms.' };
+      return { rooms: (data.rooms as PublicRoomSummary[]) ?? [] };
+    } catch {
+      return { rooms: [], error: 'Could not reach the server.' };
+    }
+  }
+
+  /** Files a report against another player. */
+  public async reportPlayer(input: {
+    roomId: string;
+    reportedPlayerId: string;
+    reason: string;
+    note?: string;
+  }): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const idToken = await getIdToken();
+      const response = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...input, idToken }),
+      });
+      const data = await response.json();
+      return response.ok ? { ok: true } : { ok: false, error: data.error ?? 'Could not file the report.' };
+    } catch {
+      return { ok: false, error: 'Could not reach the server.' };
+    }
   }
 }
 

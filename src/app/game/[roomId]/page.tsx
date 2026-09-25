@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import AwardsCeremony from '@/components/AwardsCeremony';
 import GameHeader from '@/components/GameHeader';
 import LeftSidebar from '@/components/LeftSidebar';
 import RightSidebar from '@/components/RightSidebar';
@@ -36,6 +37,7 @@ import VoiceCallBar from '@/components/VoiceCallBar';
 import AiGameMasterBanner from '@/components/AiGameMasterBanner';
 import GeminiAiMasterStage from '@/components/GeminiAiMasterStage';
 import AiMasterGame from '@/components/AiMasterGame';
+import TruthOrDareGame from '@/components/TruthOrDareGame';
 import SocialVoicePanel from '@/components/SocialVoicePanel';
 import SpectatorView from '@/components/SpectatorView';
 import RoastIntermission from '@/components/RoastIntermission';
@@ -48,7 +50,7 @@ import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { DEFAULT_THEME, isPlayableTheme } from '@/lib/themeConfig';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
-import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam } from '@/lib/gameRules';
+import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam, micIsLive, isStrangerRoom } from '@/lib/gameRules';
 import PowerupTargetPicker from '@/components/PowerupTargetPicker';
 import MiniGameBriefing, { useMiniGameBriefing } from '@/components/MiniGameBriefing';
 import { MINIGAME_BRIEFINGS } from '@/lib/miniGameBriefings';
@@ -147,6 +149,18 @@ export default function GameRoomPage() {
      */
     sessionKey: `${room?.roundNumber ?? 0}:${performer?.id ?? 'none'}:${room?.currentMiniGame ?? 'none'}`,
   });
+
+  /**
+   * A fresh round starts with a clean microphone record.
+   *
+   * Keyed on the same round/performer/game triple the clip uses, so a fault
+   * from the previous attempt cannot follow a player into the next one and
+   * excuse a round where the mic was working fine.
+   */
+  const roundKey = `${room?.roundNumber ?? 0}:${performer?.id ?? 'none'}:${room?.currentMiniGame ?? 'none'}`;
+  useEffect(() => {
+    speechEngine.clearMicFault();
+  }, [roundKey]);
 
   // â”€â”€ Presence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
@@ -312,7 +326,9 @@ export default function GameRoomPage() {
     roomStore.startMatch(roomId);
   };
 
-  const handleSelectMode = async (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo') => {
+  const handleSelectMode = async (
+    mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'truth_or_dare' | 'team_battle' | 'chess' | 'ludo'
+  ) => {
     if (mode === 'board') {
       handleStartMatch();
     } else if (mode === 'chess') {
@@ -335,6 +351,9 @@ export default function GameRoomPage() {
     } else if (mode === 'ai_master') {
       audioSFX.playNollywoodBrass();
       await roomStore.startAiMaster(roomId);
+    } else if (mode === 'truth_or_dare') {
+      audioSFX.playNollywoodBrass();
+      await roomStore.startTruthOrDare(roomId);
     } else if (mode === 'karaoke') {
       setComingSoonTitle('ðŸŽ¤ Karaoke & Pitch Arcade Mode');
     } else if (mode === 'hangout') {
@@ -342,8 +361,16 @@ export default function GameRoomPage() {
     }
   };
 
+  /**
+   * Banks the round, and says whether the microphone ever opened for it.
+   *
+   * Reading the fault here rather than in each game means every voice round
+   * gets the same treatment without ten components having to remember to pass
+   * it. `clearMicFault` runs when a round starts, so this only ever reports
+   * what went wrong during the attempt just finished.
+   */
   const handleMiniGameComplete = (game: MiniGameId) => (pointsEarned: number) => {
-    roomStore.completeMiniGame(roomId, game, pointsEarned);
+    roomStore.completeMiniGame(roomId, game, pointsEarned, speechEngine.getMicFault() !== null);
   };
 
   const handleFinishRoast = () => {
@@ -441,6 +468,9 @@ export default function GameRoomPage() {
             myPlayer={myPlayer}
             duckRemote={isAttemptPhase && isMyTurn}
             autoMute={isAttemptPhase && !isMyTurn}
+            micLive={micIsLive(room, myPlayer)}
+            isStranger={isStrangerRoom(room)}
+            onMicOptIn={(optIn) => void roomStore.setMicOptIn(roomId, optIn)}
             compact={isAttemptPhase}
             autoJoin={room.players.length >= 2}
           />
@@ -714,6 +744,13 @@ export default function GameRoomPage() {
             </div>
           )}
 
+          {room.phase === 'truth_or_dare_round' && (
+            <div className="space-y-6">
+              <TruthOrDareGame room={room} myPlayer={myPlayer} roomId={roomId} />
+              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
+            </div>
+          )}
+
           {room.phase === 'powerup_shop' && (
             <div className="space-y-6">
               <PowerupShop
@@ -827,6 +864,15 @@ export default function GameRoomPage() {
                       Final score: {room.winner.score} points
                     </p>
                   </>
+                )}
+
+                {/* The bit people stay for. Everything here was already being
+                    tracked during the match and used to be discarded at the
+                    whistle along with the reason to argue about it. */}
+                {(room.awards ?? []).length > 0 && (
+                  <div className="pt-2 border-t border-white/10">
+                    <AwardsCeremony awards={room.awards ?? []} players={room.players} />
+                  </div>
                 )}
 
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-3">

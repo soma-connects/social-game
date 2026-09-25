@@ -4,6 +4,8 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { MapTheme, TileNodeType } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
+import { journeyArt, tileArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
 
 /**
  * One landing spot on the road.
@@ -65,7 +67,11 @@ export default function TileNode({
           style={{ bottom: size + 8 }}
         >
           <div className="bg-slate-900/95 backdrop-blur-xl border border-white/20 text-white text-[10px] font-bold px-3 py-2 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.8)] leading-tight">
-            <span className="text-[13px] block mb-0.5">{isFinish ? '🏆' : nodeStyle.icon}</span>
+            <GameIcon
+              src={isFinish ? journeyArt('finish') : tileArt(nodeType)}
+              emoji={isFinish ? '🏆' : nodeStyle.icon}
+              className="w-4 h-4 text-[13px] mb-0.5 mx-auto"
+            />
             {isFinish ? 'The Final Station!' : TILE_DESCRIPTIONS[nodeType]}
           </div>
         </div>
@@ -100,7 +106,14 @@ export default function TileNode({
         className="relative z-10 block leading-none pointer-events-none"
         style={{ fontSize: size * 0.44, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.85))' }}
       >
-        {isFinish ? '🏆' : nodeStyle.icon}
+        {/* A 1em box, so the art scales with the tile exactly as the emoji
+            did — the span above sets the size from the tile's own prop, and
+            the emoji fallback inherits the same font size. */}
+        <GameIcon
+          src={isFinish ? journeyArt('finish') : tileArt(nodeType)}
+          emoji={isFinish ? '🏆' : nodeStyle.icon}
+          className="w-[1em] h-[1em]"
+        />
       </span>
 
       {!quiet && (

@@ -75,21 +75,6 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     setMicVolume(0);
   }, []);
 
-  /**
-   * Whether what was heard counts as the answer.
-   *
-   * The engine matches one target, and a maths answer has several spoken forms
-   * — "49" and "forty nine" are the same answer, and which one comes back
-   * depends on the phone. Grading on the numeral alone marked correct answers
-   * wrong and took a life for it.
-   */
-  const heardTheAnswer = useCallback(
-    (res: SpeechMatchResult, item: ChallengeWord): boolean =>
-      res.isMatch ||
-      (item.accept ?? []).some((form) => speechEngine.evaluateMatch(res.transcript, form).isMatch),
-    []
-  );
-
   const pickNextChallenge = useCallback(() => {
     const trap = room.trapWords.find((t) => !t.used);
     if (trap) {
@@ -202,12 +187,14 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     const target = challenge.answer ?? challenge.word;
 
     let startFailed = false;
-    const session = speechEngine.listenForSpeech({
+    const session = speechEngine.listen({
+      roomId: room.roomId,
+      mode: 'command',
       targetWord: target,
       language: challenge.language,
       onResult: (res: SpeechMatchResult) => {
         setTranscript(res.transcript);
-        if (heardTheAnswer(res, challenge)) finishRound('matched', res.confidence);
+        if (res.isMatch) finishRound('matched', res.confidence);
       },
       onError: (err) => {
         startFailed = true;
@@ -257,12 +244,14 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
     // A pronunciation challenge is its own answer; maths carries a separate
     // one, so the prompt on screen is the sum rather than the sum and its result.
     const target = challenge.answer ?? challenge.word;
-    sessionRef.current = speechEngine.listenForSpeech({
+    sessionRef.current = speechEngine.listen({
+      roomId: room.roomId,
+      mode: 'command',
       targetWord: target,
       language: challenge.language,
       onResult: (res: SpeechMatchResult) => {
         setTranscript(res.transcript);
-        if (heardTheAnswer(res, challenge)) finishRound('matched', res.confidence);
+        if (res.isMatch) finishRound('matched', res.confidence);
       },
       onError: (err) => {
         setError(err);

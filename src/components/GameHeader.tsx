@@ -89,7 +89,7 @@ export default function GameHeader({
             title="Back to home"
             className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-gradient-to-br from-partyYellow via-terracotta to-partyPink flex items-center justify-center text-lg sm:text-xl shadow-lg glow-yellow hover:scale-105 transition-transform active:scale-95 shrink-0"
           >
-            🎙️
+            <Mic className="w-4 h-4 sm:w-5 sm:h-5 text-partyDark" />
           </button>
           <div className="min-w-0 flex-1">
             <h1 className="font-extrabold text-xs text-white flex items-center gap-1.5 overflow-hidden whitespace-nowrap">

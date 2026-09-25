@@ -216,35 +216,6 @@ export const LANGUAGE_DECKS: Record<string, ChallengeWord[]> = {
   ],
 };
 
-const ONES = [
-  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
-  'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
-  'seventeen', 'eighteen', 'nineteen',
-];
-const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
-
-/**
- * How a number gets said out loud.
- *
- * Speech recognisers are inconsistent about this — the same answer comes back
- * as "49" from one phone and "forty nine" from another — so a maths round has
- * to accept both or it marks correct answers wrong.
- */
-export function spokenNumberForms(n: number): string[] {
-  if (n < 0 || n > 999 || !Number.isInteger(n)) return [];
-
-  const under100 = (v: number): string =>
-    v < 20 ? ONES[v] : `${TENS[Math.floor(v / 10)]}${v % 10 ? ' ' + ONES[v % 10] : ''}`;
-
-  if (n < 100) return [under100(n)];
-
-  const hundreds = `${ONES[Math.floor(n / 100)]} hundred`;
-  const rest = n % 100;
-  if (rest === 0) return [hundreds];
-  // Both, because British and American speakers differ on the "and".
-  return [`${hundreds} and ${under100(rest)}`, `${hundreds} ${under100(rest)}`];
-}
-
 /**
  * A mental-arithmetic challenge for the Voice Arena.
  *
@@ -276,7 +247,6 @@ export function getRandomMathProblem(): ChallengeWord {
     id: `math_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     word: expr,
     answer: String(ans),
-    accept: spokenNumberForms(ans),
     phonetic: 'Say the answer out loud',
     language: 'math',
     type: 'math',
@@ -299,16 +269,52 @@ export const PIDGIN_FEEDBACK = {
   ],
 };
 
+/**
+ * The kinds of dare a punishment tile can hand out.
+ *
+ * `tag` is the bracketed marker each dare in NOLLYWOOD_DARES already carries,
+ * and is what ties a dare string back to its category — so the list below
+ * stays the single place a category is described, rather than the modal
+ * guessing from wording. `icon` is the emoji fallback for when the generated
+ * art has not loaded.
+ */
 export const DARE_CATEGORIES = [
-  { id: 'sing', name: 'Sing It', icon: '🎵' },
-  { id: 'accent', name: 'Accent Challenge', icon: '🗣️' },
-  { id: 'dramatic', name: 'Dramatic Reading', icon: '🎭' },
-  { id: 'whisper', name: 'Whisper Mode', icon: '🤫' },
-  { id: 'twister', name: 'Tongue Twister', icon: '⚡' },
-  { id: 'market', name: 'Angry Market Woman', icon: '🛒' },
-  { id: 'news', name: 'News Reporter', icon: '📺' },
-  { id: 'crying', name: 'Nollywood Crying Scene', icon: '😭' },
+  { id: 'sing', name: 'Sing It', icon: '🎵', tag: 'SING IT' },
+  { id: 'accent', name: 'Accent Challenge', icon: '🗣️', tag: 'ACCENT' },
+  { id: 'dramatic', name: 'Dramatic Reading', icon: '🎭', tag: 'DRAMATIC' },
+  { id: 'whisper', name: 'Whisper Mode', icon: '🤫', tag: 'WHISPER' },
+  { id: 'twister', name: 'Tongue Twister', icon: '⚡', tag: 'TONGUE TWISTER' },
+  { id: 'market', name: 'Angry Market Woman', icon: '🛒', tag: 'MARKET WOMAN' },
+  { id: 'news', name: 'News Reporter', icon: '📺', tag: 'NEWS REPORTER' },
+  { id: 'crying', name: 'Nollywood Crying Scene', icon: '😭', tag: 'NOLLYWOOD CRYING' },
 ];
+
+export type DareCategory = (typeof DARE_CATEGORIES)[number];
+
+/**
+ * The category a dare belongs to, or null for a dare with no marker.
+ *
+ * Dares are plain strings in room state — they are chosen on the server and
+ * sent to every client as text — so the category has to be read back out of
+ * the string rather than carried alongside it.
+ */
+export function dareCategory(dareText: string): DareCategory | null {
+  const tag = /\[([^\]]+)\]/.exec(dareText)?.[1]?.trim().toUpperCase();
+  if (!tag) return null;
+  return DARE_CATEGORIES.find((category) => category.tag === tag) ?? null;
+}
+
+/**
+ * The dare without its leading emoji and category marker.
+ *
+ * Once the category is shown as art with its own label, repeating it inside
+ * the instruction is noise. Falls back to the whole string if there is no
+ * marker to strip, so an unmarked dare still reads correctly.
+ */
+export function dareBody(dareText: string): string {
+  const stripped = dareText.replace(/^[^[]*\[[^\]]+\]:?\s*/, '').trim();
+  return stripped || dareText.trim();
+}
 
 export const NOLLYWOOD_DARES = [
   '🎵 [SING IT]: Sing the chorus of "Calm Down" by Rema in a Hausa accent!',

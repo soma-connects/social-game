@@ -12,10 +12,12 @@ import { ROOM_TTL_MS } from '../gameRules';
 
 /** A WebRTC signalling message, relayed verbatim between two players. */
 export type SignalMessage =
-  | { kind: 'offer'; from: string; to: string; sdp: unknown }
-  | { kind: 'answer'; from: string; to: string; sdp: unknown }
-  | { kind: 'ice'; from: string; to: string; candidate: unknown }
-  | { kind: 'bye'; from: string; to: string };
+  | { kind: 'offer'; from: string; to: string; sdp: unknown; session?: string; offerId?: string }
+  | { kind: 'answer'; from: string; to: string; sdp: unknown; session?: string; offerId?: string }
+  | { kind: 'ice'; from: string; to: string; candidate: unknown; session?: string }
+  | { kind: 'bye'; from: string; to: string }
+  /** "Start our connection over" — sent by the answering side, which cannot offer itself. */
+  | { kind: 'reset'; from: string; to: string };
 
 /** Undelivered signals are worthless once stale — an offer that old is dead anyway. */
 const SIGNAL_TTL_MS = 30 * 1000;
@@ -116,6 +118,10 @@ export async function writeRoom(room: RoomState): Promise<RoomState> {
       if (currentRev !== expectedRev) throw new RoomConflictError(room.roomId);
     }
     room.rev = (expectedRev ?? 0) + 1;
+    // Liveness, for the public room browser. Without it a room that everybody
+    // walked away from keeps advertising itself until the six-hour sweep, and
+    // the browser's top result is a lobby nobody is sitting in.
+    room.updatedAt = Date.now();
     tx.set(ref, room);
   });
 
@@ -192,6 +198,20 @@ export async function writeSecrets(roomId: string, secrets: RoomSecrets): Promis
 /** Unguessable, unlike the old timestamp-based player ids. */
 export function newToken(): string {
   return randomBytes(24).toString('base64url');
+}
+
+/**
+ * Trims and caps a piece of player-authored text.
+ *
+ * A room is stored as a single Firestore document, and Firestore rejects any
+ * document over 1 MiB. Nothing about a party game needs a long string, so
+ * without a cap one pasted essay in a story round makes every later write to
+ * that room fail — which does not inconvenience whoever sent it, it ends the
+ * match for all six players. The entry point is the only place this can be
+ * enforced once, since every one of these strings is stored verbatim.
+ */
+export function playerText(value: unknown, max: number): string {
+  return String(value ?? '').trim().slice(0, max);
 }
 
 export function pushEvent(room: RoomState, text: string, type: EventLog['type']): void {

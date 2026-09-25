@@ -228,7 +228,9 @@ export default function TriviaShowdownGame({
 
   /** The actual session start, unconditional — startListening's guard lives above it. */
   const beginListening = () => {
-    sessionRef.current = speechEngine.listenForSpeech({
+    sessionRef.current = speechEngine.listen({
+      roomId: room.roomId,
+      mode: 'dictation',
       language: 'en-US',
       // No target word: the client is not told the answer, so it cannot match
       // against it. The player submits when they finish, or the timer does.
@@ -375,6 +377,9 @@ export default function TriviaShowdownGame({
               disabled={status === 'asking'}
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
+              /* The server caps this at 120; stopping here means a long answer
+                 is visibly refused rather than quietly cut after submitting. */
+              maxLength={120}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && textInput.trim()) {
                   handleEvaluate(textInput);

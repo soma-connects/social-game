@@ -36,6 +36,18 @@ import {
   MINE_PLANT_DISTANCE,
   MINE_SETBACK,
   STARTING_LIVES,
+  STREAK_KEEP_THRESHOLD,
+  DARE_BLOCKED_MESSAGE,
+  personalDaresAllowed,
+  PRESENCE_TIMEOUT_MS,
+  isPresent,
+  leaderProgressOf,
+  applyHeat,
+  computeAwards,
+  heatTier,
+  slipstreamLabel,
+  slipstreamSteps,
+  forgiveMicFault,
   loseLife,
   respawnToStart,
   TileOutcome,
@@ -49,6 +61,7 @@ import {
   performanceToSteps,
   pickMiniGame,
   rememberMiniGame,
+  recordPlayedMiniGame,
   resolveTile,
   scoreToPerformance,
   sumReactionBonus,
@@ -58,6 +71,7 @@ import {
 import {
   RoomConflictError,
   newToken,
+  playerText,
   pushEvent,
   readRoom,
   readSecrets,
@@ -74,18 +88,31 @@ import {
   syncPhaseDeadline,
 } from '@/lib/server/phaseDeadline';
 import { archiveMatch } from '@/lib/server/matchArchive';
+import {
+  newSessionId,
+  recordSessionCompleted,
+  recordSessionCreated,
+  recordSessionStarted,
+} from '@/lib/server/sessionArchive';
 import { verifyUid } from '@/lib/firebase/server';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES } from '@/lib/roomVibes';
 import { coerceVibe, fallbackChallenge } from '@/lib/server/aiHost';
 import { takeChallenge, takeHostQuip, takeTrivia, warmHostPool, warmTriviaPool } from '@/lib/server/hostLinePool';
 import { AiMasterBribe, AiMasterCategory, AiMasterState, RoomChatMessage } from '@/lib/types';
+import { TruthOrDareCategoryId, TruthOrDareSelectionMode, TruthOrDareSettings, TruthOrDareState } from '@/lib/types';
 import {
   CHAT_EMOJI_KEPT,
   CHAT_TEXT_KEPT,
   MAX_COMMENT_CHARS,
   findChatEmoji,
 } from '@/lib/chatEmoji';
+import {
+  DEFAULT_TRUTH_OR_DARE_SETTINGS,
+  TRUTH_OR_DARE_CATEGORIES,
+  isSpicyCategory,
+  pickTruthOrDarePrompt,
+} from '@/lib/truthOrDareContent';
 
 export const dynamic = 'force-dynamic';
 
@@ -175,8 +202,9 @@ function trimChat(log: RoomChatMessage[]): RoomChatMessage[] {
   return [...text, ...emoji].sort((a, b) => a.at - b.at);
 }
 
-/** How long a player can go without a heartbeat before we treat them as gone. */
-const PRESENCE_TIMEOUT_MS = 25000;
+// PRESENCE_TIMEOUT_MS now lives in gameRules: the board previews the bonuses a
+// roll has already earned, so the client has to pick the same leader this file
+// does, and two copies of the timeout would drift.
 
 /**
  * Ceiling on a base64 Guess the Voice clip.
@@ -195,9 +223,7 @@ const MAX_CLIP_CHARS = 300_000;
  */
 function activePlayers(room: RoomState): Player[] {
   const now = Date.now();
-  return room.players.filter(
-    (p) => p.connected !== false && now - (p.lastSeen ?? now) < PRESENCE_TIMEOUT_MS
-  );
+  return room.players.filter((p) => isPresent(p, now));
 }
 
 /** Drops players who have gone quiet, and hands the host role on if needed. */
@@ -292,6 +318,10 @@ function advanceRoundOrOpenShop(room: RoomState): void {
     if (room.roomType !== 'team_battle') {
       room.recentMiniGames = rememberMiniGame(room.recentMiniGames, game);
     }
+
+    // The permanent log, on the other hand, records every mode and never drops
+    // the early rounds — it is what the archive reports as gamesPlayed.
+    room.playedMiniGames = recordPlayedMiniGame(room.playedMiniGames, game);
 
     room.currentMiniGame = game;
     room.phase = miniGamePhase(game);
@@ -543,9 +573,13 @@ const HOST_ONLY_ACTIONS = new Set([
   'set_theme',
   'update_minigames',
   'update_room_vibe',
+  'set_visibility',
   'ai_master_start',
   'ai_master_verdict',
   'ai_master_next_round',
+  'truth_or_dare_start',
+  'truth_or_dare_next_round',
+  'update_truth_or_dare_settings',
   'update_phase',
   'start_match',
   'end_match',
@@ -579,6 +613,9 @@ const ACTIVE_PLAYER_ACTIONS = new Set([
   // answer it — nobody could act and the round was stuck. The two now agree on
   // whose round it is.
   'trivia_buzz',
+  // The wheel spin / card flip is turn-order-driven, same as the dice: only
+  // whoever the round has called on may set it in motion.
+  'truth_or_dare_select',
 ]);
 
 /**
@@ -590,6 +627,11 @@ const ACTIVE_PLAYER_ACTIONS = new Set([
  */
 const SELF_PLAYER_ID_ACTIONS = new Set([
   'heartbeat',
+  // Consent, so it can only ever be given for yourself. Without this the
+  // playerId in the body is whatever the sender chose, and one player could
+  // switch ANOTHER player's microphone on — the exact thing the public-room
+  // default exists to prevent.
+  'set_mic_opt_in',
   'mark_away',
   'leave_room',
   'set_avatar',
@@ -616,6 +658,7 @@ const SELF_PLAYER_ID_ACTIONS = new Set([
   'ai_master_respond',
   'ai_master_vote',
   'ai_master_bribe',
+  'truth_or_dare_choose',
 ]);
 
 type Caller = { player: Player; isHost: boolean };
@@ -930,6 +973,9 @@ function applyLanding(room: RoomState, player: Player, node: number): TileOutcom
   const outcome = resolveTile(node, player.hasShield);
 
   player.boardPosition = outcome.position;
+  // Every board move lands here, so this is the one place the closing awards
+  // need in order to see a deficit while it still exists.
+  trackDeficits(room);
   if (outcome.grantsShield) player.hasShield = true;
   if (outcome.breaksShield) player.hasShield = false;
   if (outcome.coins) player.score = Math.max(0, player.score + outcome.coins);
@@ -976,6 +1022,9 @@ function applyLanding(room: RoomState, player: Player, node: number): TileOutcom
   }
 
   if (outcome.triggersDare) {
+    // A refused dare leaves the phase untouched, so the turn carries on as if
+    // the tile were an ordinary one rather than hanging on a peer_dare screen
+    // that will never be filled in.
     startDare(room, player);
   } else if (outcome.triggersDuel) {
     startDuel(room, player);
@@ -992,10 +1041,19 @@ function applyLanding(room: RoomState, player: Player, node: number): TileOutcom
  * The dare used to be invented inside the modal on the rolling player's screen,
  * which meant nobody else knew what had been asked, and refreshing lost it.
  */
-function startDare(room: RoomState, target: Player, challenger?: Player): void {
+function startDare(room: RoomState, target: Player, challenger?: Player): boolean {
+  // The guard lives here rather than at each call site, so a third way to start
+  // a dare cannot be added without inheriting it. A dare is one player ordering
+  // another to perform while the room scores them — the single mechanic in this
+  // game that does not survive contact with strangers.
+  if (!personalDaresAllowed(room)) {
+    pushEvent(room, `🔇 ${DARE_BLOCKED_MESSAGE}`, 'system');
+    return false;
+  }
+
   const rivals = activePlayers(room).filter((p) => p.id !== target.id);
   const picked = challenger ?? rivals[Math.floor(Math.random() * rivals.length)];
-  if (!picked) return;
+  if (!picked) return false;
 
   room.currentDare = {
     dareText: DARES[Math.floor(Math.random() * DARES.length)],
@@ -1004,6 +1062,7 @@ function startDare(room: RoomState, target: Player, challenger?: Player): void {
   };
   room.phase = 'peer_dare';
   pushEvent(room, `🎤 ${picked.name} dares ${target.name}!`, 'dare');
+  return true;
 }
 
 /**
@@ -1046,13 +1105,122 @@ const TRAP_DEBATE_SETBACK = 2;
 const DARE_FAIL_SETBACK = 6;
 
 /**
+ * Clears the per-match record a player carries.
+ *
+ * Deliberately does NOT touch level, vibeScore or badges: those are progression
+ * earned by the person and survive the match, while everything below describes
+ * one match only and would otherwise leak a streak or a bomb count into the
+ * next one.
+ */
+function resetMatchStats(player: Player): void {
+  delete player.streak;
+  delete player.bestStreak;
+  delete player.roundsPlayed;
+  delete player.performanceTotal;
+  delete player.bombs;
+  delete player.bestRound;
+  delete player.worstDeficit;
+}
+
+/**
+ * Books one finished mini-game round against the player.
+ *
+ * Both completion handlers ran the same half-dozen lines inline, and they had
+ * already drifted from each other. Everything that has to happen exactly once
+ * per round — the streak, the match-long stats the closing awards read, and the
+ * heat multiplier on the coins — now happens here, so a new mini-game gets all
+ * of it by calling one function.
+ *
+ * Returns the coins actually earned, which is the raw figure with the streak
+ * multiplier applied.
+ */
+function recordRound(
+  room: RoomState,
+  player: Player,
+  game: MiniGameId,
+  rawCoins: number,
+  performance: number
+): { coins: number; streak: number; heatBonus: number; brokeStreak: boolean } {
+  const previousStreak = player.streak ?? 0;
+  const kept = performance >= STREAK_KEEP_THRESHOLD;
+
+  // A streak is only worth having if it can be lost, so anything short of a
+  // decent round drops it to zero rather than merely failing to extend it.
+  const streak = kept ? previousStreak + 1 : 0;
+  const brokeStreak = !kept && previousStreak >= 2;
+  player.streak = streak;
+  player.bestStreak = Math.max(player.bestStreak ?? 0, streak);
+
+  const coins = applyHeat(rawCoins, streak);
+
+  player.roundsPlayed = (player.roundsPlayed ?? 0) + 1;
+  player.performanceTotal = (player.performanceTotal ?? 0) + performance;
+  if (performance <= MINIGAME_FAIL_THRESHOLD) player.bombs = (player.bombs ?? 0) + 1;
+  if (performance > (player.bestRound?.performance ?? -1)) {
+    player.bestRound = { game, performance, points: coins };
+  }
+
+  if (brokeStreak) {
+    pushEvent(room, `💧 ${player.name} lost a ${previousStreak}-round streak`, 'debuff');
+  }
+
+  const tier = heatTier(streak);
+  if (tier.multiplier > 1) {
+    pushEvent(
+      room,
+      `${tier.icon} ${player.name} is ${tier.label.toUpperCase()} — ${streak} in a row, x${tier.multiplier} coins`,
+      'buff'
+    );
+  }
+
+  return { coins, streak, heatBonus: tier.stepBonus, brokeStreak };
+}
+
+/** Board depth of whoever is furthest along, for the slipstream gap. */
+function leaderProgress(room: RoomState): number {
+  return leaderProgressOf(room.players);
+}
+
+/**
+ * Records how far behind the leader everyone currently is, keeping the worst.
+ *
+ * The Comeback Kid award needs a deficit that was actually recovered, and by
+ * the final whistle the deficit is gone — the board only stores where everyone
+ * is now. Cheap enough to run after every board mutation.
+ */
+function trackDeficits(room: RoomState): void {
+  const leader = leaderProgress(room);
+  for (const player of room.players) {
+    const deficit = Math.max(0, leader - boardProgress(player.boardPosition));
+    player.worstDeficit = Math.max(player.worstDeficit ?? 0, deficit);
+  }
+}
+
+/**
  * Charges a life for bombing the task the room just watched you attempt.
  *
  * Team Battle is scored on the crew total rather than survival, so it opts out
  * — taking lives there would punish a side twice for the same round.
  */
-function chargeFailedChallenge(room: RoomState, player: Player, game: MiniGameId): void {
-  if (room.roomType === 'team_battle') return;
+function chargeFailedChallenge(
+  room: RoomState,
+  player: Player,
+  game: MiniGameId,
+  micFault = false
+): boolean {
+  if (room.roomType === 'team_battle') return false;
+
+  // A microphone that never opened is not a failed attempt. Forgiven a fixed
+  // number of times per match, because the claim comes from the client and
+  // cannot be checked here — see MIC_FAULT_GRACE.
+  if (micFault && forgiveMicFault(player)) {
+    pushEvent(
+      room,
+      `🎙️ ${player.name}'s mic did not open — the round is not counted against them`,
+      'system'
+    );
+    return true;
+  }
 
   const from = player.boardPosition;
   const { livesLeft, empty } = loseLife(player);
@@ -1064,7 +1232,7 @@ function chargeFailedChallenge(room: RoomState, player: Player, game: MiniGameId
       `💔 ${player.name} bombed ${MINIGAME_LABELS[game]} — ${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left`,
       'debuff'
     );
-    return;
+    return false;
   }
 
   pushEvent(room, `☠️ ${player.name} ran out of lives — back to the launchpad with a fresh bar!`, 'debuff');
@@ -1074,6 +1242,7 @@ function chargeFailedChallenge(room: RoomState, player: Player, game: MiniGameId
     fromNode: from,
     toNode: 0,
   });
+  return false;
 }
 
 /**
@@ -1403,10 +1572,204 @@ function judgeBribe(state: AiMasterState, player: Player, amount: number): boole
   return Math.random() < Math.max(0.05, Math.min(0.9, odds));
 }
 
+// ─── Truth or Dare game ─────────────────────────────────────────────────────
+
+/** Points a completed dare is worth. Higher than truth — it's the bolder ask. */
+const TRUTH_OR_DARE_DARE_POINTS = 100;
+const TRUTH_OR_DARE_TRUTH_POINTS = 60;
+
+/** Settings default to the shipped library until the host changes them. */
+function truthOrDareSettingsOf(room: RoomState): TruthOrDareSettings {
+  return room.truthOrDareSettings ?? DEFAULT_TRUTH_OR_DARE_SETTINGS;
+}
+
+/** A random player other than the spinner — the bottle-spin mechanic. */
+function pickTruthOrDareTarget(room: RoomState, excludeId: string): Player | null {
+  const pool = activePlayers(room).filter((p) => p.id !== excludeId);
+  if (pool.length === 0) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** Round-robins the caller through the room's active players, same idea as the board's turn order. */
+function advanceTruthOrDareCaller(room: RoomState): Player | null {
+  const pool = activePlayers(room);
+  if (pool.length === 0) return null;
+
+  const order = room.players.filter((p) => pool.some((ap) => ap.id === p.id));
+  const currentId = room.players[room.activePlayerIndex]?.id;
+  const at = order.findIndex((p) => p.id === currentId);
+  const next = order[(at + 1) % order.length] ?? order[0];
+  room.activePlayerIndex = room.players.findIndex((p) => p.id === next.id);
+  return next;
+}
+
+/**
+ * Opens the next round: picks the caller, the mechanic, and — for a card flip
+ * — the target too, since a card flip is the caller answering their own card
+ * rather than picking somebody else.
+ */
+function startTruthOrDareTurn(room: RoomState): void {
+  const previous = room.truthOrDareState ?? null;
+  const caller = advanceTruthOrDareCaller(room);
+  if (!caller) return;
+
+  const settings = truthOrDareSettingsOf(room);
+  const modes = settings.selectionModes.length > 0 ? settings.selectionModes : DEFAULT_TRUTH_OR_DARE_SETTINGS.selectionModes;
+  const round = (previous?.round ?? 0) + 1;
+  // Alternates when the room offers both, so a party gets some of each rather
+  // than the host's first pick winning every round by default.
+  const mode: TruthOrDareSelectionMode = modes.length > 1 ? (round % 2 === 1 ? 'wheel' : 'card') : modes[0];
+
+  room.truthOrDareState = {
+    round,
+    selectionMode: mode,
+    callerId: caller.id,
+    targetId: mode === 'card' ? caller.id : '',
+    phase: 'selecting',
+    choice: null,
+    category: null,
+    promptId: null,
+    promptText: null,
+    spicy: false,
+    completed: null,
+    usedPromptIds: previous?.usedPromptIds ?? [],
+    forfeits: previous?.forfeits ?? {},
+    selectedAt: null,
+    revealedAt: null,
+    deadline: null,
+    deadlineFor: null,
+  };
+  room.phase = 'truth_or_dare_round';
+  pushEvent(
+    room,
+    mode === 'wheel' ? `🎡 ${caller.name} spins the wheel!` : `🃏 ${caller.name} flips a card!`,
+    'system'
+  );
+}
+
+/** Books the target's own report of what happened — the app trusts the room, not a vote. */
+function resolveTruthOrDareTurn(room: RoomState, target: Player, completed: boolean): void {
+  const state = room.truthOrDareState;
+  if (!state) return;
+
+  state.completed = completed;
+  state.phase = 'resolved';
+  state.revealedAt = Date.now();
+
+  if (completed) {
+    const points = state.choice === 'dare' ? TRUTH_OR_DARE_DARE_POINTS : TRUTH_OR_DARE_TRUTH_POINTS;
+    target.score += points;
+    target.vibeScore = (target.vibeScore ?? 0) + 10;
+    updatePlayerLevel(target);
+    pushEvent(room, `✅ ${target.name} pulled it off (+${points} pts)`, 'buff');
+  } else {
+    state.forfeits = { ...state.forfeits, [target.id]: (state.forfeits[target.id] ?? 0) + 1 };
+    pushEvent(room, `🙈 ${target.name} forfeited — settle it the old-fashioned way!`, 'debuff');
+  }
+}
+
+// ── Truth or Dare's clock — same shape as the AI Master's, see its own
+// section above for why this cannot just be the board's shared phaseDeadline:
+// each beat waits on a different person (the caller to spin, the target to
+// choose, the target to resolve), so one flat per-phase deadline cannot tell
+// whose silence it is timing out.
+
+const TRUTH_OR_DARE_SELECT_MS = 20_000;
+const TRUTH_OR_DARE_CHOOSE_MS = 25_000;
+const TRUTH_OR_DARE_PROMPT_MS = 120_000;
+const TRUTH_OR_DARE_RESOLVED_MS = 20_000;
+
+function truthOrDareWaitMs(phase: TruthOrDareState['phase']): number {
+  if (phase === 'selecting') return TRUTH_OR_DARE_SELECT_MS;
+  if (phase === 'choosing') return TRUTH_OR_DARE_CHOOSE_MS;
+  if (phase === 'resolved') return TRUTH_OR_DARE_RESOLVED_MS;
+  return TRUTH_OR_DARE_PROMPT_MS;
+}
+
+function truthOrDareBeat(state: TruthOrDareState): string {
+  return `${state.round}:${state.phase}`;
+}
+
+function syncTruthOrDareDeadline(room: RoomState, now: number): void {
+  const state = room.truthOrDareState;
+  if (!state || room.phase !== 'truth_or_dare_round') return;
+
+  const beat = truthOrDareBeat(state);
+  if (state.deadlineFor !== beat || !state.deadline) {
+    state.deadline = now + truthOrDareWaitMs(state.phase);
+    state.deadlineFor = beat;
+  }
+}
+
+function truthOrDareHasStalled(room: RoomState, now: number): boolean {
+  const state = room.truthOrDareState;
+  if (!state || room.phase !== 'truth_or_dare_round') return false;
+  if (state.deadlineFor !== truthOrDareBeat(state)) return false;
+  return !!state.deadline && now >= state.deadline;
+}
+
+/**
+ * Moves a stalled round on without whoever it was waiting for — "if you
+ * didn't flip on your own turn, it flips randomly for you" from the design,
+ * and the same courtesy for choosing and for closing out a dare nobody ever
+ * marked done. Ridden on the heartbeat, like the AI Master's own clock.
+ */
+async function expireStalledTruthOrDare(room: RoomState, now: number): Promise<void> {
+  const state = room.truthOrDareState;
+  if (!state || !truthOrDareHasStalled(room, now)) return;
+
+  if (state.phase === 'selecting') {
+    if (state.selectionMode === 'wheel') {
+      const target = pickTruthOrDareTarget(room, state.callerId);
+      if (target) state.targetId = target.id;
+    }
+    state.phase = 'choosing';
+    state.selectedAt = now;
+    pushEvent(room, `⏳ Time's up — it spins itself!`, 'system');
+    return;
+  }
+
+  if (state.phase === 'choosing') {
+    const target = room.players.find((p) => p.id === state.targetId);
+    const choice: 'truth' | 'dare' = Math.random() < 0.5 ? 'truth' : 'dare';
+    const settings = truthOrDareSettingsOf(room);
+    const prompt = pickTruthOrDarePrompt(choice, settings.categories, settings.spicyEnabled, state.usedPromptIds);
+    if (!prompt) return;
+
+    state.choice = choice;
+    state.category = prompt.category;
+    state.promptId = prompt.id;
+    state.promptText = prompt.text;
+    state.spicy = isSpicyCategory(prompt.category);
+    state.usedPromptIds = [...state.usedPromptIds, prompt.id].slice(-200);
+    state.phase = 'prompt';
+    pushEvent(room, `⏳ ${target?.name ?? 'They'} took too long — the app picked ${choice.toUpperCase()} for them`, 'system');
+    return;
+  }
+
+  if (state.phase === 'prompt') {
+    const target = room.players.find((p) => p.id === state.targetId);
+    if (target) resolveTruthOrDareTurn(room, target, false);
+    pushEvent(room, `⏳ Time ran out before it was marked done`, 'system');
+    return;
+  }
+
+  if (state.phase === 'resolved') {
+    startTruthOrDareTurn(room);
+  }
+}
+
 /** Ends the match. In team mode one player crossing wins it for their whole crew. */
 function declareWinner(room: RoomState, player: Player, reason: 'finish' | 'last_standing' = 'finish'): void {
   room.winner = player;
   room.phase = 'game_over';
+
+  // Worked out once, here, rather than in the client. Every player's stats are
+  // about to stop changing, and the alternative — each of six clients deriving
+  // its own award list from a snapshot — lets two people in the same room read
+  // out different winners.
+  trackDeficits(room);
+  room.awards = computeAwards(room.players);
   if (room.roomType === 'team_battle' && player.teamId) {
     room.winningTeam = player.teamId;
     const team = getTeam(player.teamId);
@@ -1465,8 +1828,10 @@ async function createRoom(
 ): Promise<{ room: RoomState; playerId: string; token: string }> {
   const host = makePlayer(hostName, 0, true);
   if (hostUid) host.uid = hostUid;
+  const createdAt = Date.now();
   const room: RoomState = {
     roomId,
+    sessionId: newSessionId(roomId, createdAt),
     hostId: host.id,
     phase: 'lobby',
     roomType,
@@ -1495,6 +1860,11 @@ async function createRoom(
   };
   pushEvent(room, `🎮 ${host.name} opened room ${roomId}`, 'system');
   await writeRoom(room);
+
+  // Opens the funnel row. Awaited but never throws — a room that was created
+  // and abandoned is the single most useful thing the dashboard can show, and
+  // it is also the one case that will never report itself later.
+  await recordSessionCreated(room, createdAt);
 
   const token = newToken();
   await writeSecrets(roomId, { tokens: { [host.id]: token } });
@@ -1606,6 +1976,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       // than by anything this loop tracks.
       if (room.phase === 'game_over' && !room.matchArchived) {
         await archiveMatch(room, 'winner');
+        await recordSessionCompleted(room, 'winner');
       }
 
       return response;
@@ -1642,7 +2013,7 @@ async function applyAction(
 
   switch (action) {
     case 'join': {
-      const name = String(body.playerName ?? '').trim();
+      const name = playerText(body.playerName, 24);
 
       // A refresh or a reconnect re-claims the seat this browser already holds.
       // Matching on the *name* instead — which is what this used to do — meant
@@ -1711,7 +2082,7 @@ async function applyAction(
     }
 
     case 'add_trap': {
-      const word = String(body.trapWord ?? '').trim();
+      const word = playerText(body.trapWord, 80);
       if (!word) return NextResponse.json({ error: 'Trap word is required' }, { status: 400 });
       // Authorship comes from the authenticated caller, not from the body —
       // otherwise a trap can be planted in somebody else's name.
@@ -1956,7 +2327,7 @@ async function applyAction(
 
     /** Opens a Story Builder round with the prompt the active player drew. */
     case 'story_builder_start': {
-      const prompt = String(body.prompt ?? '').trim();
+      const prompt = playerText(body.prompt, 200);
       if (!prompt) return NextResponse.json({ error: 'A starting prompt is required' }, { status: 400 });
 
       room.storyBuilderState = {
@@ -1975,7 +2346,7 @@ async function applyAction(
       const state = room.storyBuilderState;
       if (!state) return NextResponse.json({ error: 'No story in progress' }, { status: 409 });
 
-      const sentence = String(body.sentence ?? '').trim();
+      const sentence = playerText(body.sentence, 240);
       const author = room.players.find((p) => p.id === body.playerId);
       if (!sentence || !author) {
         return NextResponse.json({ error: 'A sentence and a known player are required' }, { status: 400 });
@@ -2044,7 +2415,7 @@ async function applyAction(
 
     /** Pairs the active player against an opponent and opens the debate. */
     case 'debate_start': {
-      const topic = String(body.topic ?? '').trim();
+      const topic = playerText(body.topic, 120);
       if (!topic) return NextResponse.json({ error: 'A debate topic is required' }, { status: 400 });
 
       const starter = room.players.find((p) => p.id === body.playerId) ?? room.players[room.activePlayerIndex];
@@ -2091,7 +2462,7 @@ async function applyAction(
         pushEvent(room, `🗳️ Both sides have spoken — the room votes`, 'system');
       }
 
-      const argument = String(body.argument ?? '').trim();
+      const argument = playerText(body.argument, 400);
       if (argument) {
         const speaker = room.players.find((p) => p.id === body.playerId);
         room.sessionMemory ??= [];
@@ -2297,7 +2668,7 @@ async function applyAction(
       const target = secrets.triviaAnswer ?? '';
       // Older rooms stored only the one form; fall back to it.
       const accepted = secrets.triviaAccepted?.length ? secrets.triviaAccepted : [target];
-      const spoken = String(body.answerText ?? '');
+      const spoken = playerText(body.answerText, 120);
 
       // Speech recognition hands back a whole sentence ("uh, I think it's
       // Lagos"), so the answer counts when it appears as a whole word inside
@@ -2397,7 +2768,15 @@ async function applyAction(
       const points = basePoints + bluffBonus + reactionBonus + judgeBonus;
       const performance = scoreToPerformance(game, points);
       const steps = performanceToSteps(performance);
-      const coinsEarned = Math.floor(performance * 100);
+      // Streak, match stats and the heat multiplier all land in one place, so
+      // the coins banked below are already the boosted figure.
+      const { coins: coinsEarned } = recordRound(
+        room,
+        active,
+        game,
+        Math.floor(performance * 100),
+        performance
+      );
 
       active.score += coinsEarned;
       // In Team Battle the same points also feed the crew total, which is what
@@ -2435,7 +2814,14 @@ async function applyAction(
         rolled: false,
       });
 
-      if (performance <= MINIGAME_FAIL_THRESHOLD) chargeFailedChallenge(room, active, game);
+      // body.micFault says the microphone never opened this round; the cap on
+      // how often that is honoured lives in forgiveMicFault. The recap needs
+      // to know a life was waived, or it shows a bombed card for a round the
+      // player never got to attempt.
+      if (performance <= MINIGAME_FAIL_THRESHOLD) {
+        const waived = chargeFailedChallenge(room, active, game, body.micFault === true);
+        if (waived && room.turnResult) room.turnResult.micFaultForgiven = true;
+      }
 
       room.phase = 'roast_intermission';
       return NextResponse.json({
@@ -2493,7 +2879,15 @@ async function applyAction(
       const points = basePoints + reactionBonus + judgeBonus;
       const performance = scoreToPerformance(game, points);
       const steps = performanceToSteps(performance);
-      const coinsEarned = Math.floor(performance * 100);
+      // Streak, match stats and the heat multiplier all land in one place, so
+      // the coins banked below are already the boosted figure.
+      const { coins: coinsEarned } = recordRound(
+        room,
+        active,
+        game,
+        Math.floor(performance * 100),
+        performance
+      );
 
       active.score += coinsEarned;
       // In Team Battle the same points also feed the crew total, which is what
@@ -2534,7 +2928,14 @@ async function applyAction(
         rolled: false,
       });
 
-      if (performance <= MINIGAME_FAIL_THRESHOLD) chargeFailedChallenge(room, active, game);
+      // body.micFault says the microphone never opened this round; the cap on
+      // how often that is honoured lives in forgiveMicFault. The recap needs
+      // to know a life was waived, or it shows a bombed card for a round the
+      // player never got to attempt.
+      if (performance <= MINIGAME_FAIL_THRESHOLD) {
+        const waived = chargeFailedChallenge(room, active, game, body.micFault === true);
+        if (waived && room.turnResult) room.turnResult.micFaultForgiven = true;
+      }
 
       // Open the roast so the room can laugh at what just happened.
       room.phase = 'roast_intermission';
@@ -2588,7 +2989,7 @@ async function applyAction(
       const active = room.players[room.activePlayerIndex];
       if (!active) return NextResponse.json({ error: 'No active player' }, { status: 409 });
 
-      // The mini-game decides roll order; the dice movement itself stays random.
+      // The mini-game decides both the roll order and the distance travelled.
       const entry = (room.roundResults ?? []).find((r) => r.playerId === active.id);
       if (entry) {
         if (entry.rolled) {
@@ -2597,9 +2998,46 @@ async function applyAction(
         entry.rolled = true;
       }
 
-      const die1 = Math.floor(Math.random() * 6) + 1;
-      const die2 = Math.floor(Math.random() * 6) + 1;
-      const roll = die1 + die2;
+      // The dice reveals what the mini-game earned — it is not a fresh random
+      // number. See the turn-loop note at the top of gameRules: "play badly and
+      // you shuffle forward, play well and you get the full six."
+      //
+      // Rolling 2d6 here instead quietly severed the game's core loop. A player
+      // could bomb every single mini-game and still outrun a player who aced
+      // them, which left the voice rounds deciding nothing but coins and roll
+      // order — and the `steps` figure the room was shown after every round was
+      // never actually spent.
+      //
+      // A player with no banked result (joined mid-round, or their result was
+      // dropped with them) falls back to a genuine roll rather than being stuck
+      // on the spot.
+      const earned = entry?.steps ?? Math.floor(Math.random() * 11) + 2;
+      const heatBonus = heatTier(active.streak ?? 0).stepBonus;
+      const slipstream = slipstreamSteps(boardProgress(active.boardPosition), leaderProgress(room));
+      const roll = earned + heatBonus + slipstream;
+
+      // Announced, never silent. A catch-up bonus the room cannot see reads as
+      // the board being broken rather than as the game keeping somebody in it.
+      if (heatBonus > 0) {
+        pushEvent(room, `🔥 ${active.name}'s streak adds +${heatBonus} step`, 'buff');
+      }
+      if (slipstream > 0) {
+        pushEvent(
+          room,
+          `${slipstreamLabel(slipstream)} — ${active.name} catches +${slipstream} step${slipstream === 1 ? '' : 's'}`,
+          'buff'
+        );
+      }
+
+      room.lastMove = {
+        playerId: active.id,
+        playerName: active.name,
+        base: earned,
+        heat: heatBonus,
+        slipstream,
+        total: roll,
+        at: Date.now(),
+      };
 
       let currentId = active.boardPosition;
       let remaining = roll;
@@ -2613,20 +3051,20 @@ async function applyAction(
           active.boardPosition = currentId;
           active.remainingSteps = remaining;
           room.phase = 'branch_choice';
-          pushEvent(room, `🎲 ${active.name} rolled ${roll} and reached a fork in the road!`, 'system');
-          return NextResponse.json({ room: await writeRoom(room), roll, waitingForBranch: true });
+          pushEvent(room, `🎲 ${active.name} earned ${roll} and reached a fork in the road!`, 'system');
+          return NextResponse.json({ room: await writeRoom(room), roll, move: room.lastMove, waitingForBranch: true });
         }
         currentId = node.next[0];
         remaining--;
       }
 
-      pushEvent(room, `🎲 ${active.name} rolled ${roll}`, 'system');
+      pushEvent(room, `🎲 ${active.name} moves ${roll} step${roll === 1 ? '' : 's'}`, 'system');
       const outcome = applyLanding(room, active, currentId);
       const commitMine = await resolveMineLanding(roomId, room, active);
       const rolled = await writeRoom(room);
       await commitMine();
 
-      return NextResponse.json({ room: rolled, roll, outcome });
+      return NextResponse.json({ room: rolled, roll, move: room.lastMove, outcome });
     }
 
     case 'choose_branch': {
@@ -2730,6 +3168,12 @@ async function applyAction(
       const owned = active.inventory.indexOf(powerupId);
       if (owned === -1) {
         return NextResponse.json({ error: 'Powerup not in inventory' }, { status: 409 });
+      }
+
+      // Checked before the item is consumed, so a blocked dare does not also
+      // cost the player the Dare Gun they paid for.
+      if (powerupId === 'dare_gun' && !personalDaresAllowed(room)) {
+        return NextResponse.json({ error: DARE_BLOCKED_MESSAGE }, { status: 409 });
       }
 
       // Resolve the victim before spending anything, so a bad target does not
@@ -3029,9 +3473,11 @@ async function applyAction(
       room.matchArchived = false;
       room.winner = null;
       room.aiMasterState = null;
+      await recordSessionStarted(room);
       for (const player of room.players) {
         player.lives = STARTING_LIVES;
         delete player.eliminated;
+        resetMatchStats(player);
       }
       pushEvent(room, `🤖 The AI Master takes the stage — ${ROOM_VIBES[roomVibeOf(room)].label}`, 'system');
       await startAiMasterRound(room);
@@ -3152,6 +3598,118 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
+    case 'update_truth_or_dare_settings': {
+      const categoriesInput = Array.isArray(body.categories) ? body.categories : [];
+      const validCategories = (categoriesInput as unknown[]).filter((c): c is TruthOrDareCategoryId =>
+        TRUTH_OR_DARE_CATEGORIES.some((cat) => cat.id === c)
+      );
+      const categories = validCategories.length > 0 ? validCategories : DEFAULT_TRUTH_OR_DARE_SETTINGS.categories;
+
+      const modesInput = Array.isArray(body.selectionModes) ? body.selectionModes : [];
+      const validModes = (modesInput as unknown[]).filter(
+        (m): m is TruthOrDareSelectionMode => m === 'wheel' || m === 'card'
+      );
+      const selectionModes = validModes.length > 0 ? validModes : DEFAULT_TRUTH_OR_DARE_SETTINGS.selectionModes;
+
+      room.truthOrDareSettings = {
+        categories,
+        spicyEnabled: body.spicyEnabled === true,
+        selectionModes,
+      };
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'truth_or_dare_start': {
+      if (room.players.length < 2) {
+        return NextResponse.json({ error: 'Truth or Dare needs at least 2 players' }, { status: 409 });
+      }
+      room.roomType = 'truth_or_dare';
+      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      room.matchStartedAt = Date.now();
+      room.matchArchived = false;
+      room.winner = null;
+      room.truthOrDareState = null;
+      if (!room.truthOrDareSettings) room.truthOrDareSettings = DEFAULT_TRUTH_OR_DARE_SETTINGS;
+      await recordSessionStarted(room);
+      for (const player of room.players) {
+        resetMatchStats(player);
+      }
+      pushEvent(room, `🎯 Truth or Dare begins!`, 'system');
+      startTruthOrDareTurn(room);
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'truth_or_dare_select': {
+      const state = room.truthOrDareState;
+      if (!state || state.phase !== 'selecting') {
+        return NextResponse.json({ error: 'Nothing to spin or flip right now' }, { status: 409 });
+      }
+      if (state.selectionMode === 'wheel') {
+        const target = pickTruthOrDareTarget(room, state.callerId);
+        if (!target) return NextResponse.json({ error: 'No one to challenge' }, { status: 409 });
+        state.targetId = target.id;
+      }
+      state.phase = 'choosing';
+      state.selectedAt = Date.now();
+      const target = room.players.find((p) => p.id === state.targetId);
+      pushEvent(
+        room,
+        `${state.selectionMode === 'wheel' ? '🎡' : '🃏'} ${target?.name ?? 'Someone'} is up!`,
+        'system'
+      );
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'truth_or_dare_choose': {
+      const state = room.truthOrDareState;
+      if (!state || state.phase !== 'choosing') {
+        return NextResponse.json({ error: 'No choice to make right now' }, { status: 409 });
+      }
+      if (body.playerId !== state.targetId) {
+        return NextResponse.json({ error: 'It is not your challenge' }, { status: 403 });
+      }
+      const choice: 'truth' | 'dare' = body.choice === 'dare' ? 'dare' : 'truth';
+      const settings = truthOrDareSettingsOf(room);
+      const prompt = pickTruthOrDarePrompt(choice, settings.categories, settings.spicyEnabled, state.usedPromptIds);
+      if (!prompt) {
+        return NextResponse.json({ error: 'No prompts available for the categories in this room' }, { status: 409 });
+      }
+      state.choice = choice;
+      state.category = prompt.category;
+      state.promptId = prompt.id;
+      state.promptText = prompt.text;
+      state.spicy = isSpicyCategory(prompt.category);
+      state.usedPromptIds = [...state.usedPromptIds, prompt.id].slice(-200);
+      state.phase = 'prompt';
+      const target = room.players.find((p) => p.id === state.targetId);
+      pushEvent(room, `${choice === 'dare' ? '🎭' : '🫢'} ${target?.name ?? 'Someone'} picked ${choice.toUpperCase()}`, 'system');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'truth_or_dare_resolve': {
+      const state = room.truthOrDareState;
+      if (!state || state.phase !== 'prompt') {
+        return NextResponse.json({ error: 'No challenge to resolve right now' }, { status: 409 });
+      }
+      const isHostCaller = body.callerId === room.hostId;
+      if (body.callerId !== state.targetId && !isHostCaller) {
+        return NextResponse.json({ error: 'Only they — or the host — can close this out' }, { status: 403 });
+      }
+      const target = room.players.find((p) => p.id === state.targetId);
+      if (!target) return NextResponse.json({ error: 'Player not found' }, { status: 404 });
+
+      resolveTruthOrDareTurn(room, target, body.completed !== false);
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'truth_or_dare_next_round': {
+      if (!room.truthOrDareState) {
+        return NextResponse.json({ error: 'No Truth or Dare game in progress' }, { status: 409 });
+      }
+      startTruthOrDareTurn(room);
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
     case 'update_room_vibe': {
       const vibe = body.roomVibe;
       if (typeof vibe !== 'string' || !(vibe in ROOM_VIBES)) {
@@ -3159,6 +3717,51 @@ async function applyAction(
       }
       room.roomVibe = vibe as keyof typeof ROOM_VIBES;
       pushEvent(room, `${ROOM_VIBES[room.roomVibe].emoji} Room vibe set to ${ROOM_VIBES[room.roomVibe].label}`, 'system');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    case 'set_visibility': {
+      const next = body.isPublic === true;
+
+      // Only from the lobby. Publishing a match already in progress drops
+      // strangers into the middle of somebody's game, and — worse — would flip
+      // the safety rules underneath players who joined under the old ones.
+      if (room.phase !== 'lobby') {
+        return NextResponse.json(
+          { error: 'The room can only be listed or delisted from the lobby.' },
+          { status: 409 }
+        );
+      }
+
+      room.isPublic = next;
+      if (next) {
+        // Latched, never cleared. Delisting must not silently re-enable dares
+        // aimed at whoever already walked in off the browser.
+        room.wasEverPublic = true;
+        pushEvent(
+          room,
+          '🌍 Room listed publicly — anyone can find and join it. Mics start muted and dares are off.',
+          'system'
+        );
+      } else {
+        pushEvent(room, '🔒 Room delisted — invite only from here.', 'system');
+      }
+
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /**
+     * The player's own microphone consent.
+     *
+     * Not host-only and deliberately not restricted to the active player: this
+     * is the one control every person in the room must be able to reach at any
+     * moment, including in the middle of somebody else's turn.
+     */
+    case 'set_mic_opt_in': {
+      const player = room.players.find((p) => p.id === body.playerId);
+      if (!player) return NextResponse.json({ error: 'Player not found' }, { status: 404 });
+
+      player.micOptIn = body.micOptIn === true;
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -3194,10 +3797,22 @@ async function applyAction(
       room.rollIndex = 0;
       room.shopReady = [];
       room.turnResult = null;
+      room.lastMove = null;
+      room.awards = null;
+      // Match-scoped, so cleared where the match begins rather than trusting
+      // that end_match ran first — a second match in the same room would
+      // otherwise archive the previous one's mini-games as its own.
+      room.recentMiniGames = [];
+      room.playedMiniGames = [];
       for (const player of room.players) {
         player.lives = STARTING_LIVES;
         delete player.eliminated;
+        resetMatchStats(player);
       }
+
+      // Moves the funnel row from "a room was opened" to "a match actually
+      // began" — the step most rooms are expected to fall out of.
+      await recordSessionStarted(room);
 
       if (room.enabledMiniGames?.includes('story_builder')) {
         room.storyBuilderState = { prompt: '', story: [], currentPlayerIndex: 0, phase: 'prompting', votes: {} };
@@ -3244,6 +3859,7 @@ async function applyAction(
       // match already ended with a winner it was archived then, and
       // archiveMatch's create() makes the second call a no-op.
       await archiveMatch(room, room.winner ? 'winner' : 'ended_early');
+      await recordSessionCompleted(room, room.winner ? 'winner' : 'ended_early');
 
       for (const player of room.players) {
         player.boardPosition = 0;
@@ -3254,6 +3870,7 @@ async function applyAction(
         delete player.skipNextTurn;
         delete player.remainingSteps;
         delete player.eliminated;
+        resetMatchStats(player);
       }
 
       room.phase = 'lobby';
@@ -3271,18 +3888,22 @@ async function applyAction(
       room.shopReady = [];
       room.turnResult = null;
       room.boardEvent = null;
+      room.lastMove = null;
+      room.awards = null;
       room.rollDeadline = null;
       clearPhaseDeadline(room);
       room.currentDare = null;
       room.socialRound = null;
       room.liveState = null;
       room.recentMiniGames = [];
+      room.playedMiniGames = [];
       room.truthBluffState = null;
       room.storyBuilderState = null;
       room.debateState = null;
       room.triviaState = null;
       room.guessTheVoiceState = null;
       room.aiMasterState = null;
+      room.truthOrDareState = null;
 
       pushEvent(room, `🏁 ${room.players.find((p) => p.id === body.callerId)?.name ?? 'The host'} ended the match — back to the lobby`, 'system');
       return NextResponse.json({ room: await writeRoom(room) });
@@ -3327,8 +3948,9 @@ async function applyAction(
       // the room sitting there for up to PRESENCE_TIMEOUT_MS/3 longer.
       const phaseStalled = phaseHasStalled(room, now);
       const aiStalled = aiMasterHasStalled(room, now);
+      const truthOrDareStalled = truthOrDareHasStalled(room, now);
 
-      if (!wasAway && !needsRefresh && !rollStalled && !phaseStalled && !aiStalled) {
+      if (!wasAway && !needsRefresh && !rollStalled && !phaseStalled && !aiStalled && !truthOrDareStalled) {
         return NextResponse.json({ ok: true });
       }
 
@@ -3341,11 +3963,13 @@ async function applyAction(
       expireStalledRoll(room, now);
       expireStalledPhase(room, now);
       await expireStalledAiMaster(room, now);
+      await expireStalledTruthOrDare(room, now);
       // Arm the clock for whatever the room is waiting on now. Last, so it sees
       // the phase the expiries above may have just moved it into, and so a
       // fresh wait is never handed a deadline that has already passed.
       syncPhaseDeadline(room, now);
       syncAiMasterDeadline(room, now);
+      syncTruthOrDareDeadline(room, now);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -3724,6 +4348,21 @@ async function applyAction(
       const ls = room.ludoState;
       if (ls.hasRolled) return NextResponse.json({ error: 'Already rolled this turn' }, { status: 400 });
 
+      // Verify the caller owns the colour to move.
+      //
+      // Chess checks this; Ludo did not, so any player in the room could roll
+      // and move on somebody else's turn — burning their roll from across the
+      // table. The AI seats are the one exception, and only from the client
+      // that drives them (the host), exactly as chess allows.
+      {
+        const seat = ls.players.find((p) => p.color === ls.activeColor);
+        const callerId = body.callerId ?? body.playerId;
+        const isBotTurn = seat?.isAi === true && callerId === room.hostId;
+        if (seat && seat.playerId !== callerId && !isBotTurn) {
+          return NextResponse.json({ error: 'It is not your turn' }, { status: 403 });
+        }
+      }
+
       const roll = Math.floor(Math.random() * 6) + 1;
       ls.diceValue = roll;
       ls.hasRolled = true;
@@ -3813,6 +4452,21 @@ async function applyAction(
 
       if (!ls.hasRolled || !roll) {
         return NextResponse.json({ error: 'Must roll dice first' }, { status: 400 });
+      }
+
+      // Verify the caller owns the colour to move.
+      //
+      // Chess checks this; Ludo did not, so any player in the room could roll
+      // and move on somebody else's turn — burning their roll from across the
+      // table. The AI seats are the one exception, and only from the client
+      // that drives them (the host), exactly as chess allows.
+      {
+        const seat = ls.players.find((p) => p.color === ls.activeColor);
+        const callerId = body.callerId ?? body.playerId;
+        const isBotTurn = seat?.isAi === true && callerId === room.hostId;
+        if (seat && seat.playerId !== callerId && !isBotTurn) {
+          return NextResponse.json({ error: 'It is not your turn' }, { status: 403 });
+        }
       }
 
       const activeColor = ls.activeColor;

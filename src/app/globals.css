@@ -2,113 +2,125 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Two copies of the palette, and the reason is not style.
+ *
+ * A custom property holds whatever tokens you give it, supported or not. So on
+ * a browser without oklch(), `--background: oklch(...)` is stored happily, and
+ * the failure lands later: `background: var(--background)` resolves to an
+ * oklch() the browser cannot parse, which is invalid at computed-value time and
+ * falls back to the property's initial value — transparent. The result is a
+ * white page and near-black text under an app whose components all assume a
+ * dark ground. Not a slightly duller theme: an unreadable one.
+ *
+ * oklch() needs Chrome 111, Safari 15.4 or Firefox 113 (2022-23). Chrome and
+ * Android's WebView update through the Play Store rather than with the OS, so
+ * most phones have it regardless of Android version — but "most" is the wrong
+ * bar for whether the app renders at all.
+ *
+ * The hex values below are the same colours converted to sRGB, so an older
+ * browser gets the intended palette rather than a fallback that looks like a
+ * mistake. Change one and change its pair.
+ */
 :root {
-  --background: #0d1117;
-  --foreground: #F8FAFC;
-  --terracotta: #FF5722;
-  --emerald: #10B981;
-  --yellow: #FFD166;
-  --cyan: #58A6FF;
+  --background: #03080F;
+  --foreground: #EDF3F8;
+  --terracotta: #E35A2D;
+  --emerald: #12C281;
+  --yellow: #FFC921;
+  --cyan: #00D2E5;
+  --surface-1: #07101A;
+  --surface-2: #0D1925;
+  --surface-3: #142332;
+  --border: rgba(62, 79, 96, 0.72);
 }
+
+@supports (color: oklch(0% 0 0)) {
+  :root {
+    --background: oklch(13% 0.02 248);
+    --foreground: oklch(96% 0.01 248);
+    --terracotta: oklch(64% 0.18 38);
+    --emerald: oklch(72% 0.16 160);
+    --yellow: oklch(86% 0.17 88);
+    --cyan: oklch(78% 0.15 205);
+    --surface-1: oklch(17% 0.025 248);
+    --surface-2: oklch(21% 0.03 248);
+    --surface-3: oklch(25% 0.035 248);
+    --border: oklch(42% 0.035 248 / 0.72);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--background); }
 
 body {
   color: var(--foreground);
-  background: #0d1117;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--background);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   min-height: 100vh;
   overflow-x: hidden;
   position: relative;
+  font-optical-sizing: auto;
 }
 
-/* Starfield is now rendered via <StarfieldCanvas /> — no CSS pseudo-element needed. */
+h1, h2, h3, h4 { text-wrap: balance; }
+p { text-wrap: pretty; }
 
-@keyframes cosmicPulse {
-  0% { transform: scale(1); opacity: 0.2; }
-  100% { transform: scale(1.03); opacity: 0.3; }
+button, input { font: inherit; }
+button { min-height: 44px; }
+
+button:focus-visible, input:focus-visible {
+  outline: 3px solid var(--yellow);
+  outline-offset: 3px;
 }
 
-/* Transparent Glassmorphism Cards — lets the starfield show through */
+/* Surfaces are intentionally opaque enough to keep game state legible. */
 .glass-card {
-  background: rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  box-shadow: 0 16px 40px oklch(4% 0.02 248 / 0.28);
 }
 
 .glass-pill {
-  background: rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
 }
 
-/* Localized Cosmic Color Glows */
-.glow-yellow {
-  box-shadow: 0 0 24px rgba(255, 209, 102, 0.5);
-}
+.glow-yellow { box-shadow: 0 0 0 1px oklch(86% 0.17 88 / 0.22), 0 12px 30px oklch(70% 0.12 88 / 0.18); }
+.glow-terracotta { box-shadow: 0 0 0 1px oklch(64% 0.18 38 / 0.22), 0 12px 30px oklch(58% 0.12 38 / 0.18); }
+.glow-emerald { box-shadow: 0 0 0 1px oklch(72% 0.16 160 / 0.22), 0 12px 30px oklch(62% 0.12 160 / 0.18); }
+.glow-cyan { box-shadow: 0 0 0 1px oklch(78% 0.15 205 / 0.22), 0 12px 30px oklch(62% 0.12 205 / 0.18); }
+.glow-purple { box-shadow: 0 0 0 1px oklch(78% 0.15 205 / 0.22), 0 12px 30px oklch(62% 0.12 205 / 0.18); }
 
-.glow-terracotta {
-  box-shadow: 0 0 24px rgba(255, 87, 34, 0.5);
-}
-
-.glow-emerald {
-  box-shadow: 0 0 24px rgba(16, 185, 129, 0.5);
-}
-
-.glow-cyan {
-  box-shadow: 0 0 24px rgba(0, 240, 255, 0.5);
-}
-
-.glow-purple {
-  box-shadow: 0 0 24px rgba(0, 240, 255, 0.5);
-}
-
-/* Audio Wave Ring Animation for Avatar Frames */
 @keyframes wavePulse {
-  0% {
-    box-shadow: 0 0 0 0px rgba(0, 240, 255, 0.7);
-  }
-  50% {
-    box-shadow: 0 0 0 14px rgba(0, 240, 255, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0px rgba(0, 240, 255, 0);
-  }
+  0% { box-shadow: 0 0 0 0 oklch(78% 0.15 205 / 0.56); }
+  50% { box-shadow: 0 0 0 12px oklch(78% 0.15 205 / 0); }
+  100% { box-shadow: 0 0 0 0 oklch(78% 0.15 205 / 0); }
 }
+.audio-wave-ring { animation: wavePulse 1.2s infinite cubic-bezier(0.16, 1, 0.3, 1); }
 
-.audio-wave-ring {
-  animation: wavePulse 1.2s infinite ease-out;
-}
-
-/* Panic Screen Shake & Timer Animations */
 @keyframes panicShake {
-  0%, 100% { transform: translate(0, 0) rotate(0deg); }
-  20% { transform: translate(-4px, 2px) rotate(-1deg); }
-  40% { transform: translate(4px, -2px) rotate(1deg); }
-  60% { transform: translate(-4px, -2px) rotate(-1deg); }
-  80% { transform: translate(4px, 2px) rotate(1deg); }
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  20% { transform: translate(-3px, 1px) rotate(-0.5deg); }
+  40% { transform: translate(3px, -1px) rotate(0.5deg); }
+  60% { transform: translate(-3px, -1px) rotate(-0.5deg); }
+  80% { transform: translate(3px, 1px) rotate(0.5deg); }
 }
+.animate-panic { animation: panicShake 0.3s ease-in-out infinite; }
 
-.animate-panic {
-  animation: panicShake 0.3s ease-in-out infinite;
-}
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: oklch(10% 0.02 248); }
+::-webkit-scrollbar-thumb { background: oklch(45% 0.08 205); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: oklch(65% 0.12 205); }
 
-/* Custom Cosmic Scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: rgba(5, 8, 20, 0.95);
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(0, 240, 255, 0.4);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 240, 255, 0.8);
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ── Board map ─────────────────────────────────────────────────────────────

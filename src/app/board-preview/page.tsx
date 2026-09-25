@@ -97,7 +97,6 @@ export default function BoardPreviewPage() {
         theme={theme}
         players={players}
         activePlayerId={players[0]?.id ?? ''}
-        totalTiles={TOTAL_TILES}
       />
 
       <section className="max-w-xs space-y-2">

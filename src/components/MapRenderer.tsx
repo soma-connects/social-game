@@ -4,7 +4,9 @@ import React, { useMemo } from 'react';
 import { MapTheme, Player } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
 // Shared with the server so the board shown matches the tile effects applied.
-import { BOARD_GRAPH, FINISH_NODE, TOTAL_TILES } from '@/lib/gameRules';
+import { BOARD_GRAPH, BOARD_LENGTH, FINISH_NODE, boardProgress } from '@/lib/gameRules';
+import { themeArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
 import TileNode from './TileNode';
 import PlayerToken from './PlayerToken';
 import BoardCamera from './board/BoardCamera';
@@ -35,7 +37,6 @@ interface MapRendererProps {
   theme: MapTheme;
   players: Player[];
   activePlayerId: string;
-  totalTiles?: number;
   variant?: 'full' | 'peek';
 }
 
@@ -50,7 +51,6 @@ export default function MapRenderer({
   theme,
   players,
   activePlayerId,
-  totalTiles = TOTAL_TILES,
   variant = 'full',
 }: MapRendererProps) {
   const themeConfig = THEMES[theme] || THEMES.space;
@@ -58,6 +58,8 @@ export default function MapRenderer({
   const worldSize = peek ? 460 : WORLD_SIZE;
 
   const activePlayer = players.find((p) => p.id === activePlayerId);
+  // In steps walked, not node ids — ids are names, not distances.
+  const activeProgress = activePlayer ? boardProgress(activePlayer.boardPosition) : 0;
   const focusNode = activePlayer ? BOARD_GRAPH[activePlayer.boardPosition] : undefined;
   // Only changes when the active player actually moves, so the camera is not
   // re-aimed on every poll the room does.
@@ -161,13 +163,22 @@ export default function MapRenderer({
           <>
             <div className="absolute top-3 left-3 z-30 flex items-center gap-2 pointer-events-none">
               <span className="glass-pill px-3 py-1.5 rounded-full border border-white/20 text-[11px] font-black text-white flex items-center gap-1.5 shadow-lg">
-                <span>{themeConfig.icon}</span>
+                <GameIcon src={themeArt(theme)} emoji={themeConfig.icon} className="w-4 h-4 text-sm" />
                 <span className="hidden sm:inline">{themeConfig.name.toUpperCase()}</span>
                 <span className="sm:hidden">MAP</span>
               </span>
-              <span className="hidden sm:inline-block glass-pill px-2.5 py-1.5 rounded-full border border-white/15 text-[10px] font-mono font-bold text-cyan-200/90 shadow-lg">
-                {totalTiles} NODES
-              </span>
+              {/* How far along whoever is up has got. This replaced a node
+                  count, which described the data structure rather than the
+                  race — nobody playing wants to know there are 99 nodes. */}
+              {activePlayer && (
+                <span className="glass-pill px-2.5 py-1.5 rounded-full border border-white/15 text-[10px] font-bold text-white shadow-lg flex items-center gap-1.5">
+                  <span className="max-w-[80px] truncate text-cyan-200/90">{activePlayer.name}</span>
+                  <span className="font-mono tabular-nums text-partyYellow">
+                    {activeProgress}
+                    <span className="text-white/40"> / {BOARD_LENGTH}</span>
+                  </span>
+                </span>
+              )}
             </div>
 
             <div className="absolute bottom-3 left-3 z-30 text-[10px] font-bold text-cyan-200/60 pointer-events-none">

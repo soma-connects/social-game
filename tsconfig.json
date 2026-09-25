@@ -23,5 +23,11 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  // tests/ holds the Playwright end-to-end flow, which runs on demand via
+  // `npm run test:e2e:board` and pulls its runner through npx. Keeping
+  // @playwright/test out of the dependency list matters: the Dockerfile runs
+  // `npm ci` before `npm run build`, so listing it would download Playwright
+  // and its browsers into every Cloud Run image build for a test the build
+  // never runs. Excluding the folder here is what lets the repo typecheck.
+  "exclude": ["node_modules", "tests"]
 }

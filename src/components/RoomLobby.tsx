@@ -18,23 +18,19 @@ import {
   Shuffle,
   Bot,
   Settings,
+  Dices,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
-import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState } from '@/lib/types';
-import { MAX_PLAYERS, TEAMS } from '@/lib/gameRules';
+import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState, TruthOrDareCategoryId, TruthOrDareSelectionMode } from '@/lib/types';
+import { MAX_PLAYERS, MINI_GAMES, TEAMS } from '@/lib/gameRules';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
+import { DEFAULT_TRUTH_OR_DARE_SETTINGS, TRUTH_OR_DARE_CATEGORIES, TRUTH_OR_DARE_SELECTION_LABELS } from '@/lib/truthOrDareContent';
+import { badgeArt, modeArt, vibeArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
+import MicCheck from './MicCheck';
 
-const MINI_GAMES: { id: MiniGameId; name: string; icon: string; blurb: string }[] = [
-  { id: 'voice_arena', name: 'Voice Arena', icon: '🎙️', blurb: 'Say the prompt before the timer dies' },
-  { id: 'pitch_bird', name: 'PitchBird', icon: '🐦', blurb: 'Fly through gates using your pitch' },
-  { id: 'solfege', name: 'Karaoke', icon: '🎵', blurb: 'Hear Do, then sing the note you are given' },
-  { id: 'spelling_bee', name: 'Spelling Bee', icon: '🐝', blurb: 'Listen to the word, then spell it out loud' },
-  { id: 'truth_or_bluff', name: 'Truth or Bluff', icon: '🎭', blurb: 'Tell a true story and a lie, see who guesses right' },
-  { id: 'trivia_showdown', name: 'Trivia Showdown', icon: '🧠', blurb: 'Answer trivia questions fast with your voice' },
-  { id: 'asteroid_defense', name: 'Asteroid Defense', icon: '☄️', blurb: 'Shoot down asteroids by calling out their words!' },
-];
 import { audioSFX } from '@/lib/audioFeedback';
 import AvatarIllustration from './AvatarIllustration';
 import BackgroundMusic from './BackgroundMusic';
@@ -43,7 +39,9 @@ interface RoomLobbyProps {
   room: RoomState;
   myPlayer: Player;
   onStartGame: () => void;
-  onSelectMode?: (mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo') => void;
+  onSelectMode?: (
+    mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'truth_or_dare' | 'team_battle' | 'chess' | 'ludo'
+  ) => void;
 }
 
 const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
@@ -60,13 +58,16 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   const [newPlayerName, setNewPlayerName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
-  const [activeMode, setActiveMode] = useState<'board' | 'karaoke' | 'hangout' | 'ai_master' | 'team_battle' | 'chess' | 'ludo'>('board');
+  const [activeMode, setActiveMode] = useState<
+    'board' | 'karaoke' | 'hangout' | 'ai_master' | 'truth_or_dare' | 'team_battle' | 'chess' | 'ludo'
+  >('board');
   const [showCustomDecks, setShowCustomDecks] = useState(false);
   const [isShuffling, setIsShuffling] = useState(false);
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
     room.enabledMiniGames ?? ['voice_arena', 'pitch_bird']
   );
   const roomVibe: RoomVibeId = room.roomVibe ?? DEFAULT_ROOM_VIBE;
+  const truthOrDareSettings = room.truthOrDareSettings ?? DEFAULT_TRUTH_OR_DARE_SETTINGS;
   const currentAvatarIndex = Math.max(
     0,
     AVATARS.findIndex((avatar) => avatar.id === myPlayer.avatar.id)
@@ -96,6 +97,35 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
     if (!myPlayer.isHost || id === roomVibe) return;
     roomStore.setRoomVibe(room.roomId, id);
     audioSFX.playChoiSuccess();
+  };
+
+  const toggleTruthOrDareCategory = (id: TruthOrDareCategoryId) => {
+    if (!myPlayer.isHost) return;
+    const next = truthOrDareSettings.categories.includes(id)
+      ? truthOrDareSettings.categories.filter((c) => c !== id)
+      : [...truthOrDareSettings.categories, id];
+    if (next.length === 0) return; // at least one category must stay on
+    audioSFX.playChoiSuccess();
+    roomStore.updateTruthOrDareSettings(room.roomId, { ...truthOrDareSettings, categories: next });
+  };
+
+  const toggleTruthOrDareSpicy = () => {
+    if (!myPlayer.isHost) return;
+    audioSFX.playChoiSuccess();
+    roomStore.updateTruthOrDareSettings(room.roomId, {
+      ...truthOrDareSettings,
+      spicyEnabled: !truthOrDareSettings.spicyEnabled,
+    });
+  };
+
+  const toggleTruthOrDareSelectionMode = (mode: TruthOrDareSelectionMode) => {
+    if (!myPlayer.isHost) return;
+    const next = truthOrDareSettings.selectionModes.includes(mode)
+      ? truthOrDareSettings.selectionModes.filter((m) => m !== mode)
+      : [...truthOrDareSettings.selectionModes, mode];
+    if (next.length === 0) return; // at least one mechanic must stay on
+    audioSFX.playChoiSuccess();
+    roomStore.updateTruthOrDareSettings(room.roomId, { ...truthOrDareSettings, selectionModes: next });
   };
 
   const toggleMiniGame = (id: MiniGameId) => {
@@ -190,6 +220,49 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
         </button>
       </div>
 
+      {/* Public listing. Host-only, and lobby-only on the server: publishing a
+          match in progress would drop strangers into somebody's game and flip
+          the safety rules underneath the people already in it. */}
+      {myPlayer.isHost && (
+        <div className="glass-card rounded-3xl p-4 sm:p-5 border border-white/10 relative z-10 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className={`p-2.5 rounded-xl border shrink-0 ${
+                room.isPublic
+                  ? 'bg-partyCyan/20 text-partyCyan border-partyCyan/40'
+                  : 'bg-white/5 text-gray-400 border-white/10'
+              }`}
+            >
+              <Globe className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-sm sm:text-base text-white">
+                {room.isPublic ? 'LISTED PUBLICLY' : 'INVITE ONLY'}
+              </h3>
+              <p className="text-gray-300 text-xs max-w-md">
+                {room.isPublic
+                  ? 'Anyone can find this room and join. Mics start muted and dares are off.'
+                  : 'Only people with the code can join. Make it public to fill empty seats with strangers.'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              audioSFX.playTap();
+              void roomStore.setVisibility(room.roomId, !room.isPublic);
+            }}
+            className={`w-full sm:w-auto font-black text-xs px-5 py-2.5 rounded-xl transition-all shrink-0 ${
+              room.isPublic
+                ? 'bg-white/10 hover:bg-white/20 text-gray-200 border border-white/20'
+                : 'bg-partyCyan hover:bg-cyan-300 text-partyDark'
+            }`}
+          >
+            {room.isPublic ? 'MAKE PRIVATE' : 'MAKE PUBLIC'}
+          </button>
+        </div>
+      )}
+
       {/* Two-up grid for Lounging Area & Mode Hub */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 relative z-10">
         {/* Player Lounging Area */}
@@ -214,7 +287,14 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <div>
                 <span className="text-[10px] font-black text-partyYellow uppercase tracking-wider block">YOUR ACTIVE AVATAR</span>
                 <h4 className="text-base font-black text-white">{myPlayer.avatar.name}</h4>
-                <p className="text-[11px] text-partyCyan font-bold">{myPlayer.avatar.role ?? 'Party Contestant'}</p>
+                <p className="flex items-center gap-1.5 text-[11px] text-partyCyan font-bold uppercase">
+                  <GameIcon
+                    src={badgeArt(myPlayer.avatar.badge.toLowerCase())}
+                    emoji={myPlayer.avatar.emoji}
+                    className="w-4 h-4 text-[11px] shrink-0"
+                  />
+                  {myPlayer.avatar.badge || 'Party Contestant'}
+                </p>
               </div>
             </div>
 
@@ -227,6 +307,11 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <span>CHANGE AVATAR</span>
             </button>
           </div>
+
+          {/* Before the match, not during a scored round. Half this game is
+              voice, and the first thing that used to tell a player their mic
+              was blocked was a mini-game they had just scored zero in. */}
+          <MicCheck />
 
           {/* Avatar Selection Pop-up Modal */}
           {showAvatarModal && (
@@ -477,7 +562,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyCyan/15 border border-partyCyan/30 shrink-0">
-                  🎲
+                  <GameIcon src={modeArt('board')} emoji="🎲" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -507,7 +592,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyPink/15 border border-partyPink/30 shrink-0">
-                  🎤
+                  <GameIcon src={modeArt('voice')} emoji="🎤" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -537,7 +622,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/30 shrink-0">
-                  🍻
+                  <GameIcon src={modeArt('party')} emoji="🍻" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -567,7 +652,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyYellow/15 border border-partyYellow/30 shrink-0">
-                  🤖
+                  <GameIcon src={modeArt('ai_master')} emoji="🤖" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -615,11 +700,11 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                             }`}
                           >
                             {vibe.comingSoon && (
-                              <span className="absolute top-1.5 right-1.5 bg-black/50 text-partyYellow text-[8px] font-black px-1.5 py-0.5 rounded-full border border-partyYellow/30">
-                                🔒 SOON
+                              <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-0.5 bg-black/50 text-partyYellow text-[8px] font-black px-1.5 py-0.5 rounded-full border border-partyYellow/30">
+                                <LockKeyhole className="w-2 h-2" /> SOON
                               </span>
                             )}
-                            <span className="text-lg block">{vibe.emoji}</span>
+                            <GameIcon src={vibeArt(vibe.id)} emoji={vibe.emoji} className="w-7 h-7 text-lg mx-auto" />
                             <span className="font-extrabold text-xs block mt-0.5">{vibe.label}</span>
                             <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{vibe.blurb}</span>
                             {isSelected && (
@@ -634,6 +719,137 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   )}
                 </div>
               )}
+              {/* 4b. Truth or Dare */}
+              <button
+                onClick={() => {
+                  setActiveMode('truth_or_dare');
+                  audioSFX.playChoiSuccess();
+                }}
+                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
+                  activeMode === 'truth_or_dare'
+                    ? 'bg-gradient-to-r from-fuchsia-950/80 via-slate-900/90 to-pink-900/50 border-partyPink text-white shadow-xl'
+                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                }`}
+              >
+                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyPink/15 border border-partyPink/30 shrink-0">
+                  <GameIcon src={modeArt('truth_or_dare')} emoji="🎯" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
+                    TRUTH OR DARE
+                    {activeMode === 'truth_or_dare' && (
+                      <span className="bg-partyPink text-white text-[9px] px-2 py-0.5 rounded-full font-black">
+                        SELECTED
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs text-gray-300 mt-1 leading-snug">
+                    Spin the wheel 🎡 or flip a card 🃏 — classic Truth or Dare, curated categories, spicy toggle.
+                  </p>
+                </div>
+              </button>
+
+              {/* Setup only means anything to Truth or Dare, so it lives behind
+                  that mode card rather than sitting over the whole lobby. */}
+              {activeMode === 'truth_or_dare' && (
+                <div className="rounded-2xl border border-partyPink/30 bg-partyPink/[0.06] p-3.5 space-y-4 animate-fadeIn">
+                  <div>
+                    <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-partyPink" /> CATEGORIES
+                    </h4>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {myPlayer.isHost
+                        ? 'Pick what the room draws from. At least one stays on.'
+                        : 'Set by the host.'}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
+                    {TRUTH_OR_DARE_CATEGORIES.filter((c) => !c.spicy).map((category) => {
+                      const isOn = truthOrDareSettings.categories.includes(category.id);
+                      return (
+                        <button
+                          key={category.id}
+                          type="button"
+                          onClick={() => toggleTruthOrDareCategory(category.id)}
+                          disabled={!myPlayer.isHost}
+                          className={`p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
+                            isOn
+                              ? 'bg-partyPink/20 border-partyPink text-white shadow-lg'
+                              : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                          }`}
+                        >
+                          <span className="font-extrabold text-xs block">
+                            {category.emoji} {category.label}
+                          </span>
+                          <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{category.blurb}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {TRUTH_OR_DARE_CATEGORIES.filter((c) => c.spicy).map((category) => {
+                    const isOn = truthOrDareSettings.spicyEnabled && truthOrDareSettings.categories.includes(category.id);
+                    return (
+                      <button
+                        key={category.id}
+                        type="button"
+                        onClick={() => {
+                          toggleTruthOrDareSpicy();
+                          if (!truthOrDareSettings.categories.includes(category.id)) {
+                            toggleTruthOrDareCategory(category.id);
+                          }
+                        }}
+                        disabled={!myPlayer.isHost}
+                        className={`w-full p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
+                          isOn
+                            ? 'bg-orange-500/20 border-orange-400 text-white shadow-lg'
+                            : 'bg-white/5 border-orange-400/20 text-gray-400 hover:border-orange-400/40'
+                        }`}
+                      >
+                        <span className="font-extrabold text-xs block">
+                          {category.emoji} {category.label} {isOn ? '— ON' : '— OFF'}
+                        </span>
+                        <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{category.blurb}</span>
+                      </button>
+                    );
+                  })}
+
+                  <div>
+                    <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                      <Dices className="w-3.5 h-3.5 text-partyPink" /> SELECTION MECHANIC
+                    </h4>
+                    <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))] mt-2">
+                      {(Object.keys(TRUTH_OR_DARE_SELECTION_LABELS) as TruthOrDareSelectionMode[]).map((mode) => {
+                        const info = TRUTH_OR_DARE_SELECTION_LABELS[mode];
+                        const isOn = truthOrDareSettings.selectionModes.includes(mode);
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => toggleTruthOrDareSelectionMode(mode)}
+                            disabled={!myPlayer.isHost}
+                            className={`p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
+                              isOn
+                                ? 'bg-partyCyan/20 border-partyCyan text-white shadow-lg'
+                                : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                            }`}
+                          >
+                            <span className="font-extrabold text-xs block">
+                              {info.emoji} {info.label}
+                            </span>
+                            <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{info.blurb}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {truthOrDareSettings.selectionModes.length > 1 && (
+                      <p className="text-[10px] text-gray-500 mt-1.5">Both on — rounds alternate between them.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* 5. Team Battle */}
               <button
                 onClick={() => {
@@ -647,7 +863,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-red-500/15 border border-red-500/30 shrink-0">
-                  ⚔️
+                  <GameIcon src={modeArt('team_battle')} emoji="⚔️" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -677,7 +893,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-cyan-500/15 border border-cyan-400/30 shrink-0">
-                  ♟️
+                  <GameIcon src={modeArt('chess')} emoji="♟️" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -707,7 +923,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                 }`}
               >
                 <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-amber-500/15 border border-amber-400/30 shrink-0">
-                  🎲
+                  <GameIcon src={modeArt('ludo')} emoji="🎲" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
@@ -816,7 +1032,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                         }`}
                       >
                         <span className="text-xl block">{game.icon}</span>
-                        <span className="font-extrabold text-sm block">{game.name}</span>
+                        <span className="font-extrabold text-sm block">{game.label}</span>
                         <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{game.blurb}</span>
                       </button>
                     );

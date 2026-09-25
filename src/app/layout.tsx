@@ -7,15 +7,14 @@ export const metadata: Metadata = {
   title: "Voice Party Arcade | High-Speed Voice & 3D Board Game",
   description: "Multiplayer voice party game, 3D roadmap board, AI host dares & karaoke arcade!",
   manifest: "/manifest.json",
-  // Without this every page load asks for /favicon.ico, gets a 404, and the
-  // browser tab falls back to a blank sheet — the PWA icons were already here,
-  // nothing was pointing the tab at them.
+  // Without these Next emits no icon links at all, so iOS falls back to a
+  // screenshot of the page when someone adds the game to their home screen.
   icons: {
     icon: [
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: "/icon-192.png",
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
   appleWebApp: {
     capable: true,

@@ -45,7 +45,13 @@ export type MatchRecord = {
     boardPosition: number;
     won: boolean;
   }>;
-  /** Mini-games actually played, in order. */
+  /**
+   * Mini-games actually played, in order, for the whole match.
+   *
+   * Read from playedMiniGames rather than recentMiniGames: the latter is the
+   * repeat rule's sliding window, so it held only the last six picks and was
+   * never written at all in Team Battle.
+   */
   gamesPlayed: string[];
   winnerUid: string | null;
   winnerName: string | null;
@@ -83,7 +89,7 @@ function buildRecord(room: RoomState, outcome: MatchRecord['outcome']): MatchRec
           ? p.teamId === room.winningTeam
           : p.id === winnerId,
     })),
-    gamesPlayed: room.recentMiniGames ?? [],
+    gamesPlayed: room.playedMiniGames ?? [],
     winnerUid: room.players.find((p) => p.id === winnerId)?.uid ?? null,
     winnerName: room.winner?.name ?? null,
     winningTeam: room.winningTeam ?? null,

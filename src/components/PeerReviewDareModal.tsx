@@ -4,6 +4,9 @@ import React, { useState } from 'react';
 import { Mic, CheckCircle2, XCircle, ShieldAlert } from 'lucide-react';
 import { Player } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
+import { dareBody, dareCategory } from '@/lib/gameContent';
+import { dareArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
 
 interface PeerReviewDareModalProps {
   /**
@@ -29,6 +32,7 @@ export default function PeerReviewDareModal({
   onResolveDare,
 }: PeerReviewDareModalProps) {
   const [isPerforming, setIsPerforming] = useState(false);
+  const category = dareCategory(dareText);
 
   const handleJudgement = (passed: boolean) => {
     if (passed) {
@@ -54,8 +58,23 @@ export default function PeerReviewDareModal({
 
         {/* Dare Prompt Card */}
         <div className="p-6 rounded-2xl bg-partyDark/90 border border-partyYellow/40 space-y-3">
-          <span className="text-4xl">🎭</span>
-          <p className="text-lg font-black text-partyYellow leading-snug">&quot;{dareText}&quot;</p>
+          {/* Every dare carries its own kind, so the card shows which one it is
+              rather than the same mask for all eight. */}
+          <GameIcon
+            src={category ? dareArt(category.id) : undefined}
+            emoji={category?.icon ?? '🎭'}
+            alt={category?.name ?? 'Dare'}
+            className="w-16 h-16 mx-auto text-4xl"
+            eager
+          />
+          {category && (
+            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-partyPink">
+              {category.name}
+            </p>
+          )}
+          <p className="text-lg font-black text-partyYellow leading-snug">
+            &quot;{dareBody(dareText)}&quot;
+          </p>
         </div>
 
         {/* Live Mic Perform Area */}

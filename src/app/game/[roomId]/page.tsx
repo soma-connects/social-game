@@ -110,7 +110,7 @@ export default function GameRoomPage() {
 
   const { room, status, error } = snapshot;
 
-  // â”€â”€ Voice replay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Voice replay ──────────────────────────────────────────────────────────
   // Passed explicitly: identity is stored per room, and this reads during the
   // first render, before the effect below tells the store which room we watch.
   const myPlayerId = roomStore.getMyPlayerId(roomId);
@@ -142,7 +142,7 @@ export default function GameRoomPage() {
      *
      * The game id matters as much as the performer. Keying on performer and
      * round alone left the clip alive when the same player moved to a different
-     * mini-game â€” which is the common case in a Team Battle series, and the one
+     * mini-game — which is the common case in a Team Battle series, and the one
      * where the wrong audio is most confusing.
      */
     sessionKey: `${room?.roundNumber ?? 0}:${performer?.id ?? 'none'}:${room?.currentMiniGame ?? 'none'}`,
@@ -160,7 +160,7 @@ export default function GameRoomPage() {
     speechEngine.clearMicFault();
   }, [roundKey]);
 
-  // â”€â”€ Presence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Presence ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!myPlayerId) return;
 
@@ -179,7 +179,7 @@ export default function GameRoomPage() {
   /**
    * First-time explanation for whichever mini-game is on screen.
    *
-   * Spectators get it too â€” they are about to play the same game next turn, and
+   * Spectators get it too — they are about to play the same game next turn, and
    * watching something you do not understand is worse than playing it.
    */
   const inMiniGame = !!room && !!room.currentMiniGame && !!MINIGAME_BRIEFINGS[room.currentMiniGame];
@@ -223,8 +223,8 @@ export default function GameRoomPage() {
     return (
       <div className="min-h-screen flex items-center justify-center text-white bg-partyDark">
         <div className="text-center space-y-3">
-          <div className="animate-spin text-5xl">ðŸŽ™ï¸</div>
-          <p className="text-sm font-mono text-partyYellow">CONNECTING TO ROOM {roomId}â€¦</p>
+          <div className="animate-spin text-5xl">🎙️</div>
+          <p className="text-sm font-mono text-partyYellow">CONNECTING TO ROOM {roomId}…</p>
         </div>
       </div>
     );
@@ -282,7 +282,7 @@ export default function GameRoomPage() {
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Sisi Vibe, Sharp Guyâ€¦"
+                  placeholder="e.g. Sisi Vibe, Sharp Guy…"
                   value={guestNameInput}
                   onChange={(e) => setGuestNameInput(e.target.value)}
                   maxLength={20}
@@ -303,7 +303,7 @@ export default function GameRoomPage() {
                 className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl glow-emerald"
               >
                 <UserPlus className="w-5 h-5" />
-                <span>{isJoining ? 'JOININGâ€¦' : `JOIN AS PLAYER ${room.players.length + 1}`}</span>
+                <span>{isJoining ? 'JOINING…' : `JOIN AS PLAYER ${room.players.length + 1}`}</span>
               </button>
             </form>
           )}
@@ -353,9 +353,9 @@ export default function GameRoomPage() {
       audioSFX.playNollywoodBrass();
       await roomStore.startTruthOrDare(roomId);
     } else if (mode === 'karaoke') {
-      setComingSoonTitle('ðŸŽ¤ Karaoke & Pitch Arcade Mode');
+      setComingSoonTitle('🎤 Karaoke & Pitch Arcade Mode');
     } else if (mode === 'hangout') {
-      setComingSoonTitle('ðŸ» 15s Roast & Open-Mic Lounge Mode');
+      setComingSoonTitle('🍻 15s Roast & Open-Mic Lounge Mode');
     }
   };
 
@@ -484,7 +484,7 @@ export default function GameRoomPage() {
           {comingSoonTitle && (
             <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
               <div className="glass-card rounded-3xl p-6 sm:p-8 max-w-md w-full border border-partyYellow text-center space-y-4">
-                <div className="text-4xl">ðŸš€</div>
+                <div className="text-4xl">🚀</div>
                 <h3 className="text-xl font-black text-white">{comingSoonTitle}</h3>
                 <p className="text-xs text-gray-300">
                   This dedicated mode feature is currently in active development for the next update. Launch Board Game or AI Master Mode to play right now!
@@ -562,7 +562,7 @@ export default function GameRoomPage() {
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
                   movingOnAt={room.phaseDeadline ?? null}
-                  label="is flying in PitchBird ðŸ¦"
+                  label="is flying in PitchBird 🐦"
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
@@ -596,7 +596,7 @@ export default function GameRoomPage() {
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
                   movingOnAt={room.phaseDeadline ?? null}
-                  label="is on the karaoke mic ðŸŽµ"
+                  label="is on the karaoke mic 🎵"
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
@@ -617,7 +617,7 @@ export default function GameRoomPage() {
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
                   movingOnAt={room.phaseDeadline ?? null}
-                  label="is spelling in the Spelling Bee ðŸ"
+                  label="is spelling in the Spelling Bee 🐝"
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
@@ -691,7 +691,7 @@ export default function GameRoomPage() {
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
                   movingOnAt={room.phaseDeadline ?? null}
-                  label="is answering Trivia in Trivia Showdown ðŸ§ "
+                  label="is answering Trivia in Trivia Showdown 🧠"
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
@@ -712,7 +712,7 @@ export default function GameRoomPage() {
                   activePlayer={activePlayer}
                   live={room.liveState ?? null}
                   movingOnAt={room.phaseDeadline ?? null}
-                  label="is defending the station from ASTEROIDS â˜„ï¸"
+                  label="is defending the station from ASTEROIDS ☄️"
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
@@ -765,7 +765,7 @@ export default function GameRoomPage() {
             </div>
           )}
 
-          {/* Step 3 â€” move on the main board */}
+          {/* Step 3 — move on the main board */}
           {(room.phase === 'roadmap_turn' || room.phase === 'branch_choice') && (
             <>
               <RoadmapBoard
@@ -800,7 +800,7 @@ export default function GameRoomPage() {
                                     : 'bg-emerald-500/20 border-emerald-500 hover:bg-emerald-500/40 text-emerald-200'
                                 }`}
                               >
-                                <span>{isRisky ? 'ðŸ’€ RISKY PATH' : 'ðŸŒ± SAFE PATH'}</span>
+                                <span>{isRisky ? '💀 RISKY PATH' : '🌱 SAFE PATH'}</span>
                                 <span className="opacity-60 text-sm">Node #{nextId + 1}</span>
                               </button>
                             );
@@ -931,8 +931,8 @@ export default function GameRoomPage() {
         </button>
 
         {/* Replaces the old TRAPS shortcut. Traps are armed from the header and
-            almost nobody used the button, while the inventory â€” which decides
-            whether you can act on your turn â€” had no route at all on a phone:
+            almost nobody used the button, while the inventory — which decides
+            whether you can act on your turn — had no route at all on a phone:
             RightSidebar is `hidden lg:block`, so below 1024px it never renders. */}
         <button
           onClick={() => setShowMobileInventory(true)}
@@ -964,7 +964,7 @@ export default function GameRoomPage() {
             </div>
 
             <p className="text-[11px] text-gray-400">
-              {isMyTurn ? 'Your turn â€” items can be used now.' : 'You can only use items on your own turn.'}
+              {isMyTurn ? 'Your turn — items can be used now.' : 'You can only use items on your own turn.'}
             </p>
 
             {(() => {
@@ -1052,7 +1052,7 @@ export default function GameRoomPage() {
                         <div className="flex items-center gap-1.5">
                           <h4 className="font-extrabold text-xs text-white">{player.name}</h4>
                           {isMe && <span className="bg-partyCyan text-partyDark text-[8px] px-1 rounded font-black">YOU</span>}
-                          {isLeader && <span>ðŸ‘‘</span>}
+                          {isLeader && <span>👑</span>}
                         </div>
                         <p className="text-[10px] text-partyYellow font-mono">Node #{player.boardPosition + 1}</p>
                       </div>
@@ -1098,7 +1098,7 @@ export default function GameRoomPage() {
                     key={ev.id}
                     className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-200 font-bold flex items-start gap-2"
                   >
-                    <span>{ev.type === 'buff' ? 'ðŸš€' : ev.type === 'debuff' ? 'ðŸ’¥' : ev.type === 'social' ? 'ðŸ¤£' : 'ðŸŽ®'}</span>
+                    <span>{ev.type === 'buff' ? '🚀' : ev.type === 'debuff' ? '💥' : ev.type === 'social' ? '🤣' : '🎮'}</span>
                     <span>{ev.text}</span>
                   </div>
                 ))
@@ -1198,7 +1198,7 @@ export default function GameRoomPage() {
 /**
  * The board, collapsed by default outside the board phase.
  *
- * It is ~600px tall â€” on a phone that pushed the actual mini-game controls off
+ * It is ~600px tall — on a phone that pushed the actual mini-game controls off
  * screen during a round nobody spends looking at the map. Still one tap away
  * for anyone who wants to check positions.
  */
@@ -1242,7 +1242,7 @@ function WaitingPanel({ activePlayer, label }: { activePlayer: Player; label: st
       <h3 className="text-xl font-black text-white">
         {activePlayer.name} {label}
       </h3>
-      <p className="text-xs text-gray-400">Hang tight â€” your turn is coming up.</p>
+      <p className="text-xs text-gray-400">Hang tight — your turn is coming up.</p>
     </div>
   );
 }

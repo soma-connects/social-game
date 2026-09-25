@@ -59,13 +59,45 @@ export type MatchRecord = {
   roundsPlayed: number;
 };
 
+/**
+ * Who won, as player ids.
+ *
+ * `room.winner` is a player, and it is how the board game and the AI Master
+ * say who won. Chess and Ludo never set it: each records its winner as a
+ * colour on its own state, because that is what their rules are about. Read
+ * only `room.winner` and every chess match archives with nobody having won.
+ *
+ * A bot occupies a colour but is nobody's record, so it is left out — beating
+ * the computer is a win for the human side, and losing to it is a loss.
+ */
+export function winnerIdsOf(room: RoomState): Set<string> {
+  const chess = room.chessState;
+  if (room.roomType === 'chess' && chess?.winner) {
+    if (chess.winner === 'draw') return new Set();
+    const side = chess.winner === 'w' ? chess.whitePlayers : chess.blackPlayers;
+    return new Set(side.filter((slot) => !slot.isAi).map((slot) => slot.playerId));
+  }
+
+  const ludo = room.ludoState;
+  if (room.roomType === 'ludo' && ludo?.winner) {
+    return new Set(
+      ludo.players.filter((p) => p.color === ludo.winner && !p.isAi).map((p) => p.playerId)
+    );
+  }
+
+  return new Set(room.winner?.id ? [room.winner.id] : []);
+}
+
 function buildRecord(room: RoomState, outcome: MatchRecord['outcome']): MatchRecord | null {
   const matchId = room.matchId;
   // A room that never left the lobby has no match to record.
   if (!matchId || !room.matchStartedAt) return null;
 
   const endedAt = Date.now();
-  const winnerId = room.winner?.id ?? null;
+  const winners = winnerIdsOf(room);
+  // The first winner names the match; a 2v2 chess pair shares the win below.
+  const winnerId = [...winners][0] ?? null;
+  const winnerPlayer = room.players.find((p) => p.id === winnerId) ?? null;
 
   return {
     matchId,
@@ -87,11 +119,11 @@ function buildRecord(room: RoomState, outcome: MatchRecord['outcome']): MatchRec
       won:
         room.winningTeam != null
           ? p.teamId === room.winningTeam
-          : p.id === winnerId,
+          : winners.has(p.id),
     })),
     gamesPlayed: room.playedMiniGames ?? [],
-    winnerUid: room.players.find((p) => p.id === winnerId)?.uid ?? null,
-    winnerName: room.winner?.name ?? null,
+    winnerUid: winnerPlayer?.uid ?? null,
+    winnerName: winnerPlayer?.name ?? null,
     winningTeam: room.winningTeam ?? null,
     roundsPlayed: room.roundNumber ?? 0,
   };
@@ -115,14 +147,39 @@ function buildRecord(room: RoomState, outcome: MatchRecord['outcome']): MatchRec
  * object that may be re-read from Firestore before the next call, so it cannot
  * be the thing correctness rests on.
  */
+/**
+ * Matches this process has already seen archived.
+ *
+ * `room.matchArchived` cannot do this job on its own: it is set after the room
+ * has been written, so it never reaches Firestore, and the next request reads
+ * the room back with it false. Every request made from the end screen — every
+ * heartbeat from every player — then tried the create again and marked the
+ * session completed again, pushing its end time later each time. So finished
+ * matches reported durations that ran until the last person closed the tab.
+ *
+ * One process holds the room (see the instance pin in cloudbuild.yaml), so this
+ * catches every repeat but the first after a restart, and that one is still
+ * stopped by create() below.
+ */
+const archivedMatchIds = new Set<string>();
+
+/** Whether the match is known to be archived already, without a round trip. */
+export function isKnownArchived(matchId: string | null | undefined): boolean {
+  return !!matchId && archivedMatchIds.has(matchId);
+}
+
+/**
+ * Returns true only when this call wrote the record — the signal a caller
+ * needs to do anything else exactly once, like closing the session row.
+ */
 export async function archiveMatch(
   room: RoomState,
   outcome: MatchRecord['outcome']
-): Promise<void> {
-  if (room.matchArchived) return;
+): Promise<boolean> {
+  if (room.matchArchived || isKnownArchived(room.matchId)) return false;
 
   const record = buildRecord(room, outcome);
-  if (!record) return;
+  if (!record) return false;
 
   try {
     try {
@@ -132,12 +189,14 @@ export async function archiveMatch(
       // error, and specifically not a reason to increment anybody's totals.
       if (error?.code === 6) {
         room.matchArchived = true;
-        return;
+        archivedMatchIds.add(record.matchId);
+        return false;
       }
       throw error;
     }
 
     room.matchArchived = true;
+    archivedMatchIds.add(record.matchId);
 
     // Lifetime totals, one document per durable identity. Players without a uid
     // still appear in the match record; they just cannot be aggregated over
@@ -170,9 +229,13 @@ export async function archiveMatch(
     }
 
     if (any) await batch.commit();
+    return true;
   } catch (error) {
     // Logged, not thrown. Losing a summary row costs a statistic; throwing here
     // would cost the room its game-over screen.
     console.error(`archiveMatch: failed to record match ${record.matchId}`, error);
+    // Whether the summary landed before the failure is unknown here, so this
+    // reports true only if it can tell; a later request retries otherwise.
+    return archivedMatchIds.has(record.matchId);
   }
 }

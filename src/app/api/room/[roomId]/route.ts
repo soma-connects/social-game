@@ -90,6 +90,9 @@ import {
 import { archiveMatch } from '@/lib/server/matchArchive';
 import {
   newSessionId,
+  flushSessionNotes,
+  noteRoundFailure,
+  noteSessionPulse,
   recordSessionCompleted,
   recordSessionCreated,
   recordSessionStarted,
@@ -1759,6 +1762,37 @@ async function expireStalledTruthOrDare(room: RoomState, now: number): Promise<v
   }
 }
 
+/**
+ * Marks the start of a match, for the permanent record.
+ *
+ * Every mode has to do this or it is invisible to the dashboard: a room
+ * without a matchId never archives, and its session row never leaves
+ * `created` — so Chess, Ludo and Team Battle, which skipped it, were each
+ * counted as a lobby somebody opened and walked away from.
+ */
+function openMatch(room: RoomState): void {
+  room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  room.matchStartedAt = Date.now();
+  room.matchArchived = false;
+}
+
+/**
+ * Whether the match in this room has just reached its end, and how.
+ *
+ * Only the board game and the AI Master end by setting `phase = 'game_over'`.
+ * The others finish on their own terms — a chess or Ludo winner is a colour on
+ * that game's state, a Team Battle series ends on its recap screen — and a
+ * check for game_over alone never saw any of them finish.
+ */
+function matchEndedOutcome(room: RoomState): 'winner' | null {
+  if (!room.matchId || room.matchArchived) return null;
+  if (room.phase === 'game_over') return 'winner';
+  if (room.phase === 'team_battle_recap') return 'winner';
+  if (room.roomType === 'chess' && room.chessState?.winner) return 'winner';
+  if (room.roomType === 'ludo' && room.ludoState?.winner) return 'winner';
+  return null;
+}
+
 /** Ends the match. In team mode one player crossing wins it for their whole crew. */
 function declareWinner(room: RoomState, player: Player, reason: 'finish' | 'last_standing' = 'finish'): void {
   room.winner = player;
@@ -1973,11 +2007,19 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       //
       // After the response is built, so recording a match never delays the
       // game-over screen, and guarded by archiveMatch's own idempotency rather
-      // than by anything this loop tracks.
-      if (room.phase === 'game_over' && !room.matchArchived) {
-        await archiveMatch(room, 'winner');
-        await recordSessionCompleted(room, 'winner');
+      // than by anything this loop tracks. The session row is closed only when
+      // this request is the one that archived the match — otherwise every
+      // heartbeat from the end screen closed it again and dragged its end
+      // time out to whenever the last player left.
+      const ended = matchEndedOutcome(room);
+      if (ended && (await archiveMatch(room, ended))) {
+        await recordSessionCompleted(room, ended);
       }
+
+      // Anything the action noted for the dashboard — a round that timed out,
+      // a pulse of who is here and what they are playing. Written here, after
+      // the room write, so an attempt that lost its race records nothing.
+      await flushSessionNotes(room);
 
       return response;
     } catch (error) {
@@ -3415,6 +3457,8 @@ async function applyAction(
       room.teamScores = { red: 0, blue: 0 };
       room.roundResults = [];
       room.currentMiniGame = games[0];
+      openMatch(room);
+      await recordSessionStarted(room);
       pushEvent(
         room,
         `⚔️ Team Battle: ${games.length} game${games.length === 1 ? '' : 's'}, Red Crew vs Blue Crew`,
@@ -3468,9 +3512,7 @@ async function applyAction(
         return NextResponse.json({ error: 'The AI Master needs at least 2 players' }, { status: 409 });
       }
       room.roomType = 'ai_master';
-      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      room.matchStartedAt = Date.now();
-      room.matchArchived = false;
+      openMatch(room);
       room.winner = null;
       room.aiMasterState = null;
       await recordSessionStarted(room);
@@ -3624,9 +3666,7 @@ async function applyAction(
         return NextResponse.json({ error: 'Truth or Dare needs at least 2 players' }, { status: 409 });
       }
       room.roomType = 'truth_or_dare';
-      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      room.matchStartedAt = Date.now();
-      room.matchArchived = false;
+      openMatch(room);
       room.winner = null;
       room.truthOrDareState = null;
       if (!room.truthOrDareSettings) room.truthOrDareSettings = DEFAULT_TRUTH_OR_DARE_SETTINGS;
@@ -3781,9 +3821,7 @@ async function applyAction(
       // here rather than at archive time so every row is traceable back to the
       // room and the moment it started, and so a match that ends twice cannot
       // produce two rows.
-      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      room.matchStartedAt = Date.now();
-      room.matchArchived = false;
+      openMatch(room);
 
       // This action starts the board game and Team Battle only — chess, ludo
       // and AI Master each have their own. Without this a room that had just
@@ -3858,8 +3896,12 @@ async function applyAction(
       // and the winner, which is most of what the record is made of. If this
       // match already ended with a winner it was archived then, and
       // archiveMatch's create() makes the second call a no-op.
-      await archiveMatch(room, room.winner ? 'winner' : 'ended_early');
-      await recordSessionCompleted(room, room.winner ? 'winner' : 'ended_early');
+      //
+      // The outcome comes from matchEndedOutcome rather than `room.winner`,
+      // which chess and Ludo never set: a finished chess game would otherwise
+      // be filed as ended early.
+      const outcome = matchEndedOutcome(room) ?? 'ended_early';
+      if (await archiveMatch(room, outcome)) await recordSessionCompleted(room, outcome);
 
       for (const player of room.players) {
         player.boardPosition = 0;
@@ -3960,6 +4002,16 @@ async function applyAction(
         pushEvent(room, `🔌 ${me.name} reconnected`, 'system');
       }
       prunePresence(room);
+
+      // For the dashboard's "where do rounds fail". Noted before the expiries
+      // below move the room on, so each records the phase that actually ran
+      // out of time rather than the one that replaced it.
+      if (rollStalled) noteRoundFailure(room, 'roll', now);
+      if (phaseStalled) noteRoundFailure(room, 'phase', now);
+      if (aiStalled) noteRoundFailure(room, 'ai_master', now);
+      if (truthOrDareStalled) noteRoundFailure(room, 'truth_or_dare', now);
+      noteSessionPulse(room, now);
+
       expireStalledRoll(room, now);
       expireStalledPhase(room, now);
       await expireStalledAiMaster(room, now);
@@ -4107,6 +4159,8 @@ async function applyAction(
         lastMove: null,
       };
 
+      openMatch(room);
+      await recordSessionStarted(room);
       pushEvent(room, `♟️ Chess Match started! Mode: ${mode.toUpperCase()}`, 'system');
       return NextResponse.json({ room: await writeRoom(room) });
     }
@@ -4339,6 +4393,8 @@ async function applyAction(
         lastActionText: 'Game started! Red rolls first.',
       };
 
+      openMatch(room);
+      await recordSessionStarted(room);
       pushEvent(room, `🎲 Ludo Match started! 4 Players ready.`, 'system');
       return NextResponse.json({ room: await writeRoom(room) });
     }

@@ -1,6 +1,6 @@
 import { MINIGAME_LABELS } from '../gameRules';
 import type { MiniGameId } from '../types';
-import { isAbandoned, type SessionRecord } from './sessionArchive';
+import { isAbandoned, type RoundFailure, type SessionRecord } from './sessionArchive';
 import type { MatchRecord } from './matchArchive';
 
 /**
@@ -36,6 +36,145 @@ export type DayPoint = { date: string; sessions: number; matches: number; player
 
 export type ModeStat = { mode: string; matches: number; share: number };
 
+/** A place in the game, and how often something happened there. */
+export type PlaceStat = { place: string; count: number; share: number };
+
+/** One row of the recent-sessions table: who came, what happened, how long. */
+export type RecentSession = {
+  sessionId: string;
+  roomId: string;
+  mode: string;
+  createdAt: number;
+  /** completed, abandoned, or still going. */
+  state: 'completed' | 'abandoned' | 'live';
+  outcome: SessionRecord['outcome'];
+  /**
+   * How long it ran, start to finish — or, for one that died, start to the
+   * last sign of life. Null for rows written before the pulse existed.
+   */
+  durationMs: number | null;
+  /** Whether the room ever got past the lobby. */
+  started: boolean;
+  playerNames: string[];
+  playerCount: number;
+  /** Where it was last seen, in words. */
+  lastPlace: string | null;
+  failureCount: number;
+};
+
+/**
+ * Plain names for the room phases, for anywhere a person reads them.
+ *
+ * Phase ids are written for the code — `powerup_shop`, `roast_intermission` —
+ * and a chart of "where games die" labelled with them reads as a stack trace.
+ * Mini-game phases are named from MINIGAME_LABELS instead, so they stay in step
+ * with what the game calls them on screen.
+ */
+const PHASE_LABELS: Record<string, string> = {
+  lobby: 'Lobby',
+  powerup_shop: 'Power-up shop',
+  roadmap_turn: 'Rolling on the board',
+  branch_choice: 'Choosing a route',
+  peer_dare: 'Peer dare',
+  roast_intermission: 'Roast lounge',
+  team_battle_select: 'Team Battle setup',
+  team_battle_intro: 'Team Battle intro',
+  team_battle_recap: 'Team Battle recap',
+  chess_match: 'Chess',
+  ludo_match: 'Ludo',
+  ai_master_round: 'AI Master',
+  truth_or_dare_round: 'Truth or Dare',
+  game_over: 'Game over screen',
+  qualifying_voice: 'Voice Arena',
+  'ai_master:announcing': 'AI Master: taking the challenge',
+  'ai_master:responding': 'AI Master: answering',
+  'ai_master:voting': 'AI Master: the room voting',
+  'ai_master:verdict': 'AI Master: verdict',
+  'truth_or_dare:selecting': 'Truth or Dare: spinning',
+  'truth_or_dare:choosing': 'Truth or Dare: picking truth or dare',
+  'truth_or_dare:prompt': 'Truth or Dare: answering',
+  'truth_or_dare:resolved': 'Truth or Dare: between turns',
+};
+
+/** What each kind of timeout means, for a person reading the chart. */
+const FAILURE_KIND_LABELS: Record<RoundFailure['kind'], string> = {
+  roll: 'Nobody rolled',
+  phase: 'Timed out',
+  ai_master: 'Timed out',
+  truth_or_dare: 'Timed out',
+};
+
+/**
+ * Where a room was, in words.
+ *
+ * Inside a mini-game, the mini-game is the useful name: "Trivia Showdown" says
+ * what to fix, "qualifying_voice" does not. Only inside one, though —
+ * `currentMiniGame` stays set after the game is over, so reading it whenever it
+ * is present would report a room that died in the shop as dying in whatever
+ * was played before the shop.
+ */
+export function placeLabel(phase: string | null | undefined, miniGame?: string | null): string {
+  if (!phase) return 'Unknown';
+  const inMiniGame = phase === 'qualifying_voice' || phase in MINIGAME_LABELS;
+  if (inMiniGame && miniGame) return MINIGAME_LABELS[miniGame as MiniGameId] ?? miniGame;
+  return PHASE_LABELS[phase] ?? MINIGAME_LABELS[phase as MiniGameId] ?? phase;
+}
+
+/** Counts into a sorted list with shares, the shape every place chart takes. */
+function tally(places: string[]): PlaceStat[] {
+  const counts = new Map<string, number>();
+  for (const place of places) counts.set(place, (counts.get(place) ?? 0) + 1);
+  return [...counts.entries()]
+    .map(([place, count]) => ({ place, count, share: ratio(count, places.length) }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/** A session's state as the dashboard tells it. */
+function sessionState(session: SessionRecord, now: number): RecentSession['state'] {
+  if (session.status === 'completed') return 'completed';
+  return isAbandoned(session, now) ? 'abandoned' : 'live';
+}
+
+/** Start to end, or start to the last sign of life. */
+function sessionDuration(session: SessionRecord): number | null {
+  const from = session.startedAt ?? session.createdAt;
+  const to = session.endedAt ?? session.lastActiveAt ?? null;
+  return to != null && to >= from ? to - from : null;
+}
+
+/**
+ * The recent-sessions table.
+ *
+ * Names are shown, deliberately. The match table stays roster-free because it
+ * answers "what has been happening"; this one answers "who came", which is a
+ * question about people and cannot be answered without naming them. The names
+ * are the ones players typed to join, already visible to everyone in the room,
+ * and the page sits behind the admin token.
+ */
+export function buildRecentSessions(
+  sessions: SessionRecord[],
+  now: number = Date.now(),
+  limit = 25
+): RecentSession[] {
+  return [...sessions]
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, limit)
+    .map((s) => ({
+      sessionId: s.sessionId,
+      roomId: s.roomId,
+      mode: s.mode ?? 'unknown',
+      createdAt: s.createdAt,
+      state: sessionState(s, now),
+      outcome: s.outcome,
+      durationMs: sessionDuration(s),
+      started: s.status !== 'created',
+      playerNames: s.playerNames ?? [],
+      playerCount: s.playerCount,
+      lastPlace: s.lastPhase || s.lastMiniGame ? placeLabel(s.lastPhase, s.lastMiniGame) : null,
+      failureCount: s.failureCount ?? 0,
+    }));
+}
+
 export type AnalyticsSummary = {
   rangeDays: number;
   generatedAt: number;
@@ -68,6 +207,28 @@ export type AnalyticsSummary = {
   totalMatchSlots: number;
   /** Matches whose gamesPlayed array was empty — nothing to attribute. */
   matchesMissingGames: number;
+
+  /**
+   * Where abandoned games were last seen.
+   *
+   * A game that dies does not say so, so this is the last place its room was
+   * heard from — accurate to within a minute's pulse.
+   */
+  whereGamesDie: PlaceStat[];
+  /** Rounds the game had to move on from, by where they happened. */
+  roundFailures: PlaceStat[];
+  totalRoundFailures: number;
+  /** How long abandoned games ran before the room went quiet. */
+  medianAbandonedMinutes: number;
+  /**
+   * Sessions carrying the progress fields.
+   *
+   * Rows written before the pulse existed have no last place and no length, so
+   * the two charts above are drawn from this many sessions, not all of them —
+   * and the dashboard should say so rather than let a small sample pass for
+   * the whole picture.
+   */
+  sessionsWithProgress: number;
 };
 
 function median(values: number[]): number {
@@ -159,6 +320,31 @@ export function buildAnalytics(
   const uniquePlayers = players.length;
   const returningPlayers = players.filter((p) => (p.matchesPlayed ?? 0) > 1).length;
 
+  // Where abandoned games died. A lobby nobody started is its own answer —
+  // that is a different problem from a match that fell apart halfway.
+  const withProgress = sessions.filter((s) => s.lastActiveAt != null);
+  const died = withProgress.filter((s) => isAbandoned(s, now));
+  const whereGamesDie = tally(
+    died.map((s) => (s.status === 'created' ? 'Lobby' : placeLabel(s.lastPhase, s.lastMiniGame)))
+  );
+
+  const failures = sessions.flatMap((s) => s.failures ?? []);
+  const roundFailures = tally(
+    failures.map((f) => {
+      const place = placeLabel(f.phase, f.miniGame);
+      // "Timed out" is implied for everything but the dice, which is the one
+      // failure with a different cause worth naming.
+      return f.kind === 'roll' ? `${place} — ${FAILURE_KIND_LABELS.roll}` : place;
+    })
+  );
+  // The count keeps going past the kept detail, so it is the true total.
+  const totalRoundFailures = sessions.reduce((sum, s) => sum + (s.failureCount ?? 0), 0);
+
+  const abandonedLengths = died
+    .filter((s) => s.status !== 'created')
+    .map(sessionDuration)
+    .filter((d): d is number => d != null);
+
   const funnel: FunnelStep[] = [
     { label: 'Rooms opened', value: sessionsCreated, hint: 'Someone created a room' },
     { label: 'Matches started', value: matchesStarted, hint: 'Someone pressed start' },
@@ -187,5 +373,10 @@ export function buildAnalytics(
     returnRate: ratio(returningPlayers, uniquePlayers),
     totalMatchSlots: matches.reduce((sum, m) => sum + (m.playerCount ?? 0), 0),
     matchesMissingGames,
+    whereGamesDie,
+    roundFailures,
+    totalRoundFailures,
+    medianAbandonedMinutes: Math.round((median(abandonedLengths) / 60_000) * 10) / 10,
+    sessionsWithProgress: withProgress.length,
   };
 }

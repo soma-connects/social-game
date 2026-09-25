@@ -596,6 +596,10 @@ export type RoomState = {
    * reused, so the code alone cannot identify a session.
    */
   sessionId?: string | null;
+  /** When the session row was last refreshed — the pulse's throttle. */
+  sessionPulseAt?: number | null;
+  /** Round failures written to the session row so far, to cap its detail list. */
+  failuresRecorded?: number;
   /**
    * Identifies the current match for the permanent `matches` record. Minted
    * when the room leaves the lobby and cleared when it returns, so it doubles

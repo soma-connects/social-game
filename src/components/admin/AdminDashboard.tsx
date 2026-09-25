@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { BarList, ChartCard, EmptyPlot, Funnel, LineChart, StatTile } from './Charts';
 import { FUNNEL_RAMP, INK, SERIES, STATUS, percent } from './vizTokens';
-import type { AnalyticsSummary } from '@/lib/server/analytics';
+import type { AnalyticsSummary, RecentSession } from '@/lib/server/analytics';
 import ReportsQueue from './ReportsQueue';
 
 type RecentMatch = {
@@ -22,6 +22,8 @@ type RecentMatch = {
 type Payload = {
   summary: AnalyticsSummary;
   recentMatches: RecentMatch[];
+  /** Absent from a server older than this page, which must not crash on it. */
+  recentSessions?: RecentSession[];
   truncated: { sessions: boolean; matches: boolean; players: boolean };
 };
 
@@ -33,7 +35,21 @@ const MODE_LABELS: Record<string, string> = {
   chess: 'Chess',
   ludo: 'Ludo',
   ai_master: 'AI Master',
+  truth_or_dare: 'Truth or Dare',
   unknown: 'Unrecorded',
+};
+
+/** Minutes, or seconds for anything shorter — a 40-second lobby is not "1 min". */
+function formatLength(ms: number | null): string {
+  if (ms == null) return '—';
+  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))}s`;
+  return `${Math.round(ms / 60_000)} min`;
+}
+
+const SESSION_STATE_LABELS: Record<RecentSession['state'], string> = {
+  completed: 'Finished',
+  abandoned: 'Abandoned',
+  live: 'Still open',
 };
 
 /** Colours a rate by how healthy it is, not by which series it belongs to. */
@@ -77,6 +93,9 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
   }, [days, load, tab]);
 
   const summary = data?.summary;
+  // No identities at all while matches did finish means sign-in is off, not
+  // that nobody came back — the three identity tiles read this together.
+  const identityOff = !!summary && summary.uniquePlayers === 0 && summary.matchesCompleted > 0;
 
   return (
     <div className="space-y-5">
@@ -94,7 +113,9 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Wraps: seven controls do not fit across a phone, and without it
+            Sign out sat entirely off-screen. */}
+        <div className="flex flex-wrap items-center gap-2">
           <div
             className="inline-flex rounded-xl overflow-hidden border"
             style={{ borderColor: INK.axis }}
@@ -252,6 +273,80 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
             </ChartCard>
           </div>
 
+          {/* Where games break.
+              The funnel above says how many games are lost; this says where,
+              and how long they had run. Both charts are single-series counts,
+              so they carry no legend and no status colour — a place where
+              games stop is a thing to look at, not an alarm. */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatTile
+              label="Abandoned games"
+              value={String(summary.sessionsAbandoned)}
+              hint="Opened and never finished"
+            />
+            <StatTile
+              label="Median abandoned game"
+              value={`${summary.medianAbandonedMinutes} min`}
+              hint="How long it ran before the room went quiet"
+            />
+            <StatTile
+              label="Rounds timed out"
+              value={String(summary.totalRoundFailures)}
+              hint="The game had to move on without anyone"
+            />
+            <StatTile
+              label="Sessions tracked"
+              value={String(summary.sessionsWithProgress)}
+              hint={`of ${summary.sessionsCreated} opened carry where-and-how-long data`}
+            />
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-5">
+            <ChartCard
+              title="Where games die"
+              subtitle="Last place an abandoned game was seen"
+            >
+              {summary.whereGamesDie.length > 0 ? (
+                <BarList
+                  rows={summary.whereGamesDie.map((row) => ({
+                    key: row.place,
+                    label: row.place,
+                    value: row.count,
+                    note: percent(row.share),
+                  }))}
+                />
+              ) : (
+                <EmptyPlot message="No abandoned games with tracking data in this window." />
+              )}
+            </ChartCard>
+
+            <ChartCard
+              title="Where rounds time out"
+              subtitle="Rounds the game moved on from because nobody finished them"
+            >
+              {summary.roundFailures.length > 0 ? (
+                <BarList
+                  rows={summary.roundFailures.map((row) => ({
+                    key: row.place,
+                    label: row.place,
+                    value: row.count,
+                    note: percent(row.share),
+                  }))}
+                />
+              ) : (
+                <EmptyPlot message="No rounds timed out in this window." />
+              )}
+            </ChartCard>
+          </div>
+
+          {summary.sessionsWithProgress < summary.sessionsCreated && (
+            <p className="text-xs -mt-2" style={{ color: INK.muted }}>
+              Drawn from the {summary.sessionsWithProgress} session
+              {summary.sessionsWithProgress === 1 ? '' : 's'} recorded since where-and-how-long
+              tracking shipped. Rooms opened before that have no last place or length to report.
+            </p>
+          )}
+
           <div className="grid lg:grid-cols-2 gap-5">
             <ChartCard
               title="Which mini-games get played"
@@ -300,21 +395,28 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Identity comes from Firebase Anonymous sign-in. With it off, every
+                player is unknown and these read 0 — which is missing data, not
+                a return rate of nothing, so it must not be painted as an alarm. */}
             <StatTile
               label="Known players"
-              value={String(summary.uniquePlayers)}
-              hint="Signed-in identities seen in range"
+              value={identityOff ? '—' : String(summary.uniquePlayers)}
+              hint={
+                identityOff
+                  ? 'None recorded — is Anonymous sign-in enabled in Firebase?'
+                  : 'Signed-in identities seen in range'
+              }
             />
             <StatTile
               label="Came back"
-              value={String(summary.returningPlayers)}
+              value={identityOff ? '—' : String(summary.returningPlayers)}
               hint="Played more than one match"
             />
             <StatTile
               label="Return rate"
-              value={percent(summary.returnRate)}
-              hint="Of known players"
-              tone={rateTone(summary.returnRate, 0.3, 0.15)}
+              value={identityOff ? '—' : percent(summary.returnRate)}
+              hint={identityOff ? 'Needs player identities' : 'Of known players'}
+              tone={identityOff ? undefined : rateTone(summary.returnRate, 0.3, 0.15)}
             />
             <StatTile
               label="Seats filled"
@@ -322,6 +424,85 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
               hint="Players across all finished matches"
             />
           </div>
+
+          <ChartCard
+            title="Recent sessions"
+            subtitle="Every room opened, finished or not — who came, how long, where it got to"
+          >
+            {(data.recentSessions ?? []).length > 0 ? (
+              <div className="overflow-x-auto -mx-2 px-2">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr style={{ color: INK.muted }}>
+                      {['Opened', 'Room', 'Mode', 'Who came', 'Length', 'Got to', 'Timeouts', 'Result'].map(
+                        (head) => (
+                          <th
+                            key={head}
+                            className="text-left font-semibold py-2 pr-4 border-b whitespace-nowrap"
+                            style={{ borderColor: INK.grid }}
+                          >
+                            {head}
+                          </th>
+                        )
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data.recentSessions ?? []).map((session) => (
+                      <tr key={session.sessionId} style={{ color: INK.secondary }}>
+                        <td className="py-2 pr-4 border-b whitespace-nowrap" style={{ borderColor: INK.grid }}>
+                          {new Date(session.createdAt).toLocaleString()}
+                        </td>
+                        <td className="py-2 pr-4 border-b font-mono" style={{ borderColor: INK.grid }}>
+                          {session.roomId}
+                        </td>
+                        <td className="py-2 pr-4 border-b whitespace-nowrap" style={{ borderColor: INK.grid }}>
+                          {session.started ? MODE_LABELS[session.mode] ?? session.mode : 'Lobby only'}
+                        </td>
+                        <td
+                          className="py-2 pr-4 border-b min-w-[10rem]"
+                          style={{ borderColor: INK.grid, color: INK.primary }}
+                        >
+                          {session.playerNames.length > 0 ? (
+                            session.playerNames.join(', ')
+                          ) : (
+                            <span style={{ color: INK.muted }}>{session.playerCount} (names not recorded)</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4 border-b tabular-nums whitespace-nowrap" style={{ borderColor: INK.grid }}>
+                          {formatLength(session.durationMs)}
+                        </td>
+                        <td className="py-2 pr-4 border-b whitespace-nowrap" style={{ borderColor: INK.grid }}>
+                          {/* For a game that ran to its end, "got to the end" is
+                              what Result already says. The column earns its
+                              space on the ones that stopped short. */}
+                          {session.state === 'completed' && session.outcome !== 'ended_early'
+                            ? '—'
+                            : session.lastPlace ?? '—'}
+                        </td>
+                        <td className="py-2 pr-4 border-b tabular-nums" style={{ borderColor: INK.grid }}>
+                          {session.failureCount}
+                        </td>
+                        <td
+                          className="py-2 pr-4 border-b whitespace-nowrap"
+                          style={{
+                            borderColor: INK.grid,
+                            color: session.state === 'completed' ? INK.primary : INK.muted,
+                          }}
+                        >
+                          {session.state === 'completed' && session.outcome === 'ended_early'
+                            ? 'Ended early'
+                            : SESSION_STATE_LABELS[session.state]}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyPlot message="No rooms opened in this window." />
+            )}
+          </ChartCard>
 
           <ChartCard
             title="Recent matches"

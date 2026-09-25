@@ -32,6 +32,7 @@ import RoadmapBoard from '@/components/RoadmapBoard';
 import TrapWordPicker from '@/components/TrapWordPicker';
 import PeerReviewDareModal from '@/components/PeerReviewDareModal';
 import AvatarIllustration from '@/components/AvatarIllustration';
+import PlayerSafetyMenu from '@/components/PlayerSafetyMenu';
 import VoiceCallBar from '@/components/VoiceCallBar';
 import AiGameMasterBanner from '@/components/AiGameMasterBanner';
 import GeminiAiMasterStage from '@/components/GeminiAiMasterStage';
@@ -69,6 +70,7 @@ import {
   Map,
   Package,
   ChevronDown,
+  ShieldAlert,
 } from 'lucide-react';
 
 export default function GameRoomPage() {
@@ -79,6 +81,8 @@ export default function GameRoomPage() {
   const [snapshot, setSnapshot] = useState<RoomSnapshot>({ room: null, status: 'connecting', error: null });
   const [showTrapPicker, setShowTrapPicker] = useState(false);
   const [showMobilePlayers, setShowMobilePlayers] = useState(false);
+  /** Mute/report target opened from the phone roster, the only player list a phone has. */
+  const [rosterSafetyTarget, setRosterSafetyTarget] = useState<Player | null>(null);
   const [showMobileFeed, setShowMobileFeed] = useState(false);
   const [showMobileInventory, setShowMobileInventory] = useState(false);
   const [showGeminiMode, setShowGeminiMode] = useState(false);
@@ -1057,7 +1061,18 @@ export default function GameRoomPage() {
                         <p className="text-[10px] text-partyYellow font-mono">Node #{player.boardPosition + 1}</p>
                       </div>
                     </div>
-                    <span className="text-sm font-black text-partyYellow font-mono">{player.score} pts</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-sm font-black text-partyYellow font-mono">{player.score} pts</span>
+                      {!isMe && (
+                        <button
+                          onClick={() => setRosterSafetyTarget(player)}
+                          aria-label={`Mute or report ${player.name}`}
+                          className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 active:scale-95"
+                        >
+                          <ShieldAlert className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -1071,6 +1086,10 @@ export default function GameRoomPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {rosterSafetyTarget && (
+        <PlayerSafetyMenu player={rosterSafetyTarget} roomId={roomId} onClose={() => setRosterSafetyTarget(null)} />
       )}
 
       {/* Mobile Event Feed Pop-up Modal */}

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import StarfieldCanvas from "@/components/StarfieldCanvas";
 import AuthWarmup from "@/components/AuthWarmup";
+import ErrorCapture from "@/components/ErrorCapture";
 
 export const metadata: Metadata = {
   title: "Voice Party Arcade | High-Speed Voice & 3D Board Game",
@@ -41,6 +42,7 @@ export default function RootLayout({
       <body className="antialiased min-h-screen overflow-x-hidden selection:bg-partyPink selection:text-white bg-[#0d1117]">
         <StarfieldCanvas />
         <AuthWarmup />
+        <ErrorCapture />
         {children}
       </body>
     </html>

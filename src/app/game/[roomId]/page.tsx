@@ -439,6 +439,7 @@ export default function GameRoomPage() {
         onEndMatch={() => roomStore.endMatch(roomId)}
         canEndMatch={myPlayer.isHost && room.phase !== 'lobby'}
         showThemeSelector={room.phase !== 'lobby'}
+        playerId={myPlayer.id}
       />
 
       {status === 'error' && error && (

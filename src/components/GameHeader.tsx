@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Volume2, VolumeX, Mic, MicOff, Share2, Home, LogOut, MoreVertical, X, Flag } from 'lucide-react';
+import { Volume2, VolumeX, Mic, MicOff, Share2, Home, LogOut, MoreVertical, X, Flag, MessageSquareWarning } from 'lucide-react';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { micStream } from '@/lib/micStream';
 import { MapTheme } from '@/lib/types';
 import ThemeSelector from './ThemeSelector';
+import FeedbackDialog from './FeedbackDialog';
 
 interface GameHeaderProps {
   roomId: string;
@@ -22,6 +23,8 @@ interface GameHeaderProps {
   /** True when a match is actually running and the caller may end it. */
   canEndMatch?: boolean;
   showThemeSelector?: boolean;
+  /** Names the sender on a feedback report, when it belongs to this room. */
+  playerId?: string;
 }
 
 export default function GameHeader({
@@ -34,8 +37,10 @@ export default function GameHeader({
   onEndMatch,
   canEndMatch = false,
   showThemeSelector = true,
+  playerId,
 }: GameHeaderProps) {
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState(() => speechEngine.getIsMicMuted());
@@ -142,6 +147,15 @@ export default function GameHeader({
             </button>
 
             <button
+              onClick={() => setShowFeedback(true)}
+              className="glass-pill hover:bg-white/20 text-white p-2 rounded-xl transition-all"
+              title="Send feedback"
+              aria-label="Send feedback"
+            >
+              <MessageSquareWarning className="w-4 h-4 text-amber-300" />
+            </button>
+
+            <button
               onClick={onGoHome}
               className="glass-pill hover:bg-white/20 text-white p-2 rounded-xl transition-all"
               title="Home"
@@ -192,6 +206,14 @@ export default function GameHeader({
                 >
                   <Home className="w-4 h-4 text-partyCyan" />
                   BACK TO HOME
+                </button>
+
+                <button
+                  onClick={() => { setShowFeedback(true); setShowMobileMenu(false); }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white hover:bg-white/10 transition-all"
+                >
+                  <MessageSquareWarning className="w-4 h-4 text-amber-300" />
+                  SEND FEEDBACK
                 </button>
 
                 {/* Ending the match is a different thing from leaving the room,
@@ -255,6 +277,10 @@ export default function GameHeader({
             </div>
           </div>
         </div>
+      )}
+
+      {showFeedback && (
+        <FeedbackDialog roomId={roomId} playerId={playerId} onClose={() => setShowFeedback(false)} />
       )}
 
       {/* Leaving drops you out of the turn order, so make it deliberate. */}

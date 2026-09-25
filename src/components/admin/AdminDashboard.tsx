@@ -5,6 +5,7 @@ import { BarList, ChartCard, EmptyPlot, Funnel, LineChart, StatTile } from './Ch
 import { FUNNEL_RAMP, INK, SERIES, STATUS, percent } from './vizTokens';
 import type { AnalyticsSummary, RecentSession } from '@/lib/server/analytics';
 import ReportsQueue from './ReportsQueue';
+import FeedbackQueue from './FeedbackQueue';
 
 type RecentMatch = {
   matchId: string;
@@ -59,7 +60,7 @@ function rateTone(rate: number, warn: number, bad: number): string {
   return STATUS.good;
 }
 
-type Tab = 'analytics' | 'reports';
+type Tab = 'analytics' | 'reports' | 'feedback';
 
 export default function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
   const [tab, setTab] = useState<Tab>('analytics');
@@ -67,6 +68,22 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [openFeedback, setOpenFeedback] = useState(0);
+
+  // Refetched whenever the tab changes, so resolving items on the feedback tab
+  // is reflected in the badge as soon as you leave it.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/admin/feedback', { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (!cancelled && payload) setOpenFeedback(payload.openCount ?? 0);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [tab]);
 
   const load = useCallback(async (range: number) => {
     setLoading(true);
@@ -102,12 +119,14 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold" style={{ color: INK.primary }}>
-            {tab === 'reports' ? 'Moderation' : 'Game analytics'}
+            {tab === 'reports' ? 'Moderation' : tab === 'feedback' ? 'Player feedback' : 'Game analytics'}
           </h1>
           <p className="text-xs mt-0.5" style={{ color: INK.muted }}>
             {tab === 'reports'
               ? 'Player reports and what was decided about them'
-              : summary
+              : tab === 'feedback'
+                ? 'Bugs and ideas players sent from inside the game'
+                : summary
                 ? `Last ${summary.rangeDays} days · updated ${new Date(summary.generatedAt).toLocaleTimeString()}`
                 : 'Loading…'}
           </p>
@@ -120,7 +139,7 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
             className="inline-flex rounded-xl overflow-hidden border"
             style={{ borderColor: INK.axis }}
           >
-            {(['analytics', 'reports'] as Tab[]).map((name) => (
+            {(['analytics', 'reports', 'feedback'] as Tab[]).map((name) => (
               <button
                 key={name}
                 onClick={() => setTab(name)}
@@ -131,6 +150,18 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
                 }}
               >
                 {name}
+                {/* The count is on the tab so an open report is visible from
+                    the first screen — a queue nobody opens is where feedback
+                    goes to die, which is the thing this exists to prevent. */}
+                {name === 'feedback' && openFeedback > 0 && (
+                  <span
+                    className="ml-1.5 rounded-full px-1.5 text-[10px] font-bold tabular-nums"
+                    style={{ backgroundColor: STATUS.warning, color: INK.page }}
+                    aria-label={`${openFeedback} open`}
+                  >
+                    {openFeedback}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -180,6 +211,7 @@ export default function AdminDashboard({ onSignOut }: { onSignOut: () => void })
       </header>
 
       {tab === 'reports' && <ReportsQueue onSignOut={onSignOut} />}
+      {tab === 'feedback' && <FeedbackQueue onSignOut={onSignOut} />}
 
       {tab === 'analytics' && error && (
         <div

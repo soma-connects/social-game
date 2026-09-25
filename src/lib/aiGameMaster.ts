@@ -69,6 +69,11 @@ export const AI_PROMPT_POOLS: AiHostPrompt[] = [
   { id: 'pc3', category: 'personality', tone: 'energetic', text: 'Give a 10-second fast-talk sports commentary on someone taking a sip of water!' },
 ];
 
+/** Gemini TTS streams 16-bit mono PCM at this rate. */
+const GEMINI_TTS_SAMPLE_RATE = 24000;
+/** First audio normally lands in ~1s; past this the browser voice is the better host. */
+const FIRST_AUDIO_TIMEOUT_MS = 4000;
+
 class AiGameMasterEngine {
   private currentState: AiHostState = 'idle';
   private usedPromptIds: Set<string> = new Set();
@@ -76,7 +81,31 @@ class AiGameMasterEngine {
   private ttsVoice: SpeechSynthesisVoice | null = null;
   private memoryCache: SessionMemoryEvent[] = [];
 
+  /**
+   * One audio context for every host line, unlocked by the player's first tap.
+   *
+   * Phones only let a page start sound from inside a user gesture. The Gemini
+   * voice arrives a second after the line is asked for — well outside any tap —
+   * and the old player built a fresh AudioContext per line, so on a phone it was
+   * born suspended and silent. That is why the Gemini path was switched off. A
+   * single context resumed on the first tap stays unlocked for the session.
+   */
+  private audioCtx: AudioContext | null = null;
+  /** Stops whatever host line is playing now. */
+  private stopPlayback: (() => void) | null = null;
+  /** Bumped per line, so a slow line never plays over the one that replaced it. */
+  private speakToken = 0;
+
   constructor() {
+    if (typeof window !== 'undefined') {
+      const unlock = () => {
+        const ctx = this.getAudioContext();
+        if (ctx && ctx.state !== 'running') void ctx.resume().catch(() => {});
+      };
+      for (const event of ['pointerdown', 'touchstart', 'keydown']) {
+        window.addEventListener(event, unlock, { passive: true });
+      }
+    }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       const loadVoices = () => {
         const voices = window.speechSynthesis.getVoices();
@@ -101,61 +130,131 @@ class AiGameMasterEngine {
     this.currentState = state;
   }
 
-  /** Dual Delivery: Gemini TTS voice (server) with browser TTS fallback */
+  /**
+   * Says a host line in the Gemini voice, falling back to the browser's.
+   *
+   * Returns the text immediately so callers can show it while it is spoken.
+   */
   public speak(text: string): string {
-    // Force browser TTS directly to avoid async fetch delays blocking audio playback.
-    this.speakBrowserFallback(text);
+    void this.speakWithGemini(text);
     return text;
   }
 
-  private async speakAsync(text: string): Promise<void> {
+  private getAudioContext(): AudioContext | null {
+    if (typeof window === 'undefined') return null;
+    if (!this.audioCtx) {
+      const Ctor =
+        window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return null;
+      this.audioCtx = new Ctor();
+    }
+    return this.audioCtx;
+  }
+
+  private stopSpeaking(): void {
+    this.stopPlayback?.();
+    this.stopPlayback = null;
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+  }
+
+  /**
+   * Streams the line from /api/ai-tts and plays each chunk as it lands.
+   *
+   * The browser voice takes over when the context is still locked (no tap
+   * yet), when no audio arrives within FIRST_AUDIO_TIMEOUT_MS, or on any error
+   * before the first chunk — a host that goes silent is worse than a robotic one.
+   */
+  private async speakWithGemini(text: string): Promise<void> {
+    const token = ++this.speakToken;
+    this.stopSpeaking();
+
+    const ctx = this.getAudioContext();
+    if (ctx && ctx.state !== 'running') await ctx.resume().catch(() => {});
+    if (!ctx || ctx.state !== 'running') {
+      this.speakBrowserFallback(text);
+      return;
+    }
+
+    const controller = new AbortController();
+    const sources: AudioBufferSourceNode[] = [];
+    this.stopPlayback = () => {
+      controller.abort();
+      sources.forEach((s) => {
+        try {
+          s.stop();
+        } catch {
+          /* not started yet, or already ended */
+        }
+      });
+    };
+    const giveUp = setTimeout(() => controller.abort(), FIRST_AUDIO_TIMEOUT_MS);
+
+    let gotAudio = false;
+    let nextStart = 0;
+    let carry: number | null = null;
     try {
       const res = await fetch('/api/ai-tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
+        signal: controller.signal,
       });
-      const data = await res.json();
+      if (!res.ok || !res.body) throw new Error(`TTS ${res.status}`);
 
-      if (!data.success || !data.audio) {
-        throw new Error('No audio data');
+      const reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done || token !== this.speakToken) break;
+
+        // 16-bit samples can straddle network chunks; hold an odd byte over.
+        let bytes = value;
+        if (carry !== null) {
+          const joined = new Uint8Array(bytes.length + 1);
+          joined[0] = carry;
+          joined.set(bytes, 1);
+          bytes = joined;
+          carry = null;
+        }
+        if (bytes.length % 2 === 1) {
+          carry = bytes[bytes.length - 1];
+          bytes = bytes.subarray(0, bytes.length - 1);
+        }
+        const samples = bytes.length / 2;
+        if (samples === 0) continue;
+
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const buffer = ctx.createBuffer(1, samples, GEMINI_TTS_SAMPLE_RATE);
+        const channel = buffer.getChannelData(0);
+        for (let i = 0; i < samples; i++) channel[i] = view.getInt16(i * 2, true) / 32768;
+
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        // A small lead on the first chunk absorbs network jitter between the next few.
+        const startAt = Math.max(ctx.currentTime + (gotAudio ? 0.02 : 0.15), nextStart);
+        source.start(startAt);
+        nextStart = startAt + buffer.duration;
+        sources.push(source);
+
+        if (!gotAudio) {
+          gotAudio = true;
+          clearTimeout(giveUp);
+        }
       }
-
-      // Decode base64 PCM → WAV and play
-      const raw = atob(data.audio);
-      const pcm = new Uint8Array(raw.length);
-      for (let i = 0; i < raw.length; i++) pcm[i] = raw.charCodeAt(i);
-
-      // PCM 16-bit LE mono 24kHz → Float32
-      const sampleRate = 24000;
-      const samples = pcm.length / 2;
-      const float32 = new Float32Array(samples);
-      for (let i = 0; i < samples; i++) {
-        const lo = pcm[i * 2];
-        const hi = pcm[i * 2 + 1];
-        let val = (hi << 8) | lo;
-        if (val >= 0x8000) val -= 0x10000;
-        float32[i] = val / 32768;
-      }
-
-      const audioCtx = new AudioContext({ sampleRate });
-      const buffer = audioCtx.createBuffer(1, float32.length, sampleRate);
-      buffer.getChannelData(0).set(float32);
-      const source = audioCtx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(audioCtx.destination);
-      source.start();
-      source.onended = () => audioCtx.close();
-    } catch (err) {
-      console.warn('Gemini TTS failed, falling back to browser TTS:', err);
-      this.speakBrowserFallback(text);
+    } catch {
+      if (!gotAudio && token === this.speakToken) this.speakBrowserFallback(text);
+    } finally {
+      clearTimeout(giveUp);
     }
   }
 
   private speakBrowserFallback(text: string): void {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
+      // Browser voices read emoji out by name ("fire", "party popper").
+      const spoken = text.replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, '').trim();
+      if (!spoken) return;
+      const utterance = new SpeechSynthesisUtterance(spoken);
       if (this.ttsVoice) utterance.voice = this.ttsVoice;
       utterance.rate = 1.05;
       utterance.pitch = 1.1;

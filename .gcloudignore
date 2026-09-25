@@ -19,6 +19,12 @@ PROJECT_GOALS.md
 .claude/
 .claude/**
 
+# A git worktree left at an old commit. .next, .git and node_modules are already
+# skipped wherever they sit, so what is left of it is a second, older copy of the
+# whole source tree: 23MB that doubles the upload, and nothing builds from it.
+.deploy-origin-main/
+.deploy-origin-main/**
+
 # Env files. The build gets the public Firebase config through --build-arg and
 # the Gemini key at runtime, so no env file ever needs to leave this machine.
 .env

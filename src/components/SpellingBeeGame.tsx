@@ -156,7 +156,9 @@ export default function SpellingBeeGame({ room, activePlayer, onCompleteTurn }: 
     }
     
     let startFailed = false;
-    const session = speechEngine.listenForSpeech({
+    const session = speechEngine.listen({
+      roomId: room.roomId,
+      mode: 'command',
       targetWord: challenge.word,
       language: 'en-US',
       onResult: (res: SpeechMatchResult) => {
@@ -220,7 +222,9 @@ export default function SpellingBeeGame({ room, activePlayer, onCompleteTurn }: 
     if (!challenge || status !== 'listening') return;
     micStream.setSpeechPriority(true);
     sessionRef.current?.stop();
-    sessionRef.current = speechEngine.listenForSpeech({
+    sessionRef.current = speechEngine.listen({
+      roomId: room.roomId,
+      mode: 'command',
       targetWord: challenge.word,
       language: 'en-US',
       onResult: (res: SpeechMatchResult) => {

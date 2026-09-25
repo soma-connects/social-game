@@ -105,7 +105,9 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
   const beginListening = () => {
     setListening(true);
     setTranscript('');
-    sessionRef.current = speechEngine.listenForSpeech({
+    sessionRef.current = speechEngine.listen({
+      roomId: roomId,
+      mode: 'dictation',
       targetWord: '',
       language: 'en-US',
       onResult: (res: any) => setTranscript(res.transcript ?? ''),

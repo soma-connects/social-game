@@ -1,8 +1,8 @@
 // Live group voice over WebRTC.
 //
-// Topology is a full mesh: with a 4-player cap that is 3 peer connections per
-// player, which is well within what a phone handles. An SFU would only be worth
-// it past roughly 6 participants.
+// Topology is a full mesh: with the 6-player cap that is up to 5 peer
+// connections per player, each carrying one ~30 kbps Opus stream out — within
+// what a phone on 3G can send. An SFU would only be worth it past that.
 //
 // Signalling rides the REST relay in /api/room/[roomId]/signal. To avoid glare,
 // which side makes the offer is decided by comparing player ids rather than by
@@ -62,11 +62,19 @@ export interface VoiceState {
   audioBlocked: boolean;
 }
 
+// `session` identifies one RTCPeerConnection instance, and `offerId` one offer
+// made on it. Both are optional on the wire so a client still running the old
+// build keeps working against a new one.
 type SignalMessage =
-  | { kind: 'offer'; from: string; to: string; sdp: RTCSessionDescriptionInit }
-  | { kind: 'answer'; from: string; to: string; sdp: RTCSessionDescriptionInit }
-  | { kind: 'ice'; from: string; to: string; candidate: RTCIceCandidateInit }
-  | { kind: 'bye'; from: string; to: string };
+  | { kind: 'offer'; from: string; to: string; sdp: RTCSessionDescriptionInit; session?: string; offerId?: string }
+  | { kind: 'answer'; from: string; to: string; sdp: RTCSessionDescriptionInit; session?: string; offerId?: string }
+  | { kind: 'ice'; from: string; to: string; candidate: RTCIceCandidateInit; session?: string }
+  | { kind: 'bye'; from: string; to: string }
+  | { kind: 'reset'; from: string; to: string };
+
+function newSessionId(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
 
 interface Peer {
   id: string;
@@ -87,8 +95,23 @@ interface Peer {
   analyser: AnalyserNode | null;
   speaking: boolean;
   /** Candidates that arrived before the remote description was set. */
-  pendingCandidates: RTCIceCandidateInit[];
+  pendingCandidates: { candidate: RTCIceCandidateInit; session?: string }[];
   remoteDescriptionSet: boolean;
+  /** Identifies this RTCPeerConnection, so the other side can tell a rebuilt one from a renegotiation. */
+  session: string;
+  /** The other side's connection id, once known. A different one means they rebuilt. */
+  remoteSession?: string;
+  /** The offer we are waiting on an answer for; answers to anything older are stale. */
+  pendingOfferId?: string;
+  offerCount: number;
+  createdAt: number;
+  /** When this side last asked the offerer to start over. */
+  lastResetRequestAt?: number;
+  /** When the offerer last rebuilt this connection on request, to stop a reset storm. */
+  lastResetAt?: number;
+  failedAt?: number;
+  /** Timer that promotes a lingering 'disconnected' to failed. */
+  disconnectTimer?: ReturnType<typeof setTimeout>;
   /** How the media actually travels, once connected. Diagnostics only. */
   route?: 'direct' | 'relay';
   /** True once ICE gave up on this peer. */
@@ -125,8 +148,22 @@ interface Peer {
  */
 const PRESENCE_GRACE_POLLS = 5;
 
-/** How long to wait before re-sending an offer that produced no answer. */
-const OFFER_RETRY_MS = 4000;
+/**
+ * How long to wait before re-sending an offer that produced no answer.
+ *
+ * Longer than one full signalling round trip on a slow mobile network — two
+ * polls plus two POSTs to a server in another continent. At 4s a re-offer
+ * regularly went out while the first answer was still in flight, and the two
+ * handshakes tripped over each other.
+ */
+const OFFER_RETRY_MS = 8000;
+/** A connection 'disconnected' this long is treated as failed and restarted. */
+const DISCONNECT_GRACE_MS = 5000;
+/**
+ * How long the answering side waits for an offer, or sits on a failed
+ * connection, before asking the offerer to rebuild from scratch.
+ */
+const RESET_AFTER_MS = 6000;
 
 const SPEAKING_THRESHOLD = 12;
 
@@ -655,7 +692,10 @@ class VoiceChatManager {
       if (!peer) peer = this.createPeer(id);
 
       // Only the lower id offers; the other side waits and answers.
-      if (this.myId! >= id) return;
+      if (this.myId! >= id) {
+        this.maybeRequestReset(peer, now);
+        return;
+      }
 
       // Re-offer while the handshake has not completed. remoteDescriptionSet is
       // the honest signal that the other side actually answered — connection
@@ -675,6 +715,37 @@ class VoiceChatManager {
     });
 
     this.emit();
+  }
+
+  /**
+   * Lets the answering side get out of a stuck call.
+   *
+   * Only the lower id may offer, so the higher id had no move of its own when
+   * a handshake stalled — after it reloaded, say, while the offerer still held
+   * a connection it believed healthy, the pair sat silent until ICE consent
+   * finally expired half a minute later. Asking the offerer to rebuild is the
+   * one thing this side can do, and it is rate-limited so two confused peers
+   * cannot bounce resets off each other.
+   */
+  private maybeRequestReset(peer: Peer, now: number): void {
+    if (!this.myId) return;
+    const waitingForOffer = !peer.remoteDescriptionSet && now - peer.createdAt > RESET_AFTER_MS;
+    const stuckFailed = !!peer.failed && !!peer.failedAt && now - peer.failedAt > RESET_AFTER_MS;
+    if (!waitingForOffer && !stuckFailed) return;
+    if (peer.lastResetRequestAt !== undefined && now - peer.lastResetRequestAt < RESET_AFTER_MS * 2) return;
+
+    peer.lastResetRequestAt = now;
+    void this.send({ kind: 'reset', from: this.myId, to: peer.id });
+  }
+
+  /** Throws away a peer connection and builds a fresh one in its place. */
+  private rebuildPeer(peerId: string): Peer {
+    const old = this.peers.get(peerId);
+    if (old) {
+      this.destroyPeer(old);
+      this.peers.delete(peerId);
+    }
+    return this.createPeer(peerId);
   }
 
   private createPeer(peerId: string): Peer {
@@ -709,6 +780,9 @@ class VoiceChatManager {
       pendingCandidates: [],
       remoteDescriptionSet: false,
       missedPresence: 0,
+      session: newSessionId(),
+      offerCount: 0,
+      createdAt: Date.now(),
     };
 
     // The lower id offers (see connect above), so that side opens the channel
@@ -739,12 +813,23 @@ class VoiceChatManager {
      * A transceiver guarantees the sender exists up front, so restoring the mic
      * is always just a replaceTrack.
      */
-    const track = this.localStream?.getAudioTracks()[0] ?? null;
-    const transceiver = pc.addTransceiver('audio', {
-      direction: 'sendrecv',
-      streams: this.localStream ? [this.localStream] : [],
-    });
-    if (track) void transceiver.sender.replaceTrack(track).catch(() => {});
+    //
+    // Only on the OFFERING side, though. A browser never pairs a transceiver
+    // made with addTransceiver() with an m-line in an incoming offer — setting
+    // the remote offer creates a second, receive-only transceiver instead. When
+    // both sides pre-made one, the answerer's microphone sat in an orphaned
+    // transceiver that was never negotiated, and the answer went out
+    // recvonly: in every pair, whoever answered was never heard, while both
+    // ends reported "connected". The answering side attaches its microphone
+    // to the offer's own transceiver in attachLocalAudio instead.
+    if (this.myId && this.myId < peerId) {
+      const track = this.localStream?.getAudioTracks()[0] ?? null;
+      const transceiver = pc.addTransceiver('audio', {
+        direction: 'sendrecv',
+        streams: this.localStream ? [this.localStream] : [],
+      });
+      if (track) void transceiver.sender.replaceTrack(track).catch(() => {});
+    }
 
     pc.onicecandidate = (event) => {
       if (event.candidate && this.myId) {
@@ -753,13 +838,16 @@ class VoiceChatManager {
           from: this.myId,
           to: peerId,
           candidate: event.candidate.toJSON(),
+          session: peer.session,
         });
       }
     };
 
     pc.ontrack = (event) => {
-      const [stream] = event.streams;
-      if (!stream) return;
+      // A sender created while this side's mic was suspended carries no
+      // stream, so the track arrives with `streams` empty. Returning here — as
+      // this used to — left that player silent to us for the whole session.
+      const stream = event.streams[0] ?? new MediaStream([event.track]);
       peer.stream = stream;
       audio.srcObject = stream;
       this.applyAudioGate(peer);
@@ -782,9 +870,31 @@ class VoiceChatManager {
     };
 
     pc.onconnectionstatechange = () => {
+      if (pc.connectionState !== 'disconnected' && peer.disconnectTimer) {
+        clearTimeout(peer.disconnectTimer);
+        peer.disconnectTimer = undefined;
+      }
+
+      // 'disconnected' is where a phone that walked out of Wi-Fi range or lost
+      // signal sits, and browsers can leave it there for ~30s before declaring
+      // 'failed' — the only state recovery used to key off. Half a minute of a
+      // dead call is what players experienced as "the voice just stops". A few
+      // seconds of grace still rides out a genuine blip.
+      if (pc.connectionState === 'disconnected' && !peer.disconnectTimer) {
+        peer.disconnectTimer = setTimeout(() => {
+          peer.disconnectTimer = undefined;
+          if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+            peer.failed = true;
+            peer.failedAt = Date.now();
+            this.emit();
+          }
+        }, DISCONNECT_GRACE_MS);
+      }
+
       if (pc.connectionState === 'connected') {
         void this.recordConnectionRoute(peer);
         peer.failed = false;
+        peer.failedAt = undefined;
         // Attempt playback once connection completes
         if (audio.paused && audio.srcObject) {
           void audio.play().catch(() => this.markAudioBlocked());
@@ -793,6 +903,7 @@ class VoiceChatManager {
 
       if (pc.connectionState === 'failed') {
         peer.failed = true;
+        peer.failedAt ??= Date.now();
         // Marked, not repaired here. Recovery belongs to the reconcile pass on
         // the next poll, which knows whether this side is the offerer and can
         // re-offer with iceRestart. restartIce() on the answering side has
@@ -876,6 +987,8 @@ class VoiceChatManager {
   }
 
   private destroyPeer(peer: Peer): void {
+    if (peer.disconnectTimer) clearTimeout(peer.disconnectTimer);
+    peer.disconnectTimer = undefined;
     peer.pc.onicecandidate = null;
     peer.pc.ontrack = null;
     peer.pc.ondatachannel = null;
@@ -961,7 +1074,16 @@ class VoiceChatManager {
     try {
       const offer = await peer.pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
       await peer.pc.setLocalDescription(offer);
-      await this.send({ kind: 'offer', from: this.myId, to: peer.id, sdp: offer });
+      peer.offerCount += 1;
+      peer.pendingOfferId = `${peer.session}:${peer.offerCount}`;
+      await this.send({
+        kind: 'offer',
+        from: this.myId,
+        to: peer.id,
+        sdp: offer,
+        session: peer.session,
+        offerId: peer.pendingOfferId,
+      });
     } catch {
       this.error = 'Could not start a voice connection with a player.';
       this.emit();
@@ -1015,17 +1137,50 @@ class VoiceChatManager {
     switch (message.kind) {
       case 'offer': {
         // The offerer may be a player we have not seen in the room list yet.
-        if (!peer) peer = this.createPeer(message.from);
-        try {
-          await peer.pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
-          peer.remoteDescriptionSet = true;
-          await this.flushCandidates(peer);
+        //
+        // An offer from a *different* connection than the one we hold means the
+        // other player rebuilt theirs — they refreshed, rejoined, or their phone
+        // came back from the background. That offer cannot be applied to our old
+        // connection (its security fingerprint no longer matches), and trying
+        // used to fail quietly and leave both players silent to each other until
+        // this side reloaded too. Start over with a clean connection instead.
+        const rebuilt =
+          !!peer && !!message.session && !!peer.remoteSession && peer.remoteSession !== message.session;
+        if (!peer || rebuilt) peer = this.rebuildPeer(message.from);
+        if (message.session) peer.remoteSession = message.session;
 
-          const answer = await peer.pc.createAnswer();
-          await peer.pc.setLocalDescription(answer);
-          await this.send({ kind: 'answer', from: this.myId, to: message.from, sdp: answer });
+        const answerTo = async (target: Peer) => {
+          await target.pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
+          target.remoteDescriptionSet = true;
+          await this.flushCandidates(target);
+          // Before the answer is created, or it goes out receive-only.
+          await this.attachLocalAudio(target);
+
+          const answer = await target.pc.createAnswer();
+          await target.pc.setLocalDescription(answer);
+          await this.send({
+            kind: 'answer',
+            from: this.myId!,
+            to: message.from,
+            sdp: answer,
+            session: target.session,
+            offerId: message.offerId,
+          });
+        };
+
+        try {
+          await answerTo(peer);
         } catch {
-          this.error = 'Could not answer a voice connection.';
+          // Still would not take — an older client with no session ids, or a
+          // connection wedged some other way. One clean rebuild almost always
+          // clears it; if that fails too, the reset path will try again.
+          try {
+            peer = this.rebuildPeer(message.from);
+            if (message.session) peer.remoteSession = message.session;
+            await answerTo(peer);
+          } catch {
+            this.error = 'Could not answer a voice connection.';
+          }
         }
         this.emit();
         break;
@@ -1033,9 +1188,15 @@ class VoiceChatManager {
 
       case 'answer': {
         if (!peer) break;
+        // Only the answer to our latest offer counts. One to an earlier offer —
+        // or to a connection we have since rebuilt — would install mismatched
+        // credentials and fail the connection all over again.
+        if (message.offerId && peer.pendingOfferId && message.offerId !== peer.pendingOfferId) break;
+        if (peer.pc.signalingState !== 'have-local-offer') break;
         try {
           await peer.pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
           peer.remoteDescriptionSet = true;
+          if (message.session) peer.remoteSession = message.session;
           // The handshake completed, so this peer is no longer in the failed
           // state that triggered the re-offer. Without this the retry above
           // would keep firing every few seconds against a healthy connection.
@@ -1050,10 +1211,13 @@ class VoiceChatManager {
 
       case 'ice': {
         if (!peer) break;
+        // Candidates for a connection the other side has since replaced point
+        // at ports nobody is listening on any more.
+        if (message.session && peer.remoteSession && message.session !== peer.remoteSession) break;
         // Candidates routinely arrive before the description; queue them or the
         // connection silently fails to gather a working path.
         if (!peer.remoteDescriptionSet) {
-          peer.pendingCandidates.push(message.candidate);
+          peer.pendingCandidates.push({ candidate: message.candidate, session: message.session });
           break;
         }
         try {
@@ -1061,6 +1225,20 @@ class VoiceChatManager {
         } catch {
           /* candidate no longer applicable */
         }
+        break;
+      }
+
+      case 'reset': {
+        // Only the offering side can act on this; the answering side asked
+        // because it had no way to restart the handshake itself.
+        if (this.myId >= message.from) break;
+        const now = Date.now();
+        if (peer?.lastResetAt !== undefined && now - peer.lastResetAt < RESET_AFTER_MS) break;
+        const fresh = this.rebuildPeer(message.from);
+        fresh.lastResetAt = now;
+        fresh.lastOfferAt = now;
+        await this.makeOffer(fresh);
+        this.emit();
         break;
       }
 
@@ -1075,10 +1253,43 @@ class VoiceChatManager {
     }
   }
 
+  /**
+   * Puts this player's microphone on the answering side of a connection.
+   *
+   * Setting the remote offer creates the audio transceiver here, and it starts
+   * out receive-only with no track. It has to be switched to sendrecv and given
+   * the mic before createAnswer(), or the answer tells the offerer this side
+   * will never send. Also re-run on renegotiation, where it is a no-op.
+   */
+  private async attachLocalAudio(peer: Peer): Promise<void> {
+    const transceiver = peer.pc
+      .getTransceivers()
+      .find((t) => t.receiver.track?.kind === 'audio' && t.currentDirection !== 'stopped');
+    if (!transceiver) return;
+
+    if (transceiver.direction === 'recvonly' || transceiver.direction === 'inactive') {
+      transceiver.direction = 'sendrecv';
+    }
+    const track = this.localStream?.getAudioTracks()[0] ?? null;
+    if (track && transceiver.sender.track !== track) {
+      await transceiver.sender.replaceTrack(track).catch(() => {});
+    }
+    // So the other side's ontrack gets a stream rather than a bare track.
+    const sender = transceiver.sender as RTCRtpSender & { setStreams?: (...s: MediaStream[]) => void };
+    if (this.localStream && sender.setStreams) {
+      try {
+        sender.setStreams(this.localStream);
+      } catch {
+        /* older browsers; ontrack copes without it */
+      }
+    }
+  }
+
   private async flushCandidates(peer: Peer): Promise<void> {
     const queued = peer.pendingCandidates;
     peer.pendingCandidates = [];
-    for (const candidate of queued) {
+    for (const { candidate, session } of queued) {
+      if (session && peer.remoteSession && session !== peer.remoteSession) continue;
       try {
         await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch {

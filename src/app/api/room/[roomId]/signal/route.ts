@@ -25,7 +25,13 @@ function isValidSignal(value: unknown): value is SignalMessage {
   if (!value || typeof value !== 'object') return false;
   const msg = value as Record<string, unknown>;
   if (typeof msg.from !== 'string' || typeof msg.to !== 'string') return false;
-  return msg.kind === 'offer' || msg.kind === 'answer' || msg.kind === 'ice' || msg.kind === 'bye';
+  return (
+    msg.kind === 'offer' ||
+    msg.kind === 'answer' ||
+    msg.kind === 'ice' ||
+    msg.kind === 'bye' ||
+    msg.kind === 'reset'
+  );
 }
 
 export async function POST(request: Request, { params }: { params: { roomId: string } }) {

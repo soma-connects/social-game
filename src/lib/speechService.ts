@@ -11,6 +11,9 @@
 // speech recognition, callers get an error and the UI has to say so.
 
 import { isMobileAudioPlatform, micStream } from './micStream';
+import { StreamingProvider, isStreamingSupported, startStreamingRecognition } from './streamingSpeech';
+
+export type SpeechEngineKind = StreamingProvider | 'browser';
 
 export type STTStatus = 'idle' | 'listening' | 'processing' | 'matched' | 'failed' | 'error';
 
@@ -51,6 +54,20 @@ export interface ListenOptions {
 
 export interface ListenSession {
   stop: () => void;
+}
+
+export interface StreamingListenOptions extends ListenOptions {
+  /** Needed to mint a streaming token; without it this falls back to the browser recogniser. */
+  roomId: string;
+  /** See StreamingOptions.mode. Single words and short answers want 'command'. */
+  mode?: 'command' | 'dictation';
+  /** Reports which recogniser ended up listening, for a badge or diagnostics. */
+  onEngine?: (engine: SpeechEngineKind) => void;
+}
+
+/** Deepgram wants a bare language code; the browser path uses full locales. */
+function streamingLanguage(locale: string): string {
+  return locale.split('-')[0].toLowerCase() || 'en';
 }
 
 export interface MicCapabilities {
@@ -182,6 +199,11 @@ function mapGetUserMediaError(err: unknown): SpeechErrorCode {
  */
 export interface SpeechDiagnostics {
   supported: boolean;
+  /**
+   * Which recogniser this session is on. The phone mic conflict with the call
+   * only exists for 'browser'; the streaming engines share the call's stream.
+   */
+  engine?: SpeechEngineKind;
   /** The BCP-47 tag actually handed to the recogniser. */
   locale: string;
   /** Whether the shared mic was put down for this session (the mobile path). */
@@ -233,6 +255,8 @@ class SpeechRecognitionService {
   private meterFrame: number | null = null;
 
   private recognition: any = null;
+  /** Stops the streaming session started by `listen`, if one is running. */
+  private stopStreaming: (() => void) | null = null;
   private isMuted = false;
   /** Set while a round is live, so onend can distinguish a silence stall from a real stop. */
   private wantsToListen = false;
@@ -444,6 +468,7 @@ class SpeechRecognitionService {
 
     this.diagnostics = {
       supported: true,
+      engine: 'browser',
       locale: recognition.lang,
       suspendedMic,
       results: 0,
@@ -549,7 +574,118 @@ class SpeechRecognitionService {
     };
   }
 
+  /**
+   * Streaming-first listening on the shared call microphone.
+   *
+   * Same callbacks as `listenForSpeech`, so a game swaps one call and keeps its
+   * handlers. Deepgram and then Gemini Live are tried first; they tap the mic
+   * stream the voice call already holds, so the room keeps hearing the player.
+   * Only if neither is reachable does this fall back to the browser recogniser,
+   * which on a phone still has to fight the call for the device.
+   *
+   * `transcript` is everything said this session — committed text plus the
+   * current guess — because the streaming engines report one short segment at
+   * a time and several games show the whole answer as it builds. `isFinal`
+   * marks the end of an utterance, matching what the browser path reported.
+   */
+  public listen(options: StreamingListenOptions): ListenSession {
+    const { roomId, targetWord, language, onResult, onError, onEngine, mode = 'command' } = options;
+
+    // No streaming possible: go straight to the browser recogniser, still inside
+    // the tap that started this, which iOS requires for recognition.start().
+    if (!roomId || !isStreamingSupported()) {
+      onEngine?.('browser');
+      return this.listenForSpeech(options);
+    }
+    if (this.isMuted) {
+      onError(makeError('permission-denied', true));
+      return { stop: () => {} };
+    }
+
+    this.stopListening();
+
+    let stopped = false;
+    let fallback: ListenSession | null = null;
+    let streamStop: (() => void) | null = null;
+    let committed = '';
+
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      if (this.stopStreaming === stop) this.stopStreaming = null;
+      streamStop?.();
+      fallback?.stop();
+    };
+    this.stopStreaming = stop;
+
+    const toBrowser = () => {
+      if (stopped) return;
+      // listenForSpeech starts by calling stopListening, which would stop this
+      // very session; detach first so the fallback is not killed on arrival.
+      if (this.stopStreaming === stop) this.stopStreaming = null;
+      streamStop = null;
+      onEngine?.('browser');
+      fallback = this.listenForSpeech(options);
+    };
+
+    const locale = this.getLocale(language);
+    this.diagnostics = {
+      supported: true,
+      engine: undefined,
+      locale,
+      suspendedMic: false,
+      results: 0,
+      restarts: 0,
+      lastError: null,
+      startedAt: Date.now(),
+    };
+
+    void startStreamingRecognition({
+      roomId,
+      language: streamingLanguage(locale),
+      mode,
+      onProviderChange: (provider) => {
+        this.diagnostics.engine = provider;
+        onEngine?.(provider);
+      },
+      onFatal: toBrowser,
+      onTranscript: (text, isFinal, speechFinal) => {
+        if (stopped) return;
+        this.diagnostics.results++;
+        const clean = text.trim();
+        const transcript = (clean ? `${committed} ${clean}` : committed).trim();
+        if (isFinal && clean) committed = transcript;
+        if (!transcript) return;
+
+        // Score the newest words on their own as well as the whole run, so an
+        // early fumble in the session cannot drag a clean second attempt down.
+        const latest = targetWord ? this.evaluateMatch(clean, targetWord) : { isMatch: false, score: 0 };
+        const whole = targetWord ? this.evaluateMatch(transcript, targetWord) : { isMatch: false, score: 0 };
+        const best = latest.score >= whole.score ? latest : whole;
+
+        onResult({ transcript, isMatch: best.isMatch, confidence: best.score, isFinal: speechFinal });
+        if (best.isMatch) stop();
+      },
+    }).then((session) => {
+      if (!session) {
+        toBrowser();
+        return;
+      }
+      if (stopped) {
+        session.stop();
+        return;
+      }
+      streamStop = session.stop;
+      this.diagnostics.engine = session.provider;
+      onEngine?.(session.provider);
+    });
+
+    return { stop };
+  }
+
   public stopListening(): void {
+    this.stopStreaming?.();
+    this.stopStreaming = null;
     this.wantsToListen = false;
     const recognition = this.recognition;
     this.recognition = null;

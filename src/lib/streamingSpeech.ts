@@ -56,6 +56,20 @@ const CHUNK_SAMPLES = 1600;
 const CONNECT_TIMEOUT_MS = 5000;
 /** Reconnects allowed per session before handing back to the browser recogniser. */
 const MAX_FAILOVERS = 3;
+/**
+ * Hard ceiling on one streaming session.
+ *
+ * A token only guards the moment a socket opens; once open, Deepgram bills
+ * until the socket closes, and nothing on the server can close it. So the
+ * client has to: voice rounds last a minute or two, and ten minutes is far
+ * past any real one. Past it — or after IDLE_MS without a single word, the
+ * phone-left-on-the-table case — the session hands over to the free browser
+ * recogniser rather than billing on. The daily quota stops a new token being
+ * minted to get around this.
+ */
+const MAX_SESSION_MS = 10 * 60_000;
+const IDLE_MS = 3 * 60_000;
+const CAP_CHECK_MS = 5000;
 
 // Runs on the audio thread. Box-filter decimation is a crude low-pass, but for
 // speech into a recogniser it is indistinguishable from a proper resampler and
@@ -307,9 +321,24 @@ export async function startStreamingRecognition(opts: StreamingOptions): Promise
   let current: StreamingProvider | null = null;
   let stopped = false;
   let failovers = 0;
+  const startedAt = Date.now();
+  let lastHeardAt = startedAt;
+  let capTimer: number | null = null;
+
+  // Every provider reports through this, so any transcript at all counts as
+  // the player still being there.
+  const tapped: StreamingOptions = {
+    ...opts,
+    onTranscript: (text, isFinal, speechFinal) => {
+      if (text) lastHeardAt = Date.now();
+      opts.onTranscript(text, isFinal, speechFinal);
+    },
+  };
 
   const teardown = () => {
     stopped = true;
+    if (capTimer !== null) window.clearInterval(capTimer);
+    capTimer = null;
     link?.close();
     link = null;
     unsubscribe();
@@ -369,8 +398,8 @@ export async function startStreamingRecognition(opts: StreamingOptions): Promise
       };
       const next =
         token.provider === 'deepgram'
-          ? await connectDeepgram(token.token, opts, onClosed)
-          : await connectGemini(token.token, token.model, opts, onClosed);
+          ? await connectDeepgram(token.token, tapped, onClosed)
+          : await connectGemini(token.token, token.model, tapped, onClosed);
       if (!next) continue;
       if (stopped) {
         next.close();
@@ -390,6 +419,17 @@ export async function startStreamingRecognition(opts: StreamingOptions): Promise
     teardown();
     return null;
   }
+
+  capTimer = window.setInterval(() => {
+    if (stopped) return;
+    const now = Date.now();
+    const reason =
+      now - startedAt > MAX_SESSION_MS ? 'reached the session limit' : now - lastHeardAt > IDLE_MS ? 'idle' : null;
+    if (!reason) return;
+    console.info(`[speech] Streaming session ${reason}; switching to the browser recogniser`);
+    teardown();
+    opts.onFatal?.();
+  }, CAP_CHECK_MS);
 
   return {
     provider: current,

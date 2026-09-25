@@ -7,6 +7,7 @@
 
 import { MiniGameId, Player, RoomState, SessionMemoryEvent, TeamId } from './types';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from './roomVibes';
+import { roomStore } from './roomStore';
 
 export type AiHostState =
   | 'idle'
@@ -214,10 +215,14 @@ class AiGameMasterEngine {
     let nextStart = 0;
     let carry: number | null = null;
     try {
+      // Outside a room there is no membership to show, so the server would
+      // refuse; the browser voice is the host there.
+      const auth = roomStore.getRoomAuth();
+      if (!auth) throw new Error('not in a room');
       const res = await fetch('/api/ai-tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, ...auth }),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) throw new Error(`TTS ${res.status}`);
@@ -406,7 +411,7 @@ class AiGameMasterEngine {
       const res = await fetch('/api/ai-master', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'challenge', playerName, roomVibe }),
+        body: JSON.stringify({ action: 'challenge', playerName, roomVibe, ...roomStore.getRoomAuth() }),
       });
       const data = await res.json();
       if (data.success && data.text) {

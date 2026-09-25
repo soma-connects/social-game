@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { callerKey, consume } from '@/lib/server/rateLimit';
 import { askHost, coerceVibe } from '@/lib/server/aiHost';
+import { requireRoomPlayer } from '@/lib/server/roomAuth';
+import { quotaMessage, takeQuota } from '@/lib/server/quota';
 
 export async function POST(req: Request) {
   // A room legitimately fires a few host lines back to back when a round turns
@@ -13,8 +15,22 @@ export async function POST(req: Request) {
     );
   }
 
+  const body = await req.json().catch(() => null);
+  const player = await requireRoomPlayer(body?.roomId, body?.token);
+  if (!player) return NextResponse.json({ success: false, text: '' }, { status: 401 });
+
+  const quota = await takeQuota('host', { ...player, ip: callerKey(req) });
+  if (!quota.ok) {
+    return NextResponse.json({ success: false, text: '', error: quotaMessage('host', quota.scope) }, { status: 429 });
+  }
+
   try {
-    const { action, playerName, gameContext, roomVibe } = await req.json();
+    const { action, roomVibe } = body;
+    // Both reach the model verbatim, and gameContext becomes the entire prompt
+    // for an unrecognised action — uncapped, that is a free general-purpose
+    // Gemini proxy for anyone in a room. Host context is a line or two.
+    const playerName = typeof body.playerName === 'string' ? body.playerName.slice(0, 40) : '';
+    const gameContext = typeof body.gameContext === 'string' ? body.gameContext.slice(0, 500) : '';
     const vibe = coerceVibe(roomVibe);
 
     let promptText = '';

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { callerKey, consume } from '@/lib/server/rateLimit';
+import { requireRoomPlayer } from '@/lib/server/roomAuth';
+import { quotaMessage, takeQuota } from '@/lib/server/quota';
 
 /**
  * The AI Game Master's voice.
@@ -155,7 +157,10 @@ export async function POST(req: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ success: false, error: 'TTS is not configured' }, { status: 503 });
 
-  const body = (await req.json().catch(() => ({}))) as { text?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { text?: unknown; roomId?: unknown; token?: unknown };
+  const player = await requireRoomPlayer(body.roomId, body.token);
+  if (!player) return NextResponse.json({ success: false, error: 'Join a room first' }, { status: 401 });
+
   const text = typeof body.text === 'string' ? speakable(body.text) : '';
   if (!text) return NextResponse.json({ success: false, error: 'Missing text' }, { status: 400 });
   // Host lines are one or two sentences; anything longer is a bug or somebody
@@ -174,7 +179,14 @@ export async function POST(req: Request) {
     lines.delete(key);
     lines.set(key, line);
   } else {
-    line = generate(key, text, apiKey);
+    // Only a fresh generation spends money; a line another phone already asked
+    // for is served free, so it is not counted.
+    const quota = await takeQuota('tts', { ...player, ip: callerKey(req) });
+    if (!quota.ok) {
+      return NextResponse.json({ success: false, error: quotaMessage('tts', quota.scope) }, { status: 429 });
+    }
+    // Re-check: another request may have started this line during the quota round trip.
+    line = lines.get(key) ?? generate(key, text, apiKey);
   }
 
   // Hold the response until the first audio exists, so a failure can still be

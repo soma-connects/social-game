@@ -9,6 +9,7 @@
 // racing — the lower id always offers.
 
 import { micStream, MicError } from './micStream';
+import { roomStore } from './roomStore';
 
 const SIGNAL_POLL_MS = 1000;
 
@@ -338,7 +339,13 @@ class VoiceChatManager {
     if (this.iceServers.length > 0 && Date.now() < this.iceExpiresAt) return;
 
     try {
-      const res = await fetch('/api/ice');
+      // Relay credentials are players-only; the room token proves this is one.
+      const res = await fetch('/api/ice', {
+        headers: {
+          'x-room-id': this.roomId ?? '',
+          'x-room-token': (this.roomId && roomStore.getMyToken(this.roomId)) || '',
+        },
+      });
       if (!res.ok) throw new Error(`ICE config request failed: ${res.status}`);
       const data = (await res.json()) as {
         iceServers: RTCIceServer[];

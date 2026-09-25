@@ -86,6 +86,17 @@ class RoomStoreManager {
     if (key) localStorage.setItem(key, id);
   }
 
+  /**
+   * Proof of membership in the room on screen, for the server's paid routes
+   * (host voice, host lines, speech tokens, TURN). Null outside a room, where
+   * callers fall back to their free paths.
+   */
+  public getRoomAuth(): { roomId: string; token: string } | null {
+    const roomId = this.currentRoomId;
+    const token = roomId ? this.getMyToken(roomId) : null;
+    return roomId && token ? { roomId, token } : null;
+  }
+
   public getMyToken(roomId?: string): string | null {
     if (typeof window === 'undefined') return null;
     const key = this.roomKey(MY_TOKEN_KEY, roomId);

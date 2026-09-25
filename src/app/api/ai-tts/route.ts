@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { callerKey, consume } from '@/lib/server/rateLimit';
 import { requireRoomPlayer } from '@/lib/server/roomAuth';
+import { passesAppCheck } from '@/lib/server/appCheck';
 import { quotaMessage, takeQuota } from '@/lib/server/quota';
 
 /**
@@ -152,6 +153,10 @@ export async function POST(req: Request) {
       { success: false, error: 'Too many requests' },
       { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } }
     );
+  }
+
+  if (!(await passesAppCheck(req, 'ai-tts'))) {
+    return NextResponse.json({ success: false, error: 'App verification failed' }, { status: 401 });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;

@@ -8,6 +8,7 @@ import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { micStream } from '@/lib/micStream';
 import { roomStore } from '@/lib/roomStore';
+import { appCheckHeaders } from '@/lib/firebase/client';
 import MicContentionNotice from './MicContentionNotice';
 
 interface GeminiAiMasterStageProps {
@@ -115,7 +116,7 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
     try {
       const res = await fetch('/api/ai-master', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await appCheckHeaders()) },
         body: JSON.stringify({
           action: type,
           playerName: activePlayer.name,

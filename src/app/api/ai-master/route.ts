@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { callerKey, consume } from '@/lib/server/rateLimit';
 import { askHost, coerceVibe } from '@/lib/server/aiHost';
 import { requireRoomPlayer } from '@/lib/server/roomAuth';
+import { passesAppCheck } from '@/lib/server/appCheck';
 import { quotaMessage, takeQuota } from '@/lib/server/quota';
 
 export async function POST(req: Request) {
@@ -13,6 +14,10 @@ export async function POST(req: Request) {
       { success: false, text: '' },
       { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } }
     );
+  }
+
+  if (!(await passesAppCheck(req, 'ai-master'))) {
+    return NextResponse.json({ success: false, text: '' }, { status: 401 });
   }
 
   const body = await req.json().catch(() => null);

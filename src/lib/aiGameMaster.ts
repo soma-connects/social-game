@@ -8,6 +8,7 @@
 import { MiniGameId, Player, RoomState, SessionMemoryEvent, TeamId } from './types';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from './roomVibes';
 import { roomStore } from './roomStore';
+import { appCheckHeaders } from './firebase/client';
 
 export type AiHostState =
   | 'idle'
@@ -221,7 +222,7 @@ class AiGameMasterEngine {
       if (!auth) throw new Error('not in a room');
       const res = await fetch('/api/ai-tts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await appCheckHeaders()) },
         body: JSON.stringify({ text, ...auth }),
         signal: controller.signal,
       });
@@ -410,7 +411,7 @@ class AiGameMasterEngine {
     try {
       const res = await fetch('/api/ai-master', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await appCheckHeaders()) },
         body: JSON.stringify({ action: 'challenge', playerName, roomVibe, ...roomStore.getRoomAuth() }),
       });
       const data = await res.json();

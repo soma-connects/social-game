@@ -10,6 +10,7 @@
 
 import { micStream, MicError } from './micStream';
 import { roomStore } from './roomStore';
+import { appCheckHeaders } from './firebase/client';
 
 const SIGNAL_POLL_MS = 1000;
 
@@ -342,6 +343,7 @@ class VoiceChatManager {
       // Relay credentials are players-only; the room token proves this is one.
       const res = await fetch('/api/ice', {
         headers: {
+          ...(await appCheckHeaders()),
           'x-room-id': this.roomId ?? '',
           'x-room-token': (this.roomId && roomStore.getMyToken(this.roomId)) || '',
         },

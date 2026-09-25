@@ -12,6 +12,7 @@
 // caller gets null and falls back to the browser recogniser.
 
 import { roomStore } from './roomStore';
+import { appCheckHeaders } from './firebase/client';
 import { micStream } from './micStream';
 
 export type StreamingProvider = 'deepgram' | 'gemini';
@@ -114,7 +115,7 @@ async function fetchToken(roomId: string, provider: StreamingProvider): Promise<
   try {
     const res = await fetch('/api/stt-token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await appCheckHeaders()) },
       body: JSON.stringify({ roomId, token: roomStore.getMyToken(roomId) ?? '', provider }),
     });
     if (!res.ok) return null;

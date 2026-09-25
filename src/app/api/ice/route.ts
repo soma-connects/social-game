@@ -3,6 +3,7 @@ import { resolve4 } from 'node:dns/promises';
 import { connect } from 'node:net';
 import { callerKey, consume } from '@/lib/server/rateLimit';
 import { requireRoomPlayer } from '@/lib/server/roomAuth';
+import { passesAppCheck } from '@/lib/server/appCheck';
 import { quotaMessage, takeQuota } from '@/lib/server/quota';
 
 /**
@@ -293,6 +294,10 @@ export async function GET(request: Request) {
       { error: 'Too many requests' },
       { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } }
     );
+  }
+
+  if (!(await passesAppCheck(request, 'ice'))) {
+    return NextResponse.json({ error: 'App verification failed' }, { status: 401 });
   }
 
   // Relay credentials are only for players on a call. Handed to anyone, they

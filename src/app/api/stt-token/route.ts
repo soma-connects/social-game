@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { callerKey, consume } from '@/lib/server/rateLimit';
 import { requireRoomPlayer } from '@/lib/server/roomAuth';
+import { passesAppCheck } from '@/lib/server/appCheck';
 import { quotaMessage, takeQuota } from '@/lib/server/quota';
 
 /**
@@ -90,6 +91,10 @@ export async function POST(request: Request) {
       { error: 'Too many requests' },
       { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } }
     );
+  }
+
+  if (!(await passesAppCheck(request, 'stt-token'))) {
+    return NextResponse.json({ error: 'App verification failed' }, { status: 401 });
   }
 
   const body = (await request.json().catch(() => ({}))) as {

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { callerKey, consume } from '@/lib/server/rateLimit';
-import { readSecrets } from '@/lib/server/roomServer';
+import { requireRoomPlayer } from '@/lib/server/roomAuth';
+import { passesAppCheck } from '@/lib/server/appCheck';
+import { quotaMessage, takeQuota } from '@/lib/server/quota';
 
 /**
  * Short-lived credentials for streaming speech-to-text.
@@ -55,7 +57,9 @@ async function mintGemini(): Promise<SttTokenResponse | { error: string }> {
   if (!key) return { error: 'Gemini is not configured' };
 
   const now = Date.now();
-  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/auth_tokens', {
+  // v1alpha, matching the Live endpoint the browser opens with this token (see
+  // streamingSpeech.ts) — ephemeral tokens are only supported there.
+  const res = await fetch('https://generativelanguage.googleapis.com/v1alpha/auth_tokens', {
     method: 'POST',
     headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -89,21 +93,22 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!(await passesAppCheck(request, 'stt-token'))) {
+    return NextResponse.json({ error: 'App verification failed' }, { status: 401 });
+  }
+
   const body = (await request.json().catch(() => ({}))) as {
     roomId?: unknown;
     token?: unknown;
     provider?: unknown;
   };
-  const roomId = typeof body.roomId === 'string' ? body.roomId : '';
-  const playerToken = typeof body.token === 'string' ? body.token : '';
-  if (!roomId || !playerToken) {
-    return NextResponse.json({ error: 'Join a room first' }, { status: 401 });
-  }
+  const player = await requireRoomPlayer(body.roomId, body.token);
+  if (!player) return NextResponse.json({ error: 'Join a room first' }, { status: 401 });
 
-  const secrets = await readSecrets(roomId);
-  if (!Object.values(secrets.tokens).includes(playerToken)) {
-    return NextResponse.json({ error: 'Join a room first' }, { status: 401 });
-  }
+  // A failover mints a second token, so it is counted too — a session that
+  // keeps dropping and reconnecting is exactly the pattern worth capping.
+  const quota = await takeQuota('stt', { ...player, ip: callerKey(request) });
+  if (!quota.ok) return NextResponse.json({ error: quotaMessage('stt', quota.scope) }, { status: 429 });
 
   const provider: SttProvider = body.provider === 'gemini' ? 'gemini' : 'deepgram';
   const result = provider === 'gemini' ? await mintGemini() : await mintDeepgram();

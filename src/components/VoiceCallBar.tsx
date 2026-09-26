@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
-import { Mic, MicOff, PhoneCall, PhoneOff, Loader2, AlertTriangle, Volume2 } from 'lucide-react';
+import { Mic, MicOff, PhoneCall, PhoneOff, Loader2, AlertTriangle, Volume2, VolumeX } from 'lucide-react';
 import { Player } from '@/lib/types';
 import { voiceChat, VoiceState } from '@/lib/voiceChat';
-import { safetyServerVersion, safetyVersion, shouldSilence, subscribeSafety } from '@/lib/safety';
+import { isMuted, safetyServerVersion, safetyVersion, shouldSilence, subscribeSafety } from '@/lib/safety';
 import AvatarIllustration from './AvatarIllustration';
+import PlayerSafetyMenu from './PlayerSafetyMenu';
 
 interface VoiceCallBarProps {
   roomId: string;
@@ -57,6 +58,15 @@ export default function VoiceCallBar({
 }: VoiceCallBarProps) {
   const [state, setState] = useState<VoiceState>(voiceChat.getState());
   const [joining, setJoining] = useState(false);
+  /**
+   * Whose mute/report menu is open.
+   *
+   * Lives on the call bar because it is the one place every device sees every
+   * other voice during play. The only other way in was the desktop sidebar,
+   * which does not render below 1024px — so on a phone there was no way to
+   * mute or report anybody at all.
+   */
+  const [safetyTarget, setSafetyTarget] = useState<Player | null>(null);
 
   useEffect(() => voiceChat.subscribe(setState), []);
 
@@ -161,14 +171,46 @@ export default function VoiceCallBar({
     measuredPeers.length === connectedPeers.length &&
     measuredPeers.every((p) => !p.sendingAudio);
 
-  // Mid-attempt: one status line, not the full bar.
+  const safetyMenu = safetyTarget && (
+    <PlayerSafetyMenu player={safetyTarget} roomId={roomId} onClose={() => setSafetyTarget(null)} />
+  );
+
+  /** Another player's face on the bar — one tap opens mute, block and report. */
+  const peerButton = (player: Player, talking: boolean, connected: boolean) => (
+    <button
+      key={player.id}
+      type="button"
+      onClick={() => setSafetyTarget(player)}
+      aria-label={`Mute or report ${player.name}`}
+      title={`${player.name}${connected ? '' : ' (connecting)'} — tap to mute or report`}
+      className={`relative rounded-full p-0.5 active:scale-90 transition ${connected ? 'opacity-100' : 'opacity-40'}`}
+    >
+      <AvatarIllustration avatar={player.avatar} size="xs" isSpeaking={talking} />
+      {isMuted(player.id) && (
+        <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-slate-900 p-0.5">
+          <VolumeX className="w-2.5 h-2.5 text-amber-300" />
+        </span>
+      )}
+    </button>
+  );
+  const others = players.filter((p) => p.id !== myPlayer.id);
+
+  // Mid-attempt: one status line, not the full bar. It keeps the other
+  // players' faces, small, because a round is exactly when somebody on the
+  // call is most likely to need muting.
   if (compact) {
     return (
+      <>
       <div className="glass-card rounded-xl px-3 py-1.5 border border-white/10 bg-slate-900/70 flex items-center justify-between gap-2">
         <span className="text-[11px] font-bold text-gray-300 flex items-center gap-1.5 truncate">
           <PhoneCall className={`w-3 h-3 ${isLive ? 'text-emerald-400' : 'text-gray-500'}`} />
           {isLive ? 'Group voice live' : 'Group voice off'}
         </span>
+        {isLive && others.length > 0 && (
+          <span className="flex items-center gap-0.5 min-w-0 overflow-x-auto">
+            {others.map((p) => peerButton(p, speakingIds.has(p.id), connectedIds.has(p.id)))}
+          </span>
+        )}
         <span className="text-[11px] font-black flex items-center gap-1 shrink-0">
           {state.muted ? (
             <span className="text-amber-300 flex items-center gap-1">
@@ -181,6 +223,8 @@ export default function VoiceCallBar({
           )}
         </span>
       </div>
+      {safetyMenu}
+      </>
     );
   }
 
@@ -293,15 +337,10 @@ export default function VoiceCallBar({
         <div className="flex items-center gap-1.5">
           {players.map((player) => {
             const isMe = player.id === myPlayer.id;
-            const talking = isMe ? state.speaking : speakingIds.has(player.id);
-            const connected = isMe || connectedIds.has(player.id);
+            if (!isMe) return peerButton(player, speakingIds.has(player.id), connectedIds.has(player.id));
             return (
-              <div
-                key={player.id}
-                title={`${player.name}${connected ? '' : ' (connecting)'}`}
-                className={`transition-opacity ${connected ? 'opacity-100' : 'opacity-40'}`}
-              >
-                <AvatarIllustration avatar={player.avatar} size="xs" isSpeaking={talking} />
+              <div key={player.id} title={`${player.name} (you)`} className="p-0.5">
+                <AvatarIllustration avatar={player.avatar} size="xs" isSpeaking={state.speaking} />
               </div>
             );
           })}
@@ -362,6 +401,7 @@ export default function VoiceCallBar({
           <span>{state.error}</span>
         </div>
       )}
+      {safetyMenu}
     </div>
   );
 }

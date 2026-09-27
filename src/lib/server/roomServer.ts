@@ -195,6 +195,45 @@ export async function writeSecrets(roomId: string, secrets: RoomSecrets): Promis
   await privateRef(roomId).set(secrets);
 }
 
+// ─── Guess the Voice clips ──────────────────────────────────────────────────
+//
+// A player's recorded voice, held in memory for the length of one round and
+// never written to Firestore. It used to ride inside the room document, which
+// any holder of the room code can read and which nothing ever deleted — a
+// permanent, publicly readable store of people's voices, recorded without
+// asking. Here it lives only as long as the round (or CLIP_TTL_MS, if a round
+// is abandoned), and a server restart drops it too. The service is pinned to
+// one instance (see the note at the top), which is what makes memory enough.
+
+const CLIP_TTL_MS = 10 * 60 * 1000;
+const clips: Map<string, { clip: string; at: number }> = ((
+  globalThis as unknown as { __voicePartyClips?: Map<string, { clip: string; at: number }> }
+).__voicePartyClips ??= new Map());
+
+function sweepClips(): void {
+  const cutoff = Date.now() - CLIP_TTL_MS;
+  clips.forEach((entry, roomId) => {
+    if (entry.at < cutoff) clips.delete(roomId);
+  });
+}
+
+/** Stores this round's clip, replacing any earlier take. Returns its timestamp. */
+export function setRoomClip(roomId: string, clip: string): number {
+  sweepClips();
+  const at = Date.now();
+  clips.set(roomId, { clip, at });
+  return at;
+}
+
+export function getRoomClip(roomId: string): string | null {
+  sweepClips();
+  return clips.get(roomId)?.clip ?? null;
+}
+
+export function clearRoomClip(roomId: string): void {
+  clips.delete(roomId);
+}
+
 /** Unguessable, unlike the old timestamp-based player ids. */
 export function newToken(): string {
   return randomBytes(24).toString('base64url');

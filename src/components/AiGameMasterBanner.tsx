@@ -13,7 +13,7 @@ interface AiGameMasterBannerProps {
 
 export default function AiGameMasterBanner({ currentSpeech, onTriggerChallenge, roomVibe }: AiGameMasterBannerProps) {
   const [speechText, setSpeechText] = useState<string>('');
-  const [isTtsMuted, setIsTtsMuted] = useState(false);
+  const [isTtsMuted, setIsTtsMuted] = useState(() => aiGameMaster.isVoiceMuted());
   const [activePrompt, setActivePrompt] = useState<AiHostPrompt | null>(null);
 
   useEffect(() => {
@@ -37,12 +37,9 @@ export default function AiGameMasterBanner({ currentSpeech, onTriggerChallenge, 
   };
 
   const toggleTtsMute = () => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      if (!isTtsMuted) {
-        window.speechSynthesis.cancel();
-      }
-    }
-    setIsTtsMuted(!isTtsMuted);
+    const next = !isTtsMuted;
+    aiGameMaster.setVoiceMuted(next);
+    setIsTtsMuted(next);
   };
 
   return (

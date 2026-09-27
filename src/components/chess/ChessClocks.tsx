@@ -31,7 +31,7 @@ export default function ChessClocks({
    *
    * The server only adjusts the clock when a move is made, so these numbers sat
    * frozen between moves and then jumped. A chess clock that does not tick is
-   * not a clock â€” you cannot feel time pressure, and you cannot tell whether
+   * not a clock — you cannot feel time pressure, and you cannot tell whether
    * your opponent is thinking or has walked away.
    *
    * The server value stays authoritative; this only counts down from the last
@@ -49,7 +49,7 @@ export default function ChessClocks({
   const whiteTimeMs = Math.max(0, clocks.whiteTimeMs - (activeColor === 'w' ? elapsed : 0));
   const blackTimeMs = Math.max(0, clocks.blackTimeMs - (activeColor === 'b' ? elapsed : 0));
 
-  // Flag fall. Without this a player could sit at 0:00 indefinitely â€” the
+  // Flag fall. Without this a player could sit at 0:00 indefinitely — the
   // clamp at zero simply held there and the game never ended.
   const flagged = clocks.isRunning && ((activeColor === 'w' && whiteTimeMs <= 0) || (activeColor === 'b' && blackTimeMs <= 0));
   useEffect(() => {

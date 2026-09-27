@@ -77,6 +77,8 @@ export async function takeQuota(
     ref: adminDb.collection('quotas').doc(docId(bucket, scope, subject, day)),
   }));
 
+  sweepExpiredQuotas();
+
   try {
     return await adminDb.runTransaction(async (tx): Promise<QuotaResult> => {
       const snaps = await Promise.all(refs.map((r) => tx.get(r.ref)));
@@ -84,8 +86,9 @@ export async function takeQuota(
         const used = (snaps[i].data()?.count as number | undefined) ?? 0;
         if (used >= refs[i].limit) return { ok: false, scope: refs[i].scope };
       }
-      // Two days out, so a Firestore TTL policy on `expireAt` can clear
-      // yesterday's counters without racing today's.
+      // Two days out, so the sweep below (or a Firestore TTL policy, if the
+      // project ever moves to a billed plan) clears yesterday's counters
+      // without racing today's.
       const expireAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
       refs.forEach((r, i) => {
         const used = (snaps[i].data()?.count as number | undefined) ?? 0;
@@ -99,6 +102,53 @@ export async function takeQuota(
     console.error(`Quota check failed for ${bucket}:`, error);
     return { ok: false, scope: 'global' };
   }
+}
+
+// ─── clearing old counters ──────────────────────────────────────────────────
+//
+// Every day writes a fresh set of counters and nothing reads the old ones
+// again. Firestore's TTL policies would delete them, but TTL needs a billed
+// (Blaze) project and this one is on the free plan. So the server tidies up
+// after itself: at most every SWEEP_EVERY_MS, piggy-backing on a request it is
+// already serving, it deletes one batch of counters past their `expireAt`.
+// A batch at that rate clears far more than a day's worth of new counters,
+// and each sweep costs at most SWEEP_BATCH reads and deletes — a sliver of
+// the free plan's daily allowance.
+
+const SWEEP_EVERY_MS = 30 * 60 * 1000;
+const SWEEP_BATCH = 250;
+
+/** Per process, and anchored to globalThis so a dev hot reload does not reset it. */
+const sweepState = ((globalThis as unknown as { __voicePartyQuotaSweep?: { lastAt: number } }).__voicePartyQuotaSweep ??= {
+  lastAt: 0,
+});
+
+/**
+ * Deletes one batch of expired counters, if a sweep is due.
+ *
+ * Fire and forget: never awaited by the request that triggered it, and a
+ * failure only logs, so housekeeping can never slow or break a player's turn.
+ */
+export function sweepExpiredQuotas(now = Date.now()): void {
+  if (now - sweepState.lastAt < SWEEP_EVERY_MS) return;
+  sweepState.lastAt = now;
+
+  void (async () => {
+    // select() with no fields fetches ids only; the documents' contents are
+    // not needed to delete them.
+    const expired = await adminDb
+      .collection('quotas')
+      .where('expireAt', '<', new Date(now))
+      .limit(SWEEP_BATCH)
+      .select()
+      .get();
+    if (expired.empty) return;
+
+    const batch = adminDb.batch();
+    expired.docs.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+    console.log(`[quota] swept ${expired.size} expired counter(s)`);
+  })().catch((error) => console.warn('[quota] sweep failed:', error));
 }
 
 export function quotaMessage(bucket: QuotaBucket, scope: Scope | null): string {

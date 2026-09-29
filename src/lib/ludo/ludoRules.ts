@@ -1,4 +1,4 @@
-import { LudoColor, LudoToken } from './ludoTypes';
+import { LudoColor, LudoRoomState, LudoToken } from './ludoTypes';
 
 // Main 52-tile track starting coordinates for each color
 export const COLOR_START_POSITIONS: Record<LudoColor, number> = {
@@ -243,4 +243,46 @@ export function chooseBestLudoMove(
   // 4. Advance the most advanced token that is on the track
   validTokens.sort((a, b) => b.position - a.position);
   return validTokens[0];
+}
+
+/** What the bot in the active seat has to do next, if it is a bot's turn at all. */
+export type LudoBotAction = 'roll' | 'move' | null;
+
+/**
+ * Decides the bot's next step from the match state alone.
+ *
+ * Kept out of the component so the decision has one definition that can be
+ * tested. It used to live inside an effect that listed its own busy flag as a
+ * dependency: setting the flag re-ran the effect, whose cleanup cancelled the
+ * timer it had just started, and the flag then stayed set forever. Every bot
+ * seat sat there for good.
+ */
+export function nextBotAction(ls: LudoRoomState | null | undefined): LudoBotAction {
+  if (!ls || ls.winner) return null;
+  const seat = ls.players.find((p) => p.color === ls.activeColor);
+  if (!seat?.isAi) return null;
+  if (!ls.hasRolled) return 'roll';
+  return ls.diceValue ? 'move' : null;
+}
+
+/**
+ * The colour that moves after `from`, passing over humans who are not there.
+ *
+ * A player who closed the tab or lost signal cannot roll, and nothing else in
+ * the match would ever move the turn past them. Bots are never absent. If every
+ * human is gone the plain next colour is returned, so the match still advances
+ * for whoever comes back.
+ */
+export function nextLudoColor(
+  ls: LudoRoomState,
+  from: LudoColor,
+  isAbsent: (playerId: string) => boolean
+): LudoColor {
+  const start = LUDO_COLOR_ORDER.indexOf(from);
+  for (let step = 1; step <= LUDO_COLOR_ORDER.length; step++) {
+    const color = LUDO_COLOR_ORDER[(start + step) % LUDO_COLOR_ORDER.length];
+    const seat = ls.players.find((p) => p.color === color);
+    if (!seat || seat.isAi || !isAbsent(seat.playerId)) return color;
+  }
+  return LUDO_COLOR_ORDER[(start + 1) % LUDO_COLOR_ORDER.length];
 }

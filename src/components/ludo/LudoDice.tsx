@@ -8,6 +8,10 @@ interface LudoDiceProps {
   isRolling: boolean;
   disabled: boolean;
   onRoll: () => void;
+  /** It is this player's turn to roll — draws attention to the die. */
+  ready?: boolean;
+  /** Edge length of the cube, in px. */
+  size?: number;
 }
 
 /** Pip layout per face, in a 3x3 grid: [col, row], 0-indexed. */
@@ -20,102 +24,138 @@ const PIPS: Record<number, [number, number][]> = {
   6: [[0, 0], [2, 0], [0, 1], [2, 1], [0, 2], [2, 2]],
 };
 
-/** How fast the face flickers while tumbling. */
-const TUMBLE_MS = 70;
+/** Where each face sits on the cube. Opposite faces sum to seven, as on a real die. */
+const FACE_PLACEMENT: Record<number, string> = {
+  1: 'rotateY(0deg)',
+  6: 'rotateY(180deg)',
+  2: 'rotateY(90deg)',
+  5: 'rotateY(-90deg)',
+  3: 'rotateX(90deg)',
+  4: 'rotateX(-90deg)',
+};
 
-export default function LudoDice({ value, isRolling, disabled, onRoll }: LudoDiceProps) {
-  // The face shown mid-roll. The old version applied `animate-spin`, which
-  // rotates one unchanging face through 360 degrees — the die never appeared to
-  // tumble, it just twirled the previous number and then snapped to the result.
-  const [face, setFace] = useState(1);
-  const [tilt, setTilt] = useState(0);
-  const [justSettled, setJustSettled] = useState(false);
-  const wasRolling = useRef(false);
+/** The cube rotation, in degrees, that turns each face to the viewer: [x, y]. */
+const FACE_ROTATION: Record<number, [number, number]> = {
+  1: [0, 0],
+  6: [0, 180],
+  2: [0, -90],
+  5: [0, 90],
+  3: [-90, 0],
+  4: [90, 0],
+};
 
+/** Time between random kicks while the die is in the air. */
+const TUMBLE_MS = 200;
+const SETTLE_MS = 750;
+
+/** The smallest angle at or above `from + turn` that shows the same face as `face`. */
+function forwardTo(from: number, face: number, turn = 360): number {
+  return face + 360 * Math.ceil((from + turn - face) / 360);
+}
+
+/**
+ * A single six-sided die that actually tumbles.
+ *
+ * The first version was a flat square: it flickered through faces and tilted,
+ * which reads as a slot machine rather than a die. This is a real cube, spun on
+ * two axes while it is rolling and settled onto the face that was rolled, so the
+ * number it lands on is the number everyone reads.
+ */
+export default function LudoDice({ value, isRolling, disabled, onRoll, ready = false, size = 76 }: LudoDiceProps) {
+  const shown = value && value >= 1 && value <= 6 ? value : 1;
+  const [rot, setRot] = useState<[number, number]>(() => [...FACE_ROTATION[shown]] as [number, number]);
+  const [motion, setMotion] = useState<'still' | 'tumble' | 'settle'>('still');
+  const mounted = useRef(false);
+
+  // In the air: throw it a full turn or more on both axes, fast and linear.
   useEffect(() => {
     if (!isRolling) return;
-    const timer = setInterval(() => {
-      setFace(1 + Math.floor(Math.random() * 6));
-      // A small random tilt each tick reads as a die knocking about, where a
-      // constant rotation reads as a loading spinner.
-      setTilt(-18 + Math.random() * 36);
-    }, TUMBLE_MS);
+    setMotion('tumble');
+    const kick = () =>
+      setRot(([x, y]) => [x + 360 + Math.floor(Math.random() * 200), y + 360 + Math.floor(Math.random() * 200)]);
+    kick();
+    const timer = setInterval(kick, TUMBLE_MS);
     return () => clearInterval(timer);
   }, [isRolling]);
 
-  // Settle: straighten up and pop once the real value lands.
+  // On the table: turn forward onto the face that was rolled. Not on first paint,
+  // so a die that mounts already showing a number does not perform for nobody.
   useEffect(() => {
-    if (wasRolling.current && !isRolling) {
-      setTilt(0);
-      setJustSettled(true);
-      const timer = setTimeout(() => setJustSettled(false), 420);
-      return () => clearTimeout(timer);
+    if (isRolling) return;
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
     }
-    wasRolling.current = isRolling;
-  }, [isRolling]);
+    const [fx, fy] = FACE_ROTATION[shown];
+    setMotion('settle');
+    setRot(([x, y]) => [forwardTo(x, fx), forwardTo(y, fy)]);
+  }, [shown, isRolling]);
 
+  const half = size / 2;
   const handleClick = () => {
     if (disabled || isRolling) return;
     audioSFX.playDiceRoll();
     onRoll();
   };
 
-  const shown = isRolling ? face : value ?? 1;
-  const pips = PIPS[shown] ?? PIPS[1];
-
   return (
     <button
       onClick={handleClick}
       disabled={disabled || isRolling}
       aria-label={isRolling ? 'Rolling' : value ? `Rolled ${value}` : 'Roll the dice'}
-      // Sized to sit in the middle of the board without swallowing the home
-      // triangles around it, and lifted with a hard shadow so it reads as
-      // resting on top of the board rather than printed into it.
-      className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-2xl p-1.5 select-none border-2 ${
-        disabled
-          ? 'opacity-30 cursor-not-allowed bg-slate-800 border-white/10 shadow-none'
-          : 'cursor-pointer bg-gradient-to-br from-[#D8DCE3] to-[#A9B0BB] border-[#8C939F] shadow-[0_10px_22px_rgba(0,0,0,0.7)] hover:brightness-110 active:scale-95'
-      }`}
-      style={{
-        transform: `rotate(${tilt}deg) scale(${isRolling ? 1.06 : justSettled ? 1.14 : 1})`,
-        // Snappy while tumbling, springy on the settle.
-        transition: isRolling ? `transform ${TUMBLE_MS}ms linear` : 'transform 380ms cubic-bezier(.2,1.5,.4,1)',
-      }}
+      className={`relative select-none rounded-2xl transition-all ${
+        disabled && !isRolling ? 'cursor-default opacity-60' : 'cursor-pointer active:scale-95'
+      } ${ready && !disabled ? 'animate-pulse' : ''}`}
+      style={{ width: size, height: size, perspective: size * 6 }}
     >
-      {/* Bone-coloured face with dark pips: a real die reads at a glance, and it
-          sits better against the muted board than a neon amber slab. */}
-      <div
-        className="relative w-full h-full rounded-xl grid p-[12%]"
+      {ready && !disabled && (
+        <span className="absolute -inset-2 rounded-3xl border-2 border-amber-300/80 shadow-[0_0_18px_rgba(252,211,77,0.6)] pointer-events-none" />
+      )}
+      <span
+        className="absolute inset-0 block"
         style={{
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gridTemplateRows: 'repeat(3, 1fr)',
-          backgroundColor: '#ECEFF3',
-          boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.9), inset 0 -3px 6px rgba(0,0,0,0.18)',
+          transformStyle: 'preserve-3d',
+          transform: `rotateX(${rot[0]}deg) rotateY(${rot[1]}deg)`,
+          transition:
+            motion === 'tumble'
+              ? `transform ${TUMBLE_MS}ms linear`
+              : motion === 'settle'
+              ? `transform ${SETTLE_MS}ms cubic-bezier(.15,.85,.25,1)`
+              : 'none',
         }}
       >
-        {pips.map(([col, row], idx) => (
+        {[1, 2, 3, 4, 5, 6].map((face) => (
           <span
-            key={idx}
-            className="rounded-full place-self-center"
+            key={face}
+            className="absolute inset-0 grid rounded-xl"
             style={{
-              gridColumnStart: col + 1,
-              gridRowStart: row + 1,
-              width: '68%',
-              height: '68%',
-              backgroundColor: '#2B3240',
-              boxShadow: 'inset 0 1px 1px rgba(0,0,0,0.6)',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gridTemplateRows: 'repeat(3, 1fr)',
+              padding: size * 0.13,
+              transform: `${FACE_PLACEMENT[face]} translateZ(${half}px)`,
+              backfaceVisibility: 'hidden',
+              background: 'linear-gradient(145deg, #FBFAF6 0%, #E9E5DA 100%)',
+              boxShadow: 'inset 0 0 0 2px rgba(0,0,0,0.10), inset 0 -4px 8px rgba(0,0,0,0.12)',
             }}
-          />
+          >
+            {PIPS[face].map(([col, row], idx) => (
+              <span
+                key={idx}
+                className="rounded-full place-self-center"
+                style={{
+                  gridColumnStart: col + 1,
+                  gridRowStart: row + 1,
+                  width: '72%',
+                  height: '72%',
+                  // The one is red, as on a real die; the rest are ink.
+                  backgroundColor: face === 1 ? '#D6342C' : '#20242E',
+                  boxShadow: 'inset 0 2px 3px rgba(0,0,0,0.55)',
+                }}
+              />
+            ))}
+          </span>
         ))}
-      </div>
-
-      {/* A six is the roll that matters in Ludo — it releases a token and grants
-          another turn — so it gets a moment of its own. */}
-      {!isRolling && value === 6 && (
-        <span className="absolute -top-2 -right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-900 shadow-lg animate-pulse">
-          6!
-        </span>
-      )}
+      </span>
     </button>
   );
 }

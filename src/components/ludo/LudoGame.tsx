@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RoomState, Player } from '@/lib/types';
 import { roomStore } from '@/lib/roomStore';
-import { chooseBestLudoMove } from '@/lib/ludo/ludoRules';
+import { chooseBestLudoMove, nextBotAction } from '@/lib/ludo/ludoRules';
 import { LudoColor } from '@/lib/ludo/ludoTypes';
 import LudoBoard from './LudoBoard';
 import LudoDice from './LudoDice';
@@ -26,7 +26,10 @@ const COLOR_NAMES: Record<LudoColor, string> = {
 
 export default function LudoGame({ room, myPlayer, roomId }: LudoGameProps) {
   const ls = room.ludoState;
-  const [isBotProcessing, setIsBotProcessing] = useState(false);
+  const [botRolling, setBotRolling] = useState(false);
+  const [myRolling, setMyRolling] = useState(false);
+  /** Bumped to try a bot step again after the server refused it. */
+  const [botRetry, setBotRetry] = useState(0);
 
   // Music, including its mute button, is handled by BackgroundMusic below. The
   // local copy that used to live here only muted this one screen and forgot the
@@ -39,46 +42,50 @@ export default function LudoGame({ room, myPlayer, roomId }: LudoGameProps) {
 
   // Active player in Ludo
   const activeLudoPlayer = ls?.players.find((p) => p.color === ls.activeColor);
-  const isBotTurn = activeLudoPlayer?.isAi;
 
-  // Automated Bot Turn Logic
+  // Bots are played by the host's browser and nobody else's. The server only
+  // accepts a bot's move from the host, so when every browser tried, everyone
+  // but the host was refused and retried in a loop.
+  const isHost = !!myPlayer.isHost;
+  const botAction = nextBotAction(ls);
+
+  // Keyed on `seq`, which moves on every roll, move and skipped turn — a bot
+  // that rolls a six goes again from a state that otherwise looks identical.
+  //
+  // Nothing in here may be a dependency that the effect itself changes. The
+  // first version listed its own busy flag: setting it re-ran the effect, whose
+  // cleanup cancelled the timer it had just started, and the flag never cleared.
+  // Every bot seat sat there for good.
   useEffect(() => {
-    if (!ls || !isBotTurn || ls.winner || isBotProcessing) return;
+    if (!isHost || !botAction || !ls) return;
+    let cancelled = false;
+    const rolling = botAction === 'roll';
+    setBotRolling(rolling);
 
-    setIsBotProcessing(true);
+    const timer = setTimeout(async () => {
+      let result: { error?: string } | undefined;
+      if (rolling) {
+        audioSFX.playDiceRoll();
+        result = await roomStore.rollLudoDice(roomId);
+      } else {
+        const best = chooseBestLudoMove(ls.tokens[ls.activeColor], ls.diceValue!, ls.tokens);
+        if (!best) return;
+        audioSFX.playChoiSuccess();
+        result = await roomStore.moveLudoToken(roomId, best.id);
+      }
+      if (cancelled) return;
+      setBotRolling(false);
+      // Refused or lost in transit: try the same step again rather than stall.
+      if (result?.error) window.setTimeout(() => setBotRetry((n) => n + 1), 2000);
+    }, rolling ? 1100 : 900);
 
-    if (!ls.hasRolled) {
-      // Bot rolls dice
-      const rollTimer = setTimeout(async () => {
-        try {
-          audioSFX.playDiceRoll();
-          await roomStore.rollLudoDice(roomId);
-        } catch (e) {
-          console.error('Bot roll failed:', e);
-        } finally {
-          setIsBotProcessing(false);
-        }
-      }, 1000);
-      return () => clearTimeout(rollTimer);
-    } else if (ls.diceValue) {
-      // Bot chooses and moves token
-      const moveTimer = setTimeout(async () => {
-        try {
-          const myTokens = ls.tokens[ls.activeColor];
-          const best = chooseBestLudoMove(myTokens, ls.diceValue!, ls.tokens);
-          if (best) {
-            audioSFX.playChoiSuccess();
-            await roomStore.moveLudoToken(roomId, best.id);
-          }
-        } catch (e) {
-          console.error('Bot move failed:', e);
-        } finally {
-          setIsBotProcessing(false);
-        }
-      }, 900);
-      return () => clearTimeout(moveTimer);
-    }
-  }, [ls?.activeColor, ls?.hasRolled, ls?.diceValue, isBotTurn, ls?.winner, roomId, isBotProcessing]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      setBotRolling(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHost, botAction, ls?.seq, ls?.activeColor, roomId, botRetry]);
 
   if (!ls) {
     return (
@@ -89,8 +96,12 @@ export default function LudoGame({ room, myPlayer, roomId }: LudoGameProps) {
   }
 
   const handleRollDice = async () => {
-    if (!isMyTurn || ls.hasRolled) return;
+    if (!isMyTurn || ls.hasRolled || myRolling) return;
+    setMyRolling(true);
+    const startedAt = Date.now();
     await roomStore.rollLudoDice(roomId);
+    // Let the die be seen tumbling even when the server answers at once.
+    window.setTimeout(() => setMyRolling(false), Math.max(0, 700 - (Date.now() - startedAt)));
   };
 
   const handleTokenClick = async (tokenId: number) => {
@@ -138,7 +149,6 @@ export default function LudoGame({ room, myPlayer, roomId }: LudoGameProps) {
           </h3>
         </div>
 
-        {/* The dice itself now lives in the middle of the board — see below. */}
         <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 text-right">
           {ls.winner
             ? 'Game over'
@@ -157,10 +167,9 @@ export default function LudoGame({ room, myPlayer, roomId }: LudoGameProps) {
         </div>
       )}
 
-      {/* Interactive 15x15 Ludo Board, with the dice floating in the middle.
-          That is where a die lands on a real board and where everyone's eyes
-          already are — parking it in the header above meant looking away from
-          the board to roll, then back again to move. */}
+      {/* The board on its own. The die used to float in the middle of it, which is
+          exactly where the home triangles are, so it sat on the one part of the
+          board every token is racing towards. */}
       <div className="relative w-full max-w-[520px] mx-auto">
         <LudoBoard
           tokens={ls.tokens}
@@ -170,17 +179,40 @@ export default function LudoGame({ room, myPlayer, roomId }: LudoGameProps) {
           isMyTurn={isMyTurn}
           onTokenClick={handleTokenClick}
         />
+      </div>
 
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
-          <div className="pointer-events-auto">
-            <LudoDice
-              value={ls.diceValue}
-              isRolling={isBotProcessing}
-              disabled={!isMyTurn || ls.hasRolled || Boolean(ls.winner)}
-              onRoll={handleRollDice}
-            />
-          </div>
+      {/* The dice tray, under the board: one die, passed round the table. */}
+      <div
+        className={`w-full max-w-[520px] mx-auto flex items-center justify-between gap-4 rounded-3xl border px-5 py-4 ${
+          isMyTurn && !ls.hasRolled && !ls.winner
+            ? 'border-amber-300/60 bg-amber-500/10'
+            : 'border-white/10 bg-slate-900/70'
+        }`}
+      >
+        <div className="min-w-0">
+          <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider block">
+            {ls.winner ? 'Match over' : isMyTurn ? 'Your roll' : `${activeLudoPlayer?.name ?? COLOR_NAMES[ls.activeColor]} is up`}
+          </span>
+          <span className="text-sm font-black text-white block mt-0.5">
+            {ls.winner
+              ? `${COLOR_NAMES[ls.winner]} wins`
+              : isMyTurn
+              ? ls.hasRolled
+                ? 'Pick a glowing token'
+                : 'Tap the die to roll'
+              : botRolling || activeLudoPlayer?.isAi
+              ? 'Bot is thinking…'
+              : 'Waiting for them…'}
+          </span>
+          <span className="text-[10px] font-bold text-slate-500 block mt-1">A six brings a token out and rolls again.</span>
         </div>
+        <LudoDice
+          value={ls.diceValue ?? ls.lastRoll ?? null}
+          isRolling={botRolling || myRolling}
+          disabled={!isMyTurn || ls.hasRolled || Boolean(ls.winner)}
+          ready={isMyTurn && !ls.hasRolled && !ls.winner}
+          onRoll={handleRollDice}
+        />
       </div>
 
       {/* Victory Celebration Modal */}

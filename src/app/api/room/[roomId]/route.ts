@@ -17,8 +17,8 @@ import {
   canMoveLudoToken,
   getLudoNextPosition,
   chooseBestLudoMove,
-  LUDO_COLOR_ORDER,
   SAFE_POSITIONS,
+  nextLudoColor,
 } from '@/lib/ludo/ludoRules';
 import { AVATARS, DARES, DUEL_TOPICS } from '@/lib/gameContent';
 import {
@@ -247,6 +247,36 @@ function prunePresence(room: RoomState): boolean {
   return changed;
 }
 
+/** Whether a Ludo seat's human has gone — dropped, timed out, or left the room. */
+function ludoSeatAbsent(room: RoomState): (playerId: string) => boolean {
+  return (playerId) => {
+    const player = room.players.find((p) => p.id === playerId);
+    return !player || player.connected === false;
+  };
+}
+
+/**
+ * Passes the Ludo turn on from a human who is not there.
+ *
+ * Ludo had no answer to a player leaving on their turn: the match waited on
+ * their roll for good. Bots are driven by the host's browser and humans by their
+ * own, so nothing else would ever move it.
+ */
+function skipAbsentLudoSeat(room: RoomState): void {
+  const ls = room.ludoState;
+  if (!ls || ls.winner) return;
+  const seat = ls.players.find((p) => p.color === ls.activeColor);
+  if (!seat || seat.isAi || !ludoSeatAbsent(room)(seat.playerId)) return;
+
+  const from = ls.activeColor;
+  ls.seq = (ls.seq ?? 0) + 1;
+  ls.hasRolled = false;
+  ls.diceValue = null;
+  ls.consecutiveSixes = 0;
+  ls.activeColor = nextLudoColor(ls, from, ludoSeatAbsent(room));
+  ls.lastActionText = `${seat.name} is away — ${from.toUpperCase()} passes.`;
+}
+
 /**
  * Nudges the room forward if the phase is now waiting on somebody who left.
  * Called whenever the player set changes.
@@ -254,6 +284,11 @@ function prunePresence(room: RoomState): boolean {
 function unstickPhase(room: RoomState): void {
   const live = activePlayers(room);
   if (live.length === 0 || room.phase === 'lobby' || room.phase === 'game_over') return;
+
+  if (room.phase === 'ludo_match') {
+    skipAbsentLudoSeat(room);
+    return;
+  }
 
   // Mid mini-game: if the performer is gone, skip their turn.
   if (PERFORMER_PHASES.has(room.phase)) {
@@ -582,6 +617,8 @@ const HOST_ONLY_ACTIONS = new Set([
   'team_battle_begin_game',
   'team_battle_next_game',
   'kick_player',
+  'chess_start_match',
+  'ludo_start_match',
 ]);
 
 /** Actions only the player whose turn it is may send. */
@@ -668,6 +705,15 @@ function authorize(
   const player = playerId ? room.players.find((p) => p.id === playerId) : undefined;
 
   if (!token || !player) {
+    // Which of the three ways a session goes missing this was — never the token.
+    console.warn('room auth: no_session', {
+      room: room.roomId,
+      action,
+      sentToken: !!token,
+      tokenKnown: !!playerId,
+      playerInRoom: !!player,
+      players: room.players.length,
+    });
     return {
       error: NextResponse.json(
         { error: 'Rejoin the room — this browser is not signed in to it.', code: 'no_session' },
@@ -4346,6 +4392,8 @@ async function applyAction(
         winner: null,
         rankings: [],
         lastActionText: 'Game started! Red rolls first.',
+        lastRoll: null,
+        seq: 0,
       };
 
       pushEvent(room, `🎲 Ludo Match started! 4 Players ready.`, 'system');
@@ -4355,6 +4403,7 @@ async function applyAction(
     case 'ludo_roll_dice': {
       if (!room.ludoState) return NextResponse.json({ error: 'No active Ludo match' }, { status: 400 });
       const ls = room.ludoState;
+      if (ls.winner) return NextResponse.json({ error: 'The match is over' }, { status: 409 });
       if (ls.hasRolled) return NextResponse.json({ error: 'Already rolled this turn' }, { status: 400 });
 
       // Verify the caller owns the colour to move.
@@ -4373,7 +4422,9 @@ async function applyAction(
       }
 
       const roll = Math.floor(Math.random() * 6) + 1;
+      ls.seq = (ls.seq ?? 0) + 1;
       ls.diceValue = roll;
+      ls.lastRoll = roll;
       ls.hasRolled = true;
 
       const activeColor = ls.activeColor;
@@ -4392,8 +4443,7 @@ async function applyAction(
         ls.diceValue = null;
         ls.lastActionText = `3 consecutive 6s! ${activeColor.toUpperCase()} forfeits turn.`;
         // Advance turn
-        const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
-        ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
+        ls.activeColor = nextLudoColor(ls, activeColor, ludoSeatAbsent(room));
         return NextResponse.json({ room: await writeRoom(room) });
       }
 
@@ -4404,8 +4454,7 @@ async function applyAction(
         ls.lastActionText = `${activeColor.toUpperCase()} rolled a ${roll} (no moves).`;
         ls.hasRolled = false;
         ls.diceValue = null;
-        const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
-        ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
+        ls.activeColor = nextLudoColor(ls, activeColor, ludoSeatAbsent(room));
       } else if (validMoves.length === 1) {
         // Auto-move single option for speedy mobile play!
         const token = validMoves[0];
@@ -4445,8 +4494,7 @@ async function applyAction(
         } else {
           ls.hasRolled = false;
           ls.diceValue = null;
-          const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
-          ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
+          ls.activeColor = nextLudoColor(ls, activeColor, ludoSeatAbsent(room));
         }
       }
 
@@ -4456,6 +4504,7 @@ async function applyAction(
     case 'ludo_move_token': {
       if (!room.ludoState) return NextResponse.json({ error: 'No active Ludo match' }, { status: 400 });
       const ls = room.ludoState;
+      if (ls.winner) return NextResponse.json({ error: 'The match is over' }, { status: 409 });
       const { tokenId } = body;
       const roll = ls.diceValue;
 
@@ -4478,6 +4527,7 @@ async function applyAction(
         }
       }
 
+      ls.seq = (ls.seq ?? 0) + 1;
       const activeColor = ls.activeColor;
       const token = ls.tokens[activeColor].find((t) => t.id === tokenId);
       if (!token || !canMoveLudoToken(token, roll)) {
@@ -4520,8 +4570,7 @@ async function applyAction(
       } else {
         ls.hasRolled = false;
         ls.diceValue = null;
-        const nextIdx = (LUDO_COLOR_ORDER.indexOf(activeColor) + 1) % 4;
-        ls.activeColor = LUDO_COLOR_ORDER[nextIdx];
+        ls.activeColor = nextLudoColor(ls, activeColor, ludoSeatAbsent(room));
       }
 
       return NextResponse.json({ room: await writeRoom(room) });

@@ -30,4 +30,20 @@ export interface LudoRoomState {
   winner: LudoColor | null;
   rankings: LudoColor[];
   lastActionText?: string;
+  /**
+   * The most recent roll, kept after the turn resolves.
+   *
+   * `diceValue` is cleared the moment a roll is auto-played or passed, so the
+   * table never saw the number a player had just rolled — only a line of text
+   * saying so. This stays put until the next roll.
+   */
+  lastRoll?: number | null;
+  /**
+   * Counts every roll, move and skipped turn.
+   *
+   * A bot that rolls a six moves and then rolls again from an identical-looking
+   * state — same colour, nothing rolled, nothing showing — so the browser driving
+   * it had no way to tell a fresh turn from the one it had just played.
+   */
+  seq?: number;
 }

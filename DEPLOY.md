@@ -93,7 +93,8 @@ any access to — see that file.
 They do not all travel the same way, and mixing the two up is how a deploy ends
 up half-working.
 
-**Build-time, public.** The seven `NEXT_PUBLIC_FIREBASE_*` values are compiled
+**Build-time, public.** The seven `NEXT_PUBLIC_FIREBASE_*` values and
+`NEXT_PUBLIC_RECAPTCHA_SITE_KEY` are compiled
 into the client bundle by `next build`, so they must be present *as the image is
 built* — build args, via `cloudbuild.yaml`. They cannot be added afterwards, and
 they are not secrets: they ship to every browser, and `firestore.rules` is what
@@ -215,6 +216,38 @@ so the app can run on more than one instance") and is not merged.
 `GEMINI_API_KEY`, `ADMIN_DASHBOARD_TOKEN` and the Cloudflare TURN credentials
 are real secrets and stay runtime env vars on the service — never build args,
 which would bake them into an image layer.
+
+### App Check
+
+The paid routes (`/api/stt-token`, `/api/ai-tts`, `/api/ai-master`, `/api/ice`)
+check a Firebase App Check token as well as the room token, so a script that
+lifts a room token out of devtools still cannot call them.
+
+- `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` is the reCAPTCHA Enterprise site key
+  registered for the web app in Firebase console → App Check. It is public and a
+  build arg like the Firebase config. It works only on the domains listed on the
+  key in Google Cloud → Security → reCAPTCHA, so add every domain players use.
+- `APP_CHECK_MODE` is a runtime env var: `monitor` (the default) serves requests
+  without a valid token and logs `[app-check] … missing|invalid token`;
+  `enforce` refuses them with 401; `off` skips the check.
+
+Roll out in that order. Deploy in monitor mode, watch the logs and the App Check
+metrics for a day or two, and only then switch the service over:
+
+```bash
+gcloud run services update voice-party-roadmap-game --region us-central1 \
+  --update-env-vars APP_CHECK_MODE=enforce
+```
+
+Enforcing on the day it ships locks out every tab opened before the deploy.
+The same goes for the **Enforce** buttons in Firebase console → App Check → APIs
+(Firestore, Authentication): wait for the metrics there to show nearly all
+requests verified.
+
+Local development cannot pass reCAPTCHA (`localhost` is not on the key). Register
+a debug token in Firebase console → App Check → Apps → ⋮ → Manage debug tokens
+and put it in `NEXT_PUBLIC_APPCHECK_DEBUG_TOKEN` in `.env.local`; production
+builds ignore it.
 
 ## Voice chat and TURN
 

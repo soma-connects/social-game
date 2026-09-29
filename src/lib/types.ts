@@ -270,7 +270,14 @@ export type DebateState = {
 export type GuessTheVoiceState = {
   performerId: string;
   prompt: string;
+  /**
+   * Always null now. The clip used to be stored here, inside the room
+   * document; it lives in server memory instead (see setRoomClip) and is
+   * fetched with the `guess_voice_clip` action. Kept so older rooms still parse.
+   */
   audioBlobUrl: string | null;
+  /** When this round's clip was stored, or null before there is one. Changes per take. */
+  clipAt?: number | null;
   phase: 'prompting' | 'recording' | 'playback' | 'voting' | 'reveal';
   votes: Record<string, string>; // voterId -> guessedPlayerId
   revealedAt?: number;

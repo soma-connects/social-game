@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { resolve4 } from 'node:dns/promises';
 import { connect } from 'node:net';
 import { callerKey, consume } from '@/lib/server/rateLimit';
+import { requireRoomPlayer } from '@/lib/server/roomAuth';
+import { passesAppCheck } from '@/lib/server/appCheck';
+import { quotaMessage, takeQuota } from '@/lib/server/quota';
 
 /**
  * ICE server configuration for the voice call.
@@ -290,6 +293,26 @@ export async function GET(request: Request) {
     return NextResponse.json(
       { error: 'Too many requests' },
       { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } }
+    );
+  }
+
+  if (!(await passesAppCheck(request, 'ice'))) {
+    return NextResponse.json({ error: 'App verification failed' }, { status: 401 });
+  }
+
+  // Relay credentials are only for players on a call. Handed to anyone, they
+  // let a stranger push their own traffic through this account's TURN
+  // allowance. Headers rather than the query string, so the room token never
+  // lands in an access log.
+  const player = await requireRoomPlayer(request.headers.get('x-room-id'), request.headers.get('x-room-token'));
+  if (!player) return NextResponse.json({ error: 'Join a room first' }, { status: 401 });
+
+  const quota = await takeQuota('turn', { ...player, ip: callerKey(request) });
+  if (!quota.ok) {
+    // STUN still connects most home networks; only the relay is withheld.
+    return NextResponse.json(
+      { iceServers: STUN, hasRelay: false, provider: 'stun-only', ttl: 600, error: quotaMessage('turn', quota.scope) },
+      { status: 200 }
     );
   }
 

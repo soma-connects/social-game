@@ -19,7 +19,12 @@ interface LeftSidebarProps {
   canManage?: boolean;
   onKickPlayer?: (player: Player) => void;
   roomType?: 'board_game' | 'team_battle' | 'chess' | 'ludo' | 'ai_master' | 'truth_or_dare';
+  /** False in the lobby, where there is no match for lives to belong to. */
+  inMatch?: boolean;
 }
+
+/** The only modes that spend lives; everywhere else a heart bar never moves. */
+const MODES_WITH_LIVES = new Set(['board_game', 'ai_master']);
 
 export default function LeftSidebar({
   roomId,
@@ -30,6 +35,7 @@ export default function LeftSidebar({
   canManage = false,
   onKickPlayer,
   roomType = 'board_game',
+  inMatch = false,
 }: LeftSidebarProps) {
   const [safetyTarget, setSafetyTarget] = useState<Player | null>(null);
 
@@ -135,9 +141,10 @@ export default function LeftSidebar({
                       LVL {player.level ?? 1} · VIBE {player.vibeScore ?? 0}
                     </p>
 
-                    {/* Lives. Team Battle is scored on the crew total, so the
-                        survival bar only means something in the board game. */}
-                    {roomType !== 'team_battle' && (
+                    {/* Lives, only during a match in a mode that spends them.
+                        In the lobby there is nothing to lose yet, and Team
+                        Battle, chess, ludo and Truth or Dare never touch them. */}
+                    {inMatch && MODES_WITH_LIVES.has(roomType) && (
                       <div className="flex items-center gap-0.5 mt-0.5" title={`${player.lives ?? STARTING_LIVES} of ${STARTING_LIVES} lives`}>
                         {Array.from({ length: STARTING_LIVES }, (_, i) => {
                           const filled = i < (player.lives ?? STARTING_LIVES);

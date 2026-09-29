@@ -7,6 +7,8 @@ import { aiGameMaster } from '@/lib/aiGameMaster';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { micStream } from '@/lib/micStream';
+import { roomStore } from '@/lib/roomStore';
+import { appCheckHeaders } from '@/lib/firebase/client';
 import MicContentionNotice from './MicContentionNotice';
 
 interface GeminiAiMasterStageProps {
@@ -114,8 +116,15 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
     try {
       const res = await fetch('/api/ai-master', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: type, playerName: activePlayer.name, gameContext: customText, roomVibe: room.roomVibe }),
+        headers: { 'Content-Type': 'application/json', ...(await appCheckHeaders()) },
+        body: JSON.stringify({
+          action: type,
+          playerName: activePlayer.name,
+          gameContext: customText,
+          roomVibe: room.roomVibe,
+          roomId: room.roomId,
+          token: roomStore.getMyToken(room.roomId),
+        }),
       });
       const data = await res.json();
       if (data.text) {
@@ -155,7 +164,7 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
           )}
           <div className="flex items-center gap-2.5">
             <div className={`w-8 h-8 rounded-full bg-gradient-to-r from-partyCyan via-partyYellow to-partyPink flex items-center justify-center text-sm shadow-md ${isSpeaking ? 'animate-pulse glow-cyan' : ''}`}>
-              ðŸ¤–
+              🤖
             </div>
             <div>
               <h3 className="font-extrabold text-sm text-white flex items-center gap-1.5">
@@ -183,7 +192,7 @@ export default function GeminiAiMasterStage({ room, activePlayer, myPlayer, onEx
           >
             {msg.sender === 'gemini' && (
               <div className="w-8 h-8 rounded-full bg-slate-900 border border-partyCyan/40 text-sm flex items-center justify-center shrink-0 shadow">
-                ðŸ¤–
+                🤖
               </div>
             )}
             <div

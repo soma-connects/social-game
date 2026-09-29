@@ -14,7 +14,12 @@ const store = vi.hoisted(() => ({
   rooms: new Map<string, any>(),
   secrets: new Map<string, { tokens: Record<string, string> }>(),
   asked: [] as { task: string; options: any }[],
-  challenges: [] as { name: string; options: any }[],
+  challenges: [] as { name: string; options: any; style: any; others: string[] }[],
+  judged: [] as { input: any; options: any }[],
+  /** What the AI Master rules; null is "could not rule", so the room's vote decides. */
+  judgement: null as null | { pass: boolean; line: string },
+  /** How many of the next room writes should lose a race, forcing the request to replay. */
+  failWrites: 0,
 }));
 
 vi.mock('@/lib/firebase/server', () => ({ verifyUid: async () => null, adminDb: {} }));
@@ -32,9 +37,13 @@ vi.mock('@/lib/server/aiHost', () => ({
     store.asked.push({ task, options });
     return 'MODEL LINE';
   },
-  generateChallenge: async (_vibe: unknown, _category: unknown, name: string, options: unknown) => {
-    store.challenges.push({ name, options });
+  generateChallenge: async (_vibe: unknown, _category: unknown, name: string, options: unknown, style: unknown, others: string[]) => {
+    store.challenges.push({ name, options, style, others });
     return { challenge: `Confess something, ${name}`, hostLine: `Calling ${name}` };
+  },
+  judgeAnswer: async (_vibe: unknown, input: unknown, options: unknown) => {
+    store.judged.push({ input, options });
+    return store.judgement;
   },
 }));
 
@@ -47,6 +56,10 @@ vi.mock('@/lib/server/roomServer', async (importOriginal) => {
       return room ? structuredClone(room) : null;
     },
     writeRoom: async (room: { roomId: string }) => {
+      if (store.failWrites > 0) {
+        store.failWrites--;
+        throw new actual.RoomConflictError(room.roomId);
+      }
       store.rooms.set(room.roomId, structuredClone(room));
       return structuredClone(room);
     },
@@ -65,6 +78,8 @@ vi.mock('@/lib/server/roomServer', async (importOriginal) => {
 });
 
 import { POST } from '@/app/api/room/[roomId]/route';
+import { forgetAll } from '@/lib/server/hostMemo';
+import { CHALLENGE_STYLES } from '@/lib/challengeStyles';
 
 type Who = { id: string; token: string; name: string };
 
@@ -110,6 +125,10 @@ beforeEach(() => {
   store.secrets.clear();
   store.asked.length = 0;
   store.challenges.length = 0;
+  store.judged.length = 0;
+  store.judgement = null;
+  store.failWrites = 0;
+  forgetAll();
 });
 
 describe('starting the match', () => {
@@ -175,14 +194,19 @@ describe('a round nobody answered', () => {
     expect(task).toContain('Do not congratulate');
   });
 
-  it('is a fail, not a dodge, if the room did vote', async () => {
+  it('is still a dodge if the room voted anyway, and the votes move nothing', async () => {
     const { roomId, host, people } = await match();
+    const target = targetOf(roomId, people);
     const voter = others(roomId, people)[0];
-    await call(roomId, { action: 'ai_master_respond', response: '(said nothing)' }, targetOf(roomId, people));
+    await call(roomId, { action: 'ai_master_respond', response: '(said nothing)' }, target);
     await call(roomId, { action: 'ai_master_vote', verdict: 'fail' }, voter);
     await call(roomId, { action: 'ai_master_verdict' }, host);
 
-    expect(state(roomId).outcome).toBe('bombed');
+    expect(state(roomId).outcome).toBe('dodged');
+    expect(playerOf(roomId, target.id).lives).toBe(3);
+    expect(playerOf(roomId, target.id).score).toBe(100);
+    // Nothing was said, so there is nothing for the AI Master to rule on.
+    expect(store.judged).toHaveLength(0);
   });
 });
 
@@ -196,7 +220,8 @@ describe('a round somebody answered', () => {
     await call(roomId, { action: 'ai_master_vote', verdict: 'pass' }, v2);
 
     expect(state(roomId).outcome).toBe('survived');
-    expect(playerOf(roomId, target.id).score).toBe(100 + 120);
+    // 100 to start, +120 for surviving, and two good votes added 15 each.
+    expect(playerOf(roomId, target.id).score).toBe(100 + 120 + 30);
     const task = store.asked.at(-1)!.task;
     expect(task).toContain('I ate the last jollof');
     expect(task).toContain('2 to 0');
@@ -382,5 +407,232 @@ describe('what the server logs', () => {
     await call(roomId, { action: 'heartbeat', visible: false }, ada);
 
     expect(playerOf(roomId, ada.id).lastVisible).toBe(false);
+  });
+});
+
+describe('the AI Master decides who survives', () => {
+  /** A round where the target has answered and the two others have voted the same way. */
+  async function answered(judgement: { pass: boolean; line: string } | null, votes: 'pass' | 'fail') {
+    store.judgement = judgement;
+    const game = await match();
+    const target = targetOf(game.roomId, game.people);
+    await call(game.roomId, { action: 'ai_master_respond', response: 'I once ate a whole pot of jollof alone' }, target);
+    for (const voter of others(game.roomId, game.people)) await call(game.roomId, { action: 'ai_master_vote', verdict: votes }, voter);
+    return { ...game, target };
+  }
+
+  it('spares somebody the room voted against, and the votes only take points off', async () => {
+    const { roomId, target } = await answered({ pass: true, line: 'Solo jollof. I respect the commitment.' }, 'fail');
+
+    const s = state(roomId);
+    expect(s.outcome).toBe('survived');
+    expect(s.verdictBy).toBe('ai');
+    expect(playerOf(roomId, target.id).lives).toBe(3);
+    // 100 to start, +120 for surviving, and two bad votes took 15 each.
+    expect(playerOf(roomId, target.id).score).toBe(100 + 120 - 30);
+    expect(s.voteSwing).toBe(-30);
+    expect(s.hostLine).toBe('Solo jollof. I respect the commitment.');
+  });
+
+  it('takes a life from somebody the room loved, and the votes only add points', async () => {
+    const { roomId, target } = await answered({ pass: false, line: 'A pot? A spoonful, maybe. Weak.' }, 'pass');
+
+    const s = state(roomId);
+    expect(s.outcome).toBe('bombed');
+    expect(s.verdictBy).toBe('ai');
+    expect(playerOf(roomId, target.id).lives).toBe(2);
+    // No pass bonus, but two good votes still paid 15 each.
+    expect(playerOf(roomId, target.id).score).toBe(100 + 30);
+    expect(s.hostLine).toBe('A pot? A spoonful, maybe. Weak.');
+  });
+
+  it('says the line the AI Master wrote about the answer, not a generic one', async () => {
+    const { roomId } = await answered({ pass: true, line: 'Specific to what they said.' }, 'pass');
+    expect(state(roomId).hostLine).toBe('Specific to what they said.');
+    // No second model call was made to write a congratulation.
+    expect(store.asked.some((a) => a.task.includes('so they survive'))).toBe(false);
+  });
+
+  it('is shown what was actually said, the challenge, and how many lives are at stake', async () => {
+    await answered({ pass: true, line: 'x' }, 'pass');
+    const { input } = store.judged[0];
+    expect(input.answer).toBe('I once ate a whole pot of jollof alone');
+    expect(input.challenge).toContain('Confess something');
+    expect(input.livesLeft).toBe(3);
+    expect(input.styleLabel).toBeTruthy();
+  });
+
+  it('keeps the ruling out of the room document until the reveal', async () => {
+    store.judgement = { pass: false, line: 'A secret ruling line.' };
+    const { roomId, people } = await match();
+    await call(roomId, { action: 'ai_master_respond', response: 'Something' }, targetOf(roomId, people));
+
+    // The room has been told the AI Master has decided - not what it decided.
+    expect(state(roomId).judged).toBe(true);
+    expect(state(roomId).phase).toBe('voting');
+    expect(JSON.stringify(room(roomId))).not.toContain('A secret ruling line.');
+    expect(store.secrets.get(roomId)).toBeDefined();
+  });
+
+  it('falls back to the room’s vote when the AI Master cannot rule', async () => {
+    const { roomId, target } = await answered(null, 'fail');
+
+    expect(state(roomId).verdictBy).toBe('room');
+    expect(state(roomId).outcome).toBe('bombed');
+    expect(playerOf(roomId, target.id).lives).toBe(2);
+  });
+
+  it('does not let an old ruling decide a new round', async () => {
+    store.judgement = { pass: true, line: 'Round one is fine.' };
+    const { roomId, host, people } = await match();
+    const first = targetOf(roomId, people);
+    await call(roomId, { action: 'ai_master_respond', response: 'Something' }, first);
+    await call(roomId, { action: 'ai_master_verdict' }, host);
+    expect(state(roomId).outcome).toBe('survived');
+
+    // Round two: the AI Master is unreachable, so the room must decide this one.
+    store.judgement = null;
+    await call(roomId, { action: 'ai_master_next_round' }, host);
+    const second = targetOf(roomId, people);
+    await call(roomId, { action: 'ai_master_respond', response: 'Something else' }, second);
+    for (const voter of others(roomId, people)) await call(roomId, { action: 'ai_master_vote', verdict: 'fail' }, voter);
+
+    expect(state(roomId).round).toBe(2);
+    expect(state(roomId).verdictBy).toBe('room');
+    expect(state(roomId).outcome).toBe('bombed');
+  });
+});
+
+describe('staying silent', () => {
+  it('is forgiven once, but a second silent round in a row costs a life', async () => {
+    const { roomId, host, people } = await match();
+    const target = targetOf(roomId, people);
+
+    // First silent round: nothing lost.
+    await call(roomId, { action: 'ai_master_verdict' }, host);
+    expect(state(roomId).outcome).toBe('dodged');
+    expect(playerOf(roomId, target.id).lives).toBe(3);
+    expect(state(roomId).dodgeStreak?.[target.id]).toBe(1);
+
+    // The same player, silent again.
+    const r = room(roomId);
+    r.aiMasterState.phase = 'announcing';
+    r.aiMasterState.round = 2;
+    store.rooms.set(roomId, r);
+    await call(roomId, { action: 'ai_master_verdict' }, host);
+
+    expect(state(roomId).outcome).toBe('bombed');
+    expect(playerOf(roomId, target.id).lives).toBe(2);
+  });
+
+  it('starts over once they speak', async () => {
+    store.judgement = { pass: true, line: 'Finally.' };
+    const { roomId, people } = await match();
+    const target = targetOf(roomId, people);
+    const r = room(roomId);
+    r.aiMasterState.dodgeStreak = { [target.id]: 1 };
+    store.rooms.set(roomId, r);
+
+    await call(roomId, { action: 'ai_master_respond', response: 'I am here now' }, target);
+    for (const voter of others(roomId, people)) await call(roomId, { action: 'ai_master_vote', verdict: 'pass' }, voter);
+
+    expect(state(roomId).dodgeStreak?.[target.id]).toBe(0);
+  });
+
+  it('knocks somebody out on their last life if they go silent twice', async () => {
+    const { roomId, host, people } = await match();
+    const target = targetOf(roomId, people);
+    const r = room(roomId);
+    r.aiMasterState.dodgeStreak = { [target.id]: 1 };
+    playerOf(roomId, target.id).lives = 1;
+    store.rooms.set(roomId, r);
+
+    await call(roomId, { action: 'ai_master_verdict' }, host);
+
+    expect(playerOf(roomId, target.id).eliminated).toBe(true);
+  });
+});
+
+describe('what the room is asked', () => {
+  it('comes from the menu of the vibe the host picked', async () => {
+    const roomId = `AM${++counter}`;
+    const created = await call(roomId, { action: 'create', playerName: 'Host' });
+    const host: Who = { id: created.body.playerId, token: created.body.token, name: 'Host' };
+    await call(roomId, { action: 'join', playerName: 'Ada' });
+    await call(roomId, { action: 'update_room_vibe', roomVibe: 'bros_hangout' }, host);
+    await call(roomId, { action: 'ai_master_start' }, host);
+
+    const asked = store.challenges[0].style;
+    expect(CHALLENGE_STYLES.bros_hangout.map((s) => s.id)).toContain(asked.id);
+    expect(state(roomId).styleId).toBe(asked.id);
+    expect(state(roomId).styleLabel).toBe(asked.label);
+  });
+
+  it('names somebody else in the room the question may involve', async () => {
+    await match();
+    expect(store.challenges[0].others.length).toBe(2);
+    expect(store.challenges[0].others).not.toContain(store.challenges[0].name);
+  });
+
+  it('never asks the same kind of thing two rounds running', async () => {
+    const { roomId, host } = await match();
+    const seen = [state(roomId).styleId];
+    for (let i = 0; i < 6; i++) {
+      await call(roomId, { action: 'ai_master_verdict' }, host);
+      await call(roomId, { action: 'ai_master_next_round' }, host);
+      seen.push(state(roomId).styleId);
+    }
+    for (let i = 1; i < seen.length; i++) expect(seen[i]).not.toBe(seen[i - 1]);
+  });
+});
+
+describe('a request that has to be replayed', () => {
+  it('does not ask the model again for the next round', async () => {
+    const { roomId, host } = await match();
+    await call(roomId, { action: 'ai_master_verdict' }, host);
+    const before = store.challenges.length;
+
+    // Somebody else's write lands first, twice, so the request runs three times.
+    store.failWrites = 2;
+    const res = await call(roomId, { action: 'ai_master_next_round' }, host);
+
+    expect(res.status).toBe(200);
+    expect(state(roomId).round).toBe(2);
+    expect(store.challenges.length - before).toBe(1);
+  });
+
+  it('does not ask the model to judge the same answer again', async () => {
+    store.judgement = { pass: true, line: 'x' };
+    const { roomId, people } = await match();
+
+    store.failWrites = 2;
+    const res = await call(roomId, { action: 'ai_master_respond', response: 'A real answer' }, targetOf(roomId, people));
+
+    expect(res.status).toBe(200);
+    expect(store.judged).toHaveLength(1);
+  });
+
+  it('does not ask again for a purchase’s line either', async () => {
+    const { roomId, people } = await match();
+    const target = targetOf(roomId, people);
+    const r = room(roomId);
+    playerOf(roomId, target.id).score = 500;
+    store.rooms.set(roomId, r);
+    const before = store.asked.length;
+
+    store.failWrites = 2;
+    const res = await call(roomId, { action: 'ai_master_buy', item: 'skip' }, target);
+
+    expect(res.status).toBe(200);
+    expect(store.asked.length - before).toBe(1);
+  });
+});
+
+describe('who can call the next round', () => {
+  it('is only the host', async () => {
+    const { roomId, host, ada, ben } = await match();
+    await call(roomId, { action: 'ai_master_verdict' }, host);
+    const res = await call(roomId, { action: 'ai_master_next_round' }, [ada, ben].find((p) => p.id !== host.id)!);
+    expect(res.status).toBe(403);
   });
 });

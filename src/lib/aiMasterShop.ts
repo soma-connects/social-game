@@ -17,6 +17,13 @@ export const AI_MASTER_STARTING_PURSE = 100;
 /** Points a survived round pays the player who survived it. */
 export const AI_MASTER_PASS_POINTS = 120;
 
+/**
+ * How far one vote moves the target's points: a good vote adds this, a bad vote
+ * takes it away. The AI Master decides who survives; the room decides how much
+ * it was worth.
+ */
+export const AI_MASTER_VOTE_SWING = 15;
+
 /** Paid once per round to each player who casts a vote, so judging is worth doing. */
 export const AI_MASTER_VOTE_POINTS = 10;
 

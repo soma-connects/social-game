@@ -1,6 +1,7 @@
 import { AI_PROMPT_POOLS } from '../aiGameMaster';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from '../roomVibes';
 import { AiMasterCategory } from '../types';
+import { fallbackFor, type ChallengeStyle } from '../challengeStyles';
 
 /**
  * The AI Master's voice, in one place.
@@ -31,6 +32,10 @@ export type HostOptions = {
   strangers?: boolean;
   /** Plain-text facts: who is in the room, their lives and points, what was said. */
   facts?: string;
+  /** Lower for a ruling, which should be steady; the default suits a joke. */
+  temperature?: number;
+  /** Ceiling on the reply, in tokens. */
+  maxTokens?: number;
 };
 
 const warned = new Set<string>();
@@ -79,7 +84,7 @@ export function hostInstructions(vibe: RoomVibeId, options: HostOptions = {}): s
 /** A host line is spoken aloud inside a request the room is waiting on, so nothing here may hang. */
 const HOST_TIMEOUT_MS = 9000;
 
-async function askGemini(system: string, task: string): Promise<string | null> {
+async function askGemini(system: string, task: string, options: HostOptions = {}): Promise<string | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
@@ -96,7 +101,11 @@ async function askGemini(system: string, task: string): Promise<string | null> {
           // Thinking is off: a one-line quip does not need it, and its tokens
           // count against the output budget, which is how a short reply comes
           // back empty.
-          generationConfig: { temperature: 1, maxOutputTokens: 400, thinkingConfig: { thinkingBudget: 0 } },
+          generationConfig: {
+            temperature: options.temperature ?? 1,
+            maxOutputTokens: options.maxTokens ?? 400,
+            thinkingConfig: { thinkingBudget: 0 },
+          },
         }),
       }
     );
@@ -112,7 +121,7 @@ async function askGemini(system: string, task: string): Promise<string | null> {
 }
 
 /** xAI's API speaks the OpenAI chat-completions dialect. */
-async function askGrok(system: string, task: string): Promise<string | null> {
+async function askGrok(system: string, task: string, options: HostOptions = {}): Promise<string | null> {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) return null;
   // A non-reasoning model by default: the room is waiting on this line.
@@ -129,8 +138,8 @@ async function askGrok(system: string, task: string): Promise<string | null> {
           { role: 'system', content: system },
           { role: 'user', content: task },
         ],
-        temperature: 1,
-        max_tokens: 400,
+        temperature: options.temperature ?? 1,
+        max_tokens: options.maxTokens ?? 400,
         stream: false,
       }),
     });
@@ -155,10 +164,10 @@ async function askGrok(system: string, task: string): Promise<string | null> {
 export async function askHost(vibe: RoomVibeId, task: string, options: HostOptions = {}): Promise<string | null> {
   const system = hostInstructions(vibe, options);
   if (resolveProvider(vibe, options.strangers) === 'grok') {
-    const line = await askGrok(system, task);
+    const line = await askGrok(system, task, options);
     if (line) return line;
   }
-  return askGemini(system, task);
+  return askGemini(system, task, options);
 }
 
 /** What each category actually asks the player to do, for the prompt and the fallback. */
@@ -203,13 +212,16 @@ export async function generateChallenge(
   vibe: RoomVibeId,
   category: AiMasterCategory,
   playerName: string,
-  options: HostOptions = {}
+  options: HostOptions = {},
+  style?: ChallengeStyle,
+  others: string[] = []
 ): Promise<{ challenge: string; hostLine: string }> {
-  const brief = CATEGORY_BRIEF[category];
+  const brief = style?.brief ?? CATEGORY_BRIEF[category];
   const generated = await askHost(
     vibe,
     `Set a challenge for the player "${playerName}" in front of the whole room. Give them ${brief}. ` +
       `Make it specific and a little uncomfortable — something the room will want to hear the answer to, not a generic icebreaker. ` +
+      `If it involves another player, use only a name from the list of players you were given. ` +
       `Reply with EXACTLY two lines and no labels:\n` +
       `Line 1: one short sentence you say to the room as you call ${playerName} out. Make it about them or the moment, never a generic hype line.\n` +
       `Line 2: the challenge itself, addressed directly to ${playerName}.`,
@@ -228,7 +240,81 @@ export async function generateChallenge(
     }
   }
 
-  return { hostLine: cannedCallOut(playerName), challenge: fallbackChallenge(category) };
+  // Offline, the round still fits the room: the style's own fallback, not the
+  // generic pool every room shared.
+  return {
+    hostLine: cannedCallOut(playerName),
+    challenge: style ? fallbackFor(style, playerName, others) : fallbackChallenge(category),
+  };
+}
+
+export type Judgement = { pass: boolean; line: string };
+
+export type JudgeInput = {
+  playerName: string;
+  challenge: string;
+  /** What they said, as transcribed. Never empty: silence is not judged. */
+  answer: string;
+  styleLabel?: string;
+  livesLeft: number;
+  /** Whether the host is soft on them, hard on them, or neither. */
+  leaning?: 'soft' | 'hard' | null;
+};
+
+/**
+ * The AI Master rules on an answer: survives, or does not.
+ *
+ * The room used to decide this by vote, which made the host a spectator at its
+ * own game show. The host decides; the room's votes move the points. One call
+ * gives both the ruling and the line said about it, so a round costs one model
+ * call at this step, not two.
+ *
+ * Returns null on anything unexpected (no key, a timeout, a reply that is not
+ * the JSON asked for) and the caller falls back to the room's vote: an outage
+ * must cost the room the AI's opinion, never the round.
+ */
+export async function judgeAnswer(
+  vibe: RoomVibeId,
+  input: JudgeInput,
+  options: HostOptions = {}
+): Promise<Judgement | null> {
+  const lean =
+    input.leaning === 'soft'
+      ? 'You are soft on this player: on a close call, give them the benefit of the doubt.'
+      : input.leaning === 'hard'
+      ? 'You have it in for this player: on a close call, rule against them.'
+      : '';
+
+  const raw = await askHost(
+    vibe,
+    `You are ruling on one round of your game show.\n` +
+      `Challenge${input.styleLabel ? ` (${input.styleLabel})` : ''}: "${input.challenge}"\n` +
+      `The player is ${input.playerName}, who has ${input.livesLeft} ${input.livesLeft === 1 ? 'life' : 'lives'} left. ` +
+      `They answered out loud, transcribed by a recogniser: "${input.answer.slice(0, 500)}"\n\n` +
+      `Rule PASS if they made a real attempt that fits the challenge and gave the room something: honest, specific, funny or interesting. ` +
+      `Rule FAIL if they dodged, went off topic, gave a bare one-word non-answer, or filled time with nothing. ` +
+      `For a trivia question they pass only if they are correct. ` +
+      `The transcript can be imperfect, especially with accents — never fail someone over garbled spelling; judge what they clearly meant. ` +
+      `Be a tough but fair judge: roughly six in ten genuine attempts should pass, and length alone is not a reason to pass. ${lean}\n\n` +
+      `Reply with JSON only, no other text: {"pass": true or false, "line": "one or two sentences you say aloud to the room, reacting to what they actually said. ` +
+      `If you failed them, roast the answer${input.livesLeft <= 1 ? ' and say this was their last life' : ''}. If you passed them, grudging respect at most."}`,
+    { ...options, temperature: 0.5, maxTokens: 300 }
+  );
+  if (!raw) return null;
+
+  try {
+    const json = raw.replace(/```(?:json)?/gi, '').trim();
+    const start = json.indexOf('{');
+    const end = json.lastIndexOf('}');
+    if (start === -1 || end <= start) return null;
+    const parsed = JSON.parse(json.slice(start, end + 1));
+    if (typeof parsed.pass !== 'boolean') return null;
+    const line = String(parsed.line ?? '').trim().slice(0, 300);
+    if (!line) return null;
+    return { pass: parsed.pass, line };
+  } catch {
+    return null;
+  }
 }
 
 /**

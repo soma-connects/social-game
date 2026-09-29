@@ -102,7 +102,9 @@ import {
 import { verifyUid } from '@/lib/firebase/server';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES } from '@/lib/roomVibes';
-import { askHost, coerceVibe, generateChallenge } from '@/lib/server/aiHost';
+import { askHost, coerceVibe, generateChallenge, judgeAnswer } from '@/lib/server/aiHost';
+import { once } from '@/lib/server/hostMemo';
+import { pickChallengeStyle, seededRandom } from '@/lib/challengeStyles';
 import { AiMasterBribe, AiMasterCategory, AiMasterState } from '@/lib/types';
 import { TruthOrDareCategoryId, TruthOrDareSelectionMode, TruthOrDareSettings, TruthOrDareState } from '@/lib/types';
 import {
@@ -114,7 +116,7 @@ import {
   pickTruthOrDarePrompt,
 } from '@/lib/truthOrDareContent';
 import { addIdea, countIdeas, ideasBy, removeIdea, withoutAuthors } from '@/lib/truthOrDareIdeas';
-import { AI_MASTER_PASS_POINTS, AI_MASTER_STARTING_PURSE, AI_MASTER_VOTE_POINTS, buyFromHost } from '@/lib/aiMasterShop';
+import { AI_MASTER_PASS_POINTS, AI_MASTER_STARTING_PURSE, AI_MASTER_VOTE_POINTS, AI_MASTER_VOTE_SWING, buyFromHost } from '@/lib/aiMasterShop';
 import { fallbackLine, hostFacts, rememberHostLine, spokenAnswer, type LineKind } from '@/lib/aiMasterLines';
 
 export const dynamic = 'force-dynamic';
@@ -1284,21 +1286,6 @@ function roomVibeOf(room: RoomState) {
   return coerceVibe(room.roomVibe);
 }
 
-/** Maps the vibe's preferred prompt flavours onto the categories this game sets. */
-function pickCategory(room: RoomState): AiMasterCategory {
-  const preferred = ROOM_VIBES[roomVibeOf(room)].preferredCategories;
-  const mapped: AiMasterCategory[] = [];
-  for (const c of preferred) {
-    if (c === 'truth_bluff') mapped.push('bluff');
-    else if (c === 'icebreaker') mapped.push('truth');
-    else if (c === 'dare' || c === 'personality') mapped.push('dare');
-    else if (c === 'debate') mapped.push('story');
-  }
-  // Trivia is always in the mix so a room never gets one note all night.
-  const pool: AiMasterCategory[] = mapped.length > 0 ? [...mapped, 'trivia'] : ['truth', 'dare', 'bluff', 'trivia', 'story'];
-  return pool[Math.floor(Math.random() * pool.length)];
-}
-
 /**
  * Chooses who gets called out, letting the host's bias show.
  *
@@ -1306,7 +1293,11 @@ function pickCategory(room: RoomState): AiMasterCategory {
  * without being absolute — and the previous target is skipped so nobody gets
  * two in a row purely by chance.
  */
-function pickTarget(room: RoomState, state: AiMasterState | null | undefined): Player | null {
+function pickTarget(
+  room: RoomState,
+  state: AiMasterState | null | undefined,
+  random: () => number = Math.random
+): Player | null {
   const pool = survivors(room);
   if (pool.length === 0) return null;
   if (pool.length === 1) return pool[0];
@@ -1321,7 +1312,7 @@ function pickTarget(room: RoomState, state: AiMasterState | null | undefined): P
     if (p.id === state?.favorId && weighted.length > 1) weighted.pop();
   }
   const draw = weighted.length > 0 ? weighted : from;
-  return draw[Math.floor(Math.random() * draw.length)];
+  return draw[Math.floor(random() * draw.length)];
 }
 
 // ─── The AI Master's clock ──────────────────────────────────────────────────
@@ -1334,8 +1325,11 @@ function pickTarget(room: RoomState, state: AiMasterState | null | undefined): P
 
 /** Long enough to actually perform a challenge into a microphone. */
 const AI_MASTER_RESPOND_MS = 90_000;
-/** The room deciding. Shorter — they only have to press one of two buttons. */
-const AI_MASTER_VOTE_MS = 45_000;
+/**
+ * The room voting. Short: a vote only moves points now, since the AI Master
+ * decides who survives, so nothing hangs on waiting for everybody.
+ */
+const AI_MASTER_VOTE_MS = 20_000;
 /** Reading the verdict before the next round is called. */
 const AI_MASTER_VERDICT_MS = 25_000;
 
@@ -1419,7 +1413,7 @@ async function expireStalledAiMaster(room: RoomState, now: number): Promise<void
 }
 
 /** Occasionally re-rolls who the host likes and who it is out to get. */
-function rerollBias(room: RoomState, state: AiMasterState): void {
+function rerollBias(room: RoomState, state: AiMasterState, random: () => number = Math.random): void {
   const pool = survivors(room);
   if (pool.length < 2) {
     state.favorId = null;
@@ -1427,9 +1421,13 @@ function rerollBias(room: RoomState, state: AiMasterState): void {
     return;
   }
   // Only sometimes, so the bias persists long enough for a room to notice it.
-  if (state.round > 1 && Math.random() > 0.34) return;
+  if (state.round > 1 && random() > 0.34) return;
 
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  const shuffled = [...pool];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
   state.favorId = shuffled[0]?.id ?? null;
   state.grudgeId = shuffled[1]?.id ?? null;
 }
@@ -1443,6 +1441,16 @@ function hostOptions(room: RoomState, state: AiMasterState | null | undefined, e
 function hostSays(state: AiMasterState, line: string): void {
   state.hostLine = line;
   rememberHostLine(state, line);
+}
+
+/**
+ * One line from the model, asked once however many times the request replays.
+ *
+ * The key names what makes the question different (round, player, what
+ * happened); see hostMemo.ts for why this matters.
+ */
+function sayOnce(room: RoomState, state: AiMasterState, key: string, task: string): Promise<string | null> {
+  return once(`${room.roomId}|${key}`, () => askHost(roomVibeOf(room), task, hostOptions(room, state)));
 }
 
 /** Opens the next round: new target, new task, fresh votes. */
@@ -1462,8 +1470,14 @@ async function startAiMasterRound(room: RoomState): Promise<void> {
   const here = survivors(room);
   if (here.length === 0) return;
 
+  const round = (previous?.round ?? 0) + 1;
+  // Every choice below comes from a stream seeded by room and round, so a
+  // request that has to be replayed makes the same ones and the model's answer
+  // for it is remembered rather than paid for again.
+  const random = seededRandom(`${room.roomId}:${round}`);
+
   const draft: AiMasterState = {
-    round: (previous?.round ?? 0) + 1,
+    round,
     targetId: '',
     challenge: '',
     category: 'truth',
@@ -1473,9 +1487,10 @@ async function startAiMasterRound(room: RoomState): Promise<void> {
     grudgeId: previous?.grudgeId ?? null,
     bribes: [],
     hostHistory: previous?.hostHistory ?? [],
+    dodgeStreak: previous?.dodgeStreak ?? {},
     spotlight: null,
   };
-  rerollBias(room, draft);
+  rerollBias(room, draft, random);
 
   // A bought spotlight beats the draw. If the chosen player has left or been
   // knocked out in the meantime, the buyer gets their points back.
@@ -1495,37 +1510,45 @@ async function startAiMasterRound(room: RoomState): Promise<void> {
       }
     }
   }
-  if (!target) target = pickTarget(room, previous);
+  if (!target) target = pickTarget(room, previous, random);
   if (!target) return;
 
-  const category = pickCategory(room);
-  const { challenge, hostLine } = await generateChallenge(
-    roomVibeOf(room),
-    category,
-    target.name,
-    hostOptions(room, draft, extra)
+  // What to ask comes from the room's own menu, never the style just used.
+  const style = pickChallengeStyle(roomVibeOf(room), previous?.styleId, random);
+  const others = room.players.filter((p) => p.id !== target!.id && !p.eliminated).map((p) => p.name);
+
+  const { challenge, hostLine } = await once(
+    `${room.roomId}|challenge|${round}|${target.id}|${style.id}|${extra.length}`,
+    () => generateChallenge(roomVibeOf(room), style.category, target!.name, hostOptions(room, draft, extra), style, others)
   );
 
   draft.targetId = target.id;
-  draft.category = category;
+  draft.category = style.category;
+  draft.styleId = style.id;
+  draft.styleLabel = style.label;
   draft.challenge = challenge;
   hostSays(draft, hostLine);
 
   room.aiMasterState = draft;
   room.phase = 'ai_master_round';
-  room.activePlayerIndex = Math.max(0, room.players.findIndex((p) => p.id === target.id));
+  room.activePlayerIndex = Math.max(0, room.players.findIndex((p) => p.id === target!.id));
   pushEvent(room, `🎙️ Round ${draft.round}: the AI Master calls out ${target.name}`, 'system');
 }
 
 /**
- * Closes a round: tallies the room's verdict and makes it cost something.
+ * Closes a round: the AI Master's ruling decides who survives, and the room's
+ * votes decide how much it was worth.
  *
- * A tie counts as a fail. Somebody has to actually speak up for you — that is
- * the whole tension of being the one on the mic.
+ * The room used to decide this by vote, which left the host a spectator at its
+ * own game show. Now the AI Master rules on what was actually said (see
+ * judgeAnswer) and that ruling alone costs or spares a life. If it could not
+ * rule — no key, a timeout — the room's vote decides, as before, so an outage
+ * costs the AI's opinion and never the round.
  *
- * The host is told what actually happened — the challenge, the words, the
- * tally — because it used to be told only "congratulate them", and so it did,
- * for a player who had said nothing at all.
+ * A round nobody answered is a dodge: no points, no praise, and no life the
+ * first time, since it is as likely to be a dropped connection as a dodge. The
+ * second silent round in a row is not forgiven; staying quiet is not a way to
+ * stay in the game.
  */
 async function resolveAiMasterRound(room: RoomState): Promise<void> {
   const state = room.aiMasterState;
@@ -1538,83 +1561,127 @@ async function resolveAiMasterRound(room: RoomState): Promise<void> {
   const passes = verdicts.filter((v) => v === 'pass').length;
   const fails = verdicts.filter((v) => v === 'fail').length;
   const said = spokenAnswer(state.response);
-  const vibe = roomVibeOf(room);
+  // What the room thought it was worth, in points, whoever rules on surviving.
+  const swing = (passes - fails) * AI_MASTER_VOTE_SWING;
 
   state.phase = 'verdict';
   state.revealedAt = Date.now();
+  state.voteSwing = swing;
 
   const scene =
     `${target.name} was challenged: "${state.challenge}". ` +
     (said ? `They answered: "${said.slice(0, 300)}". ` : 'They gave no answer at all. ');
 
-  // Said nothing, and the room did not vote either. Waving that through as a
-  // pass is what had the host congratulating an empty round — but it is not a
-  // fail either, because it is just as likely to be a dropped connection as a
-  // dodge, and a life is a lot to take for that.
-  if (!said && verdicts.length === 0) {
-    state.passed = false;
-    state.outcome = 'dodged';
-    pushEvent(room, `👻 ${target.name} said nothing — no points, no penalty`, 'system');
-    hostSays(
-      state,
-      (await askHost(
-        vibe,
-        `${scene}The room did not vote either. Roast them for ghosting the round. Do not congratulate them.`,
-        hostOptions(room, state)
-      )) ?? fallbackLine('dodged', target.name)
-    );
-    return;
+  if (!said) {
+    const streak = (state.dodgeStreak?.[target.id] ?? 0) + 1;
+    state.dodgeStreak = { ...(state.dodgeStreak ?? {}), [target.id]: streak };
+
+    if (streak < 2) {
+      state.passed = false;
+      state.outcome = 'dodged';
+      state.verdictBy = 'ai';
+      pushEvent(room, `👻 ${target.name} said nothing — no points, no penalty (this time)`, 'system');
+      hostSays(
+        state,
+        (await sayOnce(
+          room,
+          state,
+          `dodge|${state.round}|${target.id}`,
+          `${scene}${verdicts.length > 0 ? 'The room voted anyway. ' : ''}Roast them for ghosting the round. Do not congratulate them, and warn them that a second silent round in a row will cost a life.`
+        )) ?? fallbackLine('dodged', target.name)
+      );
+      return;
+    }
+  } else {
+    state.dodgeStreak = { ...(state.dodgeStreak ?? {}), [target.id]: 0 };
   }
 
-  // Nobody objecting to somebody who did speak counts as nobody objecting. A
-  // bare `passes > fails` fails the target on an empty tally, which takes a life
-  // because the room wandered off.
-  const passed = verdicts.length === 0 ? true : passes > fails;
+  // Who rules. Silence twice running is not judged; it is simply a fail.
+  let passed: boolean;
+  let rulingLine: string | null = null;
+  if (!said) {
+    passed = false;
+    state.verdictBy = 'ai';
+  } else {
+    const judgement = (await readSecrets(room.roomId)).aiMasterJudgement;
+    if (judgement && judgement.round === state.round) {
+      passed = judgement.pass;
+      rulingLine = judgement.line;
+      state.verdictBy = 'ai';
+    } else {
+      // The AI Master could not rule. Nobody objecting to somebody who did
+      // speak counts as nobody objecting; a bare `passes > fails` failed the
+      // target on an empty tally, taking a life because the room wandered off.
+      passed = verdicts.length === 0 ? true : passes > fails;
+      state.verdictBy = 'room';
+    }
+  }
   state.passed = passed;
+
+  const swingText = swing === 0 ? '' : ` (votes ${swing > 0 ? '+' : ''}${swing})`;
+  target.score = Math.max(0, (target.score ?? 0) + (passed ? AI_MASTER_PASS_POINTS : 0) + swing);
 
   if (passed) {
     state.outcome = 'survived';
-    target.score += AI_MASTER_PASS_POINTS;
     target.vibeScore = (target.vibeScore ?? 0) + passes * 10;
     updatePlayerLevel(target);
-    pushEvent(room, `✅ ${target.name} survived the round ${passes}–${fails} (+${AI_MASTER_PASS_POINTS} pts)`, 'buff');
+    pushEvent(
+      room,
+      `✅ ${target.name} survived, ${state.verdictBy === 'ai' ? 'the AI Master ruled' : 'the room ruled'} (+${AI_MASTER_PASS_POINTS} pts)${swingText}`,
+      'buff'
+    );
     hostSays(
       state,
-      (await askHost(
-        vibe,
-        `${scene}The room voted ${passes} to ${fails} in their favour, so they survive. React to what they actually said: grudging respect at most, and a jab if the answer earned one. Do not just say well done.`,
-        hostOptions(room, state)
-      )) ?? fallbackLine('survived', target.name)
+      rulingLine ??
+        (await sayOnce(
+          room,
+          state,
+          `survive|${state.round}|${target.id}`,
+          `${scene}The room voted ${passes} to ${fails} in their favour, so they survive. React to what they actually said: grudging respect at most, and a jab if the answer earned one. Do not just say well done.`
+        )) ??
+        fallbackLine('survived', target.name)
     );
     return;
   }
 
   state.outcome = 'bombed';
   const { livesLeft, empty } = loseLife(target);
+  const lifeText = `${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left`;
+  const silentAgain = !said;
   if (empty) {
     target.eliminated = true;
-    pushEvent(room, `☠️ ${target.name} is OUT — no lives left!`, 'debuff');
+    pushEvent(room, `☠️ ${target.name} is OUT — no lives left!${swingText}`, 'debuff');
     hostSays(
       state,
-      (await askHost(
-        vibe,
-        `${scene}The room voted ${fails} to ${passes} against them, and that was their last life: they are OUT of the game. Give them a send-off that roasts how they went out.`,
-        hostOptions(room, state)
-      )) ?? fallbackLine('eliminated', target.name)
+      rulingLine ??
+        (await sayOnce(
+          room,
+          state,
+          `out|${state.round}|${target.id}`,
+          `${scene}${silentAgain ? 'That was their second silent round in a row, and ' : `The room voted ${fails} to ${passes} against them, and `}that was their last life: they are OUT of the game. Give them a send-off that roasts how they went out.`
+        )) ??
+        fallbackLine('eliminated', target.name)
     );
   } else {
     pushEvent(
       room,
-      `💔 ${target.name} bombed it ${fails}–${passes} — ${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left`,
+      silentAgain
+        ? `💔 ${target.name} went silent twice running — ${lifeText}`
+        : `💔 ${target.name} bombed it, ${state.verdictBy === 'ai' ? 'the AI Master ruled' : 'the room ruled'} — ${lifeText}${swingText}`,
       'debuff'
     );
     hostSays(
       state,
-      (await askHost(
-        vibe,
-        `${scene}The room voted ${fails} to ${passes} against them. They now have ${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left. Roast what they actually said.`,
-        hostOptions(room, state)
-      )) ?? fallbackLine('bombed', target.name)
+      rulingLine ??
+        (await sayOnce(
+          room,
+          state,
+          `bomb|${state.round}|${target.id}`,
+          silentAgain
+            ? `${scene}That is their second silent round in a row and your patience has run out: they lose a life and now have ${lifeText}. Roast them for it.`
+            : `${scene}The room voted ${fails} to ${passes} against them. They now have ${lifeText}. Roast what they actually said.`
+        )) ??
+        fallbackLine('bombed', target.name)
     );
   }
 }
@@ -3544,7 +3611,36 @@ async function applyAction(
       }
       state.response = String(body.response ?? '').slice(0, 600);
       state.phase = 'voting';
-      pushEvent(room, `🎤 ${responder.name} answered — the room decides`, 'system');
+      pushEvent(room, `🎤 ${responder.name} answered — the AI Master is weighing it up`, 'system');
+
+      // The AI Master rules now, while the room votes on what the answer was
+      // worth. The ruling is kept in the private state, not the room document:
+      // everybody subscribes to that, and a ruling sitting in it would turn the
+      // vote into a reaction to a verdict the room could already read.
+      const said = spokenAnswer(state.response);
+      if (said) {
+        const judgement = await once(
+          `${roomId}|judge|${state.round}|${responder.id}|${said.length}|${said.slice(0, 40)}`,
+          () =>
+            judgeAnswer(
+              roomVibeOf(room),
+              {
+                playerName: responder.name,
+                challenge: state.challenge,
+                answer: said,
+                styleLabel: state.styleLabel,
+                livesLeft: responder.lives ?? STARTING_LIVES,
+                leaning: state.grudgeId === responder.id ? 'hard' : state.favorId === responder.id ? 'soft' : null,
+              },
+              hostOptions(room, state)
+            )
+        );
+        const secrets = await readSecrets(roomId);
+        if (judgement) secrets.aiMasterJudgement = { round: state.round, ...judgement };
+        else if (secrets.aiMasterJudgement?.round === state.round) delete secrets.aiMasterJudgement;
+        await writeSecrets(roomId, secrets);
+        state.judged = !!judgement;
+      }
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -3642,23 +3738,23 @@ async function applyAction(
           }
         }
         record.hostLine =
-          (await askHost(
+          (await once(`${roomId}|bribe-yes|${state.round}|${player.id}|${amount}|${(state.bribes ?? []).length}`, () => askHost(
             roomVibeOf(room),
             `${player.name} just slipped you ${amount} points to ${
               ask === 'life' ? 'buy a life back' : ask === 'redirect' ? 'dump their challenge on somebody else' : 'get out of their challenge'
             }. Accept it shamelessly and in character, and say what they were after.`,
             hostOptions(room, state)
-          )) ?? `${player.name}, your generosity has been noted. Consider it handled.`;
+          ))) ?? `${player.name}, your generosity has been noted. Consider it handled.`;
         pushEvent(room, `🤝 The AI Master took ${player.name}'s ${cost} points…`, 'social');
       } else {
         record.hostLine =
-          (await askHost(
+          (await once(`${roomId}|bribe-no|${state.round}|${player.id}|${amount}|${(state.bribes ?? []).length}`, () => askHost(
             roomVibeOf(room),
             `${player.name} offered you ${amount} points to ${
               ask === 'life' ? 'buy a life back' : ask === 'redirect' ? 'dump their challenge on somebody else' : 'get out of their challenge'
             }, and you are refusing. Refuse in public, and mock them for thinking that was enough.`,
             hostOptions(room, state)
-          )) ?? `${player.name} tried to buy me off. Adorable. Keep playing.`;
+          ))) ?? `${player.name} tried to buy me off. Adorable. Keep playing.`;
         pushEvent(room, `🚫 ${player.name} tried to bribe the AI Master and lost ${cost} points`, 'social');
       }
 
@@ -3720,7 +3816,10 @@ async function applyAction(
 
       pushEvent(room, event, 'social');
       const hostLine =
-        (await askHost(roomVibeOf(room), scene, hostOptions(room, state))) ?? fallbackLine(kind, buyer.name);
+        (await once(
+          `${roomId}|buy|${state.round}|${buyer.id}|${item.id}|${victim?.id ?? ''}|${(state.bribes ?? []).length}`,
+          () => askHost(roomVibeOf(room), scene, hostOptions(room, state))
+        )) ?? fallbackLine(kind, buyer.name);
 
       const record: AiMasterBribe = {
         playerId: buyer.id,

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, Heart, Mic, Send, ThumbsDown, ThumbsUp, Coins, Sparkles, Skull, Headphones, Check, HeartCrack, Handshake, Ban, Ghost, Target, ShoppingBag } from 'lucide-react';
 import { AiMasterState, Player, RoomState } from '@/lib/types';
 import { STARTING_LIVES } from '@/lib/gameRules';
-import { AI_MASTER_ITEMS, AI_MASTER_PASS_POINTS, AI_MASTER_VOTE_POINTS, type AiMasterItem } from '@/lib/aiMasterShop';
+import { AI_MASTER_ITEMS, AI_MASTER_PASS_POINTS, AI_MASTER_VOTE_POINTS, AI_MASTER_VOTE_SWING, type AiMasterItem } from '@/lib/aiMasterShop';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { useCountdown } from '@/hooks/useCountdown';
 import { audioSFX } from '@/lib/audioFeedback';
@@ -44,6 +44,10 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
   const [transcript, setTranscript] = useState('');
   const [listening, setListening] = useState(false);
   const [showBribe, setShowBribe] = useState(false);
+  /** The answer has been sent and the AI Master is ruling on it. */
+  const [submitting, setSubmitting] = useState(false);
+  /** NEXT ROUND has been tapped and the host is writing the next challenge. */
+  const [advancing, setAdvancing] = useState(false);
   const [bribeAmount, setBribeAmount] = useState(50);
   /** The price-list item waiting on a victim to be named. */
   const [choosingVictimFor, setChoosingVictimFor] = useState<AiMasterItem | null>(null);
@@ -82,6 +86,12 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
   }, [state?.phase]);
 
   useEffect(() => () => sessionRef.current?.stop(), []);
+
+  // A tap that has been answered by the room moving on is no longer waiting.
+  useEffect(() => {
+    setSubmitting(false);
+    setAdvancing(false);
+  }, [state?.round, state?.phase]);
 
   if (!state) {
     return (
@@ -126,12 +136,24 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
   };
 
   const submitAnswer = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     sessionRef.current?.stop();
     sessionRef.current = null;
     setListening(false);
     audioSFX.playChoiSuccess();
     await roomStore.aiMasterRespond(roomId, transcript.trim() || '(said nothing)');
     setTranscript('');
+    setSubmitting(false);
+  };
+
+  const callNextRound = async () => {
+    if (advancing) return;
+    setAdvancing(true);
+    await roomStore.aiMasterNextRound(roomId);
+    // On success the round changes and the effect above clears this; on a refusal
+    // the button must not stay stuck.
+    setAdvancing(false);
   };
 
   const castVote = async (verdict: 'pass' | 'fail') => {
@@ -191,7 +213,7 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
                 ROUND {state.round}
               </span>
               <span className="bg-partyPink/20 text-partyPink text-[9px] px-2 py-0.5 rounded-full font-extrabold border border-partyPink/30">
-                {CATEGORY_LABEL[state.category]}
+                {state.styleLabel ?? CATEGORY_LABEL[state.category]}
               </span>
               {secondsLeft !== null && (
                 <span
@@ -326,10 +348,10 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
                   </button>
                   <button
                     onClick={submitAnswer}
-                    disabled={!transcript.trim()}
+                    disabled={!transcript.trim() || submitting}
                     className="bg-partyYellow disabled:opacity-40 text-partyDark font-black text-sm px-5 py-3 rounded-2xl flex items-center gap-2 active:scale-95"
                   >
-                    <Send className="w-4 h-4" /> DONE
+                    <Send className="w-4 h-4" /> {submitting ? 'JUDGING…' : 'DONE'}
                   </button>
                 </div>
                 <MicContentionNotice active={listening} onClaimPriority={restartWithMicPriority} />
@@ -361,12 +383,18 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
 
             {amTarget ? (
               <p className="text-sm font-bold text-gray-300 text-center py-2">
-                ⏳ The room is deciding your fate… ({votesIn}/{eligibleVoters} in)
+                {state.judged
+                  ? '🤖 The AI Master has made up its mind. The room is deciding what it was worth…'
+                  : '⏳ The AI Master could not rule — the room is deciding your fate…'}{' '}
+                ({votesIn}/{eligibleVoters} in)
               </p>
             ) : (
               <>
                 <p className="text-xs font-bold text-gray-300 text-center">
-                  Did {target?.name} pull it off? {amEliminated && '(you are out, but your vote still counts)'}
+                  {state.judged
+                    ? '🤖 The AI Master has made up its mind.'
+                    : '🤖 The AI Master could not rule on this one — the room decides.'}{' '}
+                  How was {target?.name}? {amEliminated && '(you are out, but your vote still counts)'}
                 </p>
                 <div className="flex gap-3">
                   <button
@@ -377,7 +405,7 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
                         : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
                     }`}
                   >
-                    <ThumbsUp className="w-4 h-4" /> THEY DID IT
+                    <ThumbsUp className="w-4 h-4" /> GOOD
                   </button>
                   <button
                     onClick={() => castVote('fail')}
@@ -387,11 +415,14 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
                         : 'bg-red-500/15 text-red-300 border-red-500/40 hover:bg-red-500/25'
                     }`}
                   >
-                    <ThumbsDown className="w-4 h-4" /> NOT GOOD ENOUGH
+                    <ThumbsDown className="w-4 h-4" /> BAD
                   </button>
                 </div>
                 <p className="text-[10px] text-gray-500 text-center">
-                  {votesIn}/{eligibleVoters} votes in — a tie counts as a fail
+                  {state.judged
+                    ? `Each vote moves ${target?.name}'s points by ${AI_MASTER_VOTE_SWING}. The AI Master decides who survives.`
+                    : 'A tie counts as a fail.'}{' '}
+                  ({votesIn}/{eligibleVoters} in)
                 </p>
               </>
             )}
@@ -435,15 +466,24 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
             </p>
             {state.outcome === 'dodged' && (
               <p className="text-xs font-bold text-gray-400">
-                {target?.name} said nothing — no points, and no life lost.
+                {target?.name} said nothing — no points, and no life lost. A second silent round in a row costs a life.
+              </p>
+            )}
+            {state.outcome !== 'dodged' && state.outcome !== 'skipped' && (
+              <p className="text-xs font-bold text-gray-400">
+                {state.verdictBy === 'ai'
+                  ? '🤖 The AI Master ruled'
+                  : '🗳 The AI Master could not rule — the room decided'}
+                {state.voteSwing ? ` · room votes ${state.voteSwing > 0 ? '+' : ''}${state.voteSwing} pts` : ''}
               </p>
             )}
             {myPlayer.isHost && (
               <button
-                onClick={() => roomStore.aiMasterNextRound(roomId)}
-                className="bg-partyYellow hover:bg-yellow-400 text-partyDark font-black text-sm px-8 py-3 rounded-2xl transition-all active:scale-95"
+                onClick={callNextRound}
+                disabled={advancing}
+                className="bg-partyYellow hover:bg-yellow-400 disabled:opacity-60 text-partyDark font-black text-sm px-8 py-3 rounded-2xl transition-all active:scale-95"
               >
-                NEXT ROUND
+                {advancing ? 'THE HOST IS WRITING THE NEXT ONE…' : 'NEXT ROUND'}
               </button>
             )}
             {!myPlayer.isHost && (

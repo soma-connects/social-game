@@ -177,6 +177,14 @@ export type RoomSecrets = {
    * carries how many there are.
    */
   truthOrDareIdeas?: StoredTruthOrDareIdea[];
+  /**
+   * The AI Master's ruling on the answer just given, kept back until the reveal.
+   *
+   * Private for the same reason as the trivia answer: the room subscribes to the
+   * room document, and a ruling sitting in it would make the vote a reaction to
+   * a verdict everybody could already read.
+   */
+  aiMasterJudgement?: { round: number; pass: boolean; line: string };
 };
 
 const EMPTY_SECRETS: RoomSecrets = { tokens: {} };

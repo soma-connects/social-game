@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { askHost, cannedCallOut, hostInstructions, HOST_SYSTEM_PROMPT, resolveProvider } from './aiHost';
+import { askHost, cannedCallOut, generateChallenge, hostInstructions, HOST_SYSTEM_PROMPT, judgeAnswer, resolveProvider } from './aiHost';
+import { CHALLENGE_STYLES } from '../challengeStyles';
 
 const ENV_KEYS = ['GEMINI_API_KEY', 'XAI_API_KEY', 'XAI_MODEL', 'AI_HOST_PROVIDER'] as const;
 const saved: Record<string, string | undefined> = {};
@@ -162,5 +163,104 @@ describe('the canned call-out', () => {
       lines.add(line);
     }
     expect(lines.size).toBe(5);
+  });
+});
+
+describe('ruling on an answer', () => {
+  const input = { playerName: 'Ada', challenge: 'Defend jollof.', answer: 'Jollof is overrated because it is always smoky.', livesLeft: 2 };
+
+  it('passes or fails them, with the line said about it', async () => {
+    process.env.GEMINI_API_KEY = 'g-test';
+    stubFetch(() => geminiReply('{"pass": true, "line": "Smoky is a strong word. Fine, you survive."}'));
+
+    expect(await judgeAnswer('classic_party', input)).toEqual({ pass: true, line: 'Smoky is a strong word. Fine, you survive.' });
+  });
+
+  it('reads a failure as a failure', async () => {
+    process.env.GEMINI_API_KEY = 'g-test';
+    stubFetch(() => geminiReply('{"pass": false, "line": "That was not a defence, that was a shrug."}'));
+
+    expect((await judgeAnswer('classic_party', input))?.pass).toBe(false);
+  });
+
+  it('copes with the model wrapping its JSON in a fence and a sentence', async () => {
+    process.env.GEMINI_API_KEY = 'g-test';
+    stubFetch(() => geminiReply(['Sure!', '```json', '{"pass": true, "line": "Fine."}', '```'].join(String.fromCharCode(10))));
+
+    expect(await judgeAnswer('classic_party', input)).toEqual({ pass: true, line: 'Fine.' });
+  });
+
+  it('returns nothing when the reply is not a ruling, so the room’s vote decides instead', async () => {
+    process.env.GEMINI_API_KEY = 'g-test';
+    for (const reply of ['I think they did well!', '{"pass": "yes", "line": "x"}', '{"pass": true}', '{"pass": true, "line": ""}', '{not json}']) {
+      stubFetch(() => geminiReply(reply));
+      expect(await judgeAnswer('classic_party', input)).toBeNull();
+    }
+  });
+
+  it('returns nothing with no key, or when the model is down', async () => {
+    stubFetch(() => geminiReply('{"pass": true, "line": "x"}'));
+    expect(await judgeAnswer('classic_party', input)).toBeNull();
+
+    process.env.GEMINI_API_KEY = 'g-test';
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    stubFetch(() => ({ ok: false, status: 500, json: {} }));
+    expect(await judgeAnswer('classic_party', input)).toBeNull();
+  });
+
+  it('shows the model what was actually said, and the challenge it was said to', async () => {
+    process.env.GEMINI_API_KEY = 'g-test';
+    const calls = stubFetch(() => geminiReply('{"pass": true, "line": "x"}'));
+    await judgeAnswer('classic_party', input);
+
+    const task = JSON.parse(calls[0].init.body).contents[0].parts[0].text;
+    expect(task).toContain('Defend jollof.');
+    expect(task).toContain('always smoky');
+    expect(task).toContain('Ada');
+    expect(task).toContain('2 lives');
+  });
+
+  it('rules steadily rather than jokingly', async () => {
+    process.env.GEMINI_API_KEY = 'g-test';
+    const calls = stubFetch(() => geminiReply('{"pass": true, "line": "x"}'));
+    await judgeAnswer('classic_party', input);
+    expect(JSON.parse(calls[0].init.body).generationConfig.temperature).toBeLessThan(0.8);
+  });
+
+  it('tells the model not to fail a bad transcription, and warns on the last life', async () => {
+    process.env.GEMINI_API_KEY = 'g-test';
+    const calls = stubFetch(() => geminiReply('{"pass": true, "line": "x"}'));
+    await judgeAnswer('classic_party', { ...input, livesLeft: 1 });
+    const task = JSON.parse(calls[0].init.body).contents[0].parts[0].text;
+    expect(task).toMatch(/never fail someone over garbled/i);
+    expect(task).toContain('last life');
+  });
+
+  it('carries the host’s leaning', async () => {
+    process.env.GEMINI_API_KEY = 'g-test';
+    const calls = stubFetch(() => geminiReply('{"pass": true, "line": "x"}'));
+    await judgeAnswer('classic_party', { ...input, leaning: 'hard' });
+    expect(JSON.parse(calls[0].init.body).contents[0].parts[0].text).toContain('have it in for this player');
+  });
+});
+
+describe('a challenge in the room’s own style', () => {
+  it('tells the model what kind of thing to ask', async () => {
+    process.env.GEMINI_API_KEY = 'g-test';
+    const calls = stubFetch(() => geminiReply(['Ada, court is in session.', 'Ada, your friend’s ex texts you. Rule on it.'].join(String.fromCharCode(10))));
+    const style = CHALLENGE_STYLES.bros_hangout.find((s) => s.id === 'bro_code')!;
+
+    const result = await generateChallenge('bros_hangout', 'truth', 'Ada', {}, style, ['Ben']);
+
+    expect(JSON.parse(calls[0].init.body).contents[0].parts[0].text).toContain('bro-code dilemma');
+    expect(result.challenge).toContain('ex texts you');
+  });
+
+  it('falls back to that style’s own line, not a generic one, when the model is down', async () => {
+    const style = CHALLENGE_STYLES.anime_squad.find((s) => s.id === 'tier_list')!;
+
+    const result = await generateChallenge('anime_squad', 'dare', 'Ada', {}, style, ['Ben']);
+
+    expect(style.fallbacks.map((f) => f.replace('{name}', 'Ada'))).toContain(result.challenge);
   });
 });

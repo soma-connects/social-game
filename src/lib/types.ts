@@ -357,6 +357,22 @@ export type AiMasterState = {
    * by a room that never voted — and all three were shown as SURVIVED.
    */
   outcome?: 'survived' | 'bombed' | 'dodged' | 'skipped';
+  /** The kind of challenge, from the room's own menu (see challengeStyles.ts). */
+  styleId?: string;
+  styleLabel?: string;
+  /**
+   * Whether the AI Master has made up its mind about the answer.
+   *
+   * Only that it has: the ruling itself stays private until the reveal, so the
+   * room's votes are not a reaction to a verdict already known.
+   */
+  judged?: boolean;
+  /** Who ruled: the AI Master, or the room's votes when the AI Master could not. */
+  verdictBy?: 'ai' | 'room';
+  /** How far the room's votes moved the target's points, up or down. */
+  voteSwing?: number;
+  /** Silent rounds in a row, by player. The second costs a life. */
+  dodgeStreak?: Record<string, number>;
   /** The host's last few lines, so the next ones are not the same joke in a new coat. */
   hostHistory?: string[];
   /**

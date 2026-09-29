@@ -143,6 +143,10 @@ export default function StarfieldCanvas() {
     };
 
     const renderOnce = (t = 0) => {
+      // A window with no size (a hidden tab, a 0x0 frame) has nothing to paint,
+      // and drawImage throws on a 0x0 source - which surfaced as an uncaught
+      // error on every page load.
+      if (canvas.width === 0 || canvas.height === 0) return;
       ctx.clearRect(0, 0, width(), height());
       if (backdropCtx) {
         ctx.drawImage(backdrop, 0, 0, width(), height());

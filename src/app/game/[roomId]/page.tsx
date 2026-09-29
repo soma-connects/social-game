@@ -38,7 +38,6 @@ import AiGameMasterBanner from '@/components/AiGameMasterBanner';
 import GeminiAiMasterStage from '@/components/GeminiAiMasterStage';
 import AiMasterGame from '@/components/AiMasterGame';
 import TruthOrDareGame from '@/components/TruthOrDareGame';
-import SocialVoicePanel from '@/components/SocialVoicePanel';
 import SpectatorView from '@/components/SpectatorView';
 import RoastIntermission from '@/components/RoastIntermission';
 import BattleScoreboard from '@/components/BattleScoreboard';
@@ -573,7 +572,6 @@ export default function GameRoomPage() {
                   label="is in the Voice Arena"
                 />
               )}
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
@@ -594,7 +592,6 @@ export default function GameRoomPage() {
                   label="is flying in PitchBird 🐦"
                 />
               )}
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
@@ -628,7 +625,6 @@ export default function GameRoomPage() {
                   label="is on the karaoke mic 🎵"
                 />
               )}
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
@@ -649,7 +645,6 @@ export default function GameRoomPage() {
                   label="is spelling in the Spelling Bee 🐝"
                 />
               )}
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
             </div>
           )}
@@ -663,7 +658,6 @@ export default function GameRoomPage() {
                 isMyTurn={isMyTurn}
                 roomId={roomId}
               />
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
@@ -677,7 +671,6 @@ export default function GameRoomPage() {
                 isMyTurn={isMyTurn}
                 roomId={roomId}
               />
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
             </div>
           )}
 
@@ -690,7 +683,6 @@ export default function GameRoomPage() {
                 isMyTurn={isMyTurn}
                 roomId={roomId}
               />
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
             </div>
           )}
 
@@ -703,7 +695,6 @@ export default function GameRoomPage() {
                 isMyTurn={isMyTurn}
                 roomId={roomId}
               />
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
             </div>
           )}
 
@@ -723,7 +714,6 @@ export default function GameRoomPage() {
                   label="is answering Trivia in Trivia Showdown 🧠"
                 />
               )}
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
             </div>
           )}
@@ -744,7 +734,6 @@ export default function GameRoomPage() {
                   label="is defending the station from ASTEROIDS ☄️"
                 />
               )}
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
               <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
             </div>
           )}

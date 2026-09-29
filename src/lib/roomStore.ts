@@ -5,7 +5,6 @@ import {
   MapTheme,
   MiniGameId,
   RoomState,
-  SocialReactionId,
   TeamId,
   TruthOrDareCategoryId,
   TruthOrDareIdea,
@@ -721,32 +720,6 @@ class RoomStoreManager {
     } catch {
       /* the heartbeat timeout is the fallback */
     }
-  }
-
-  public addSocialReaction(
-    roomId: string,
-    reaction: SocialReactionId,
-    voterId: string,
-    voterName: string,
-    targetPlayerId: string
-  ) {
-    return this.post(roomId, {
-      action: 'add_social_reaction',
-      reaction,
-      voterId,
-      voterName,
-      targetPlayerId,
-    });
-  }
-
-  public addJudgeVote(
-    roomId: string,
-    vote: 'pass' | 'fail',
-    voterId: string,
-    voterName: string,
-    targetPlayerId: string
-  ) {
-    return this.post(roomId, { action: 'add_judge_vote', vote, voterId, voterName, targetPlayerId });
   }
 
   /**

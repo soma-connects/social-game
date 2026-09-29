@@ -7,7 +7,7 @@
 // hype up the performer's attempt over live audio. Spectators can blast party
 // SFX from the interactive soundboard and send floating reaction badges.
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Clock,
   Flame,
@@ -21,9 +21,8 @@ import {
   Zap,
   Mic,
 } from 'lucide-react';
-import { Player, RoomState, SocialReactionId } from '@/lib/types';
+import { Player, RoomState } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
-import { roomStore } from '@/lib/roomStore';
 import { HEAT_TIERS, MINIGAME_FAIL_THRESHOLD, STARTING_LIVES, heatTier } from '@/lib/gameRules';
 import { socialArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
@@ -52,25 +51,6 @@ const SOUNDBOARD = [
   { id: 'whaala', name: 'Whaala Buzzer', icon: '🚨', action: () => audioSFX.playWhaalaFailure() },
 ];
 
-const REACTION_EMOJI: Record<SocialReactionId, string> = {
-  laugh: '😂',
-  fire: '🔥',
-  almost: '👏',
-  drama: '🎭',
-};
-
-const REACTION_BUTTONS: {
-  id: SocialReactionId;
-  label: string;
-  badge: string;
-  icon: string;
-}[] = [
-  { id: 'laugh', label: 'Try Again Boss', badge: '🤣 Flawless Comedy', icon: '😂' },
-  { id: 'fire', label: 'Clean!', badge: '🔥 Fire Delivery', icon: '🔥' },
-  { id: 'almost', label: 'Almost There', badge: '✨ Pure Vibe', icon: '👏' },
-  { id: 'drama', label: 'Oscar Performance', badge: '🎭 Nollywood Legend', icon: '🎭' },
-];
-
 export default function RoastIntermission({
   room,
   activePlayer,
@@ -79,16 +59,10 @@ export default function RoastIntermission({
   onFinishRoast,
 }: RoastIntermissionProps) {
   const [timeLeft, setTimeLeft] = useState<number>(ROAST_SECONDS);
-  const [busyReaction, setBusyReaction] = useState<string | null>(null);
-  const [floatingEmojis, setFloatingEmojis] = useState<{ id: number; emoji: string; x: number }[]>([]);
-  /** Reaction ids already animated, so polling does not replay them each tick. */
-  const seenReactionIds = useRef<Set<string>>(new Set());
 
   const isPerformer = activePlayer.id === myPlayer.id;
   const isHost = myPlayer.isHost;
   const turnResult = room.turnResult;
-  const socialRound = room.socialRound;
-  const reactions = socialRound?.reactions ?? [];
 
   // Keep the callback in a ref so the countdown effect has no changing
   // dependency — otherwise a re-render mid-roast restarts the countdown.
@@ -143,57 +117,10 @@ export default function RoastIntermission({
     action();
   };
 
-  const spawnEmoji = useCallback((emoji: string) => {
-    const id = Date.now() + Math.random();
-    setFloatingEmojis((prev) => [...prev, { id, emoji, x: Math.random() * 80 + 10 }]);
-    window.setTimeout(() => {
-      setFloatingEmojis((prev) => prev.filter((item) => item.id !== id));
-    }, 2000);
-  }, []);
-
-  // Float an emoji for reactions arriving from *other* players too. Without
-  // this the laugh meter only animates for whoever tapped, so nobody sees the
-  // room react — which is the whole point of the meter.
-  useEffect(() => {
-    for (const reaction of reactions) {
-      if (seenReactionIds.current.has(reaction.id)) continue;
-      seenReactionIds.current.add(reaction.id);
-      // Skip our own — those already floated optimistically on tap.
-      if (reaction.voterId === myPlayer.id) continue;
-      spawnEmoji(REACTION_EMOJI[reaction.reaction]);
-    }
-  }, [reactions, myPlayer.id, spawnEmoji]);
-
-  const handleSendReaction = async (reactionId: SocialReactionId, emoji: string) => {
-    if (isPerformer || busyReaction) return;
-    setBusyReaction(reactionId);
-
-    spawnEmoji(emoji); // optimistic, so the tap feels instant
-    await roomStore.addSocialReaction(
-      room.roomId,
-      reactionId,
-      myPlayer.id,
-      myPlayer.name,
-      activePlayer.id
-    );
-    setBusyReaction(null);
-  };
-
   const timerPct = Math.round((timeLeft / ROAST_SECONDS) * 100);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6 relative overflow-hidden">
-      {/* Floating Emojis Overlay */}
-      {floatingEmojis.map(({ id, emoji, x }) => (
-        <div
-          key={id}
-          className="absolute z-50 text-4xl animate-floatUp pointer-events-none drop-shadow-lg"
-          style={{ left: `${x}%`, bottom: '18%' }}
-        >
-          {emoji}
-        </div>
-      ))}
-
       {/* Top Banner & Timer */}
       <div className="glass-card rounded-3xl p-6 border border-partyYellow/50 text-center relative overflow-hidden backdrop-blur-xl bg-slate-900/85 space-y-5 shadow-2xl">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -271,17 +198,11 @@ export default function RoastIntermission({
         })()}
 
         {/* Turn Performance & Badges Card */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-left pt-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left pt-2">
           <div className="glass-pill rounded-2xl p-4 border border-partyYellow/30 space-y-1">
             <span className="text-[10px] font-black text-partyYellow uppercase">Skill Points</span>
             <p className="text-2xl font-black text-white">{turnResult?.pointsEarned ?? 0} PTS</p>
             <p className="text-[11px] text-gray-400">Earned from mini-game performance</p>
-          </div>
-
-          <div className="glass-pill rounded-2xl p-4 border border-partyCyan/30 space-y-1">
-            <span className="text-[10px] font-black text-partyCyan uppercase">Social Vibe Bonus</span>
-            <p className="text-2xl font-black text-partyCyan">+{activePlayer.vibeScore ?? 0} VIBES</p>
-            <p className="text-[11px] text-gray-400">From crowd reactions & votes</p>
           </div>
 
           <div className="glass-pill rounded-2xl p-4 border border-purple-400/30 space-y-1">
@@ -329,32 +250,6 @@ export default function RoastIntermission({
           </div>
         </div>
 
-        {/* Quick Social Reaction Buttons */}
-        {!isPerformer && (
-          <div className="space-y-2 pt-2 text-left">
-            <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">
-              🤣 REACT TO THIS ROUND:
-            </span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {REACTION_BUTTONS.map((btn) => (
-                <button
-                  key={btn.id}
-                  onClick={() => handleSendReaction(btn.id, btn.icon)}
-                  className="glass-pill hover:bg-partyYellow/20 active:scale-95 text-white font-bold text-xs py-3 px-3 rounded-2xl border border-partyYellow/40 flex items-center justify-between gap-2 transition-all shadow-lg"
-                >
-                  <span className="flex items-center gap-2">
-                    <GameIcon src={socialArt(btn.id)} emoji={btn.icon} className="w-6 h-6 text-lg mx-auto" />
-                    <span>{btn.label}</span>
-                  </span>
-                  <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded-full font-mono text-partyYellow font-black">
-                    +{reactions.filter((r) => r.reaction === btn.id).length}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Proceed / Skip Control — the performer's call, so only they see it. */}
         <div className="pt-3">
           {isPerformer ? (
@@ -367,7 +262,7 @@ export default function RoastIntermission({
             </button>
           ) : (
             <p className="text-center text-xs font-bold text-gray-400 py-4">
-              Keep reacting — {activePlayer.name} moves the room on when the clock runs out.
+              {activePlayer.name} moves the room on when the clock runs out.
             </p>
           )}
         </div>

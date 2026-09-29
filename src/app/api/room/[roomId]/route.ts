@@ -50,7 +50,6 @@ import {
   heatTier,
   slipstreamLabel,
   slipstreamSteps,
-  forgiveMicFault,
   loseLife,
   respawnToStart,
   TileOutcome,
@@ -86,7 +85,7 @@ import {
   type RoomSecrets,
 } from '@/lib/server/roomServer';
 import { acceptedAnswers, pickTriviaQuestion, rememberTrivia } from '@/lib/triviaBank';
-import { generateTriviaFromAi } from '@/lib/server/aiHost';
+import { gradeSpokenAnswer } from '@/lib/triviaGrade';
 import {
   PERFORMER_PHASES,
   clearPhaseDeadline,
@@ -1243,55 +1242,6 @@ function trackDeficits(room: RoomState): void {
     const deficit = Math.max(0, leader - boardProgress(player.boardPosition));
     player.worstDeficit = Math.max(player.worstDeficit ?? 0, deficit);
   }
-}
-
-/**
- * Charges a life for bombing the task the room just watched you attempt.
- *
- * Team Battle is scored on the crew total rather than survival, so it opts out
- * — taking lives there would punish a side twice for the same round.
- */
-function chargeFailedChallenge(
-  room: RoomState,
-  player: Player,
-  game: MiniGameId,
-  micFault = false
-): boolean {
-  if (room.roomType === 'team_battle') return false;
-
-  // A microphone that never opened is not a failed attempt. Forgiven a fixed
-  // number of times per match, because the claim comes from the client and
-  // cannot be checked here — see MIC_FAULT_GRACE.
-  if (micFault && forgiveMicFault(player)) {
-    pushEvent(
-      room,
-      `🎙️ ${player.name}'s mic did not open — the round is not counted against them`,
-      'system'
-    );
-    return true;
-  }
-
-  const from = player.boardPosition;
-  const { livesLeft, empty } = loseLife(player);
-  if (empty) respawnToStart(player);
-
-  if (!empty) {
-    pushEvent(
-      room,
-      `💔 ${player.name} bombed ${MINIGAME_LABELS[game]} — ${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left`,
-      'debuff'
-    );
-    return false;
-  }
-
-  pushEvent(room, `☠️ ${player.name} ran out of lives — back to the launchpad with a fresh bar!`, 'debuff');
-  pushBoardEvent(room, 'rewind', player, {
-    banner: '☠️ WIPED OUT!',
-    message: `${player.name} lost their last life and restarts from the launchpad.`,
-    fromNode: from,
-    toNode: 0,
-  });
-  return false;
 }
 
 /**
@@ -2720,19 +2670,17 @@ async function applyAction(
      */
     case 'trivia_generate': {
       if (!room.triviaState) {
-        const fromAi = await generateTriviaFromAi(roomVibeOf(room));
+        // Always from the bank. This used to ask Gemini first, and the round sat on
+        // "loading" for however long that took (five to ten seconds) before the
+        // first question — for a mini-game that is one turn in a longer match. The
+        // AI is the host of the AI Master mode; the board's trivia is just a quiz.
+        const banked = pickTriviaQuestion(room.recentTrivia);
+        const question = banked.question;
+        const answer = banked.answer;
+        const accepted = acceptedAnswers(banked);
+        const funFact = banked.funFact ?? '';
 
-        const banked = fromAi ? null : pickTriviaQuestion(room.recentTrivia);
-        const question = fromAi?.question ?? banked!.question;
-        const answer = fromAi?.answer ?? banked!.answer;
-        const accepted = fromAi
-          ? [answer, ...fromAi.accept].map((a) => a.toLowerCase().trim()).filter(Boolean)
-          : acceptedAnswers(banked!);
-        const funFact = fromAi?.funFact ?? banked!.funFact ?? '';
-
-        // Only what the room may see is remembered as asked. A Gemini question
-        // has no bank id and cannot repeat anyway.
-        if (banked) room.recentTrivia = rememberTrivia(room.recentTrivia, banked.id);
+        room.recentTrivia = rememberTrivia(room.recentTrivia, banked.id);
 
         // Only the question goes out. The answer stays server-side and grading
         // happens in `trivia_answer`, so it is never on the wire before the
@@ -2771,24 +2719,9 @@ async function applyAction(
       const accepted = secrets.triviaAccepted?.length ? secrets.triviaAccepted : [target];
       const spoken = playerText(body.answerText, 120);
 
-      // Speech recognition hands back a whole sentence ("uh, I think it's
-      // Lagos"), so the answer counts when it appears as a whole word inside
-      // what was said. Testing containment the other way round as well — which
-      // the client used to do — made "a" a correct answer to anything with an A.
-      const normalize = (text: string) =>
-        text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-      const cleanSpoken = normalize(spoken);
-      // Any accepted form counts. Grading compared against a single string, so
-      // a question whose answer is "1960" marked everyone wrong whose phone
-      // transcribed "nineteen sixty" — the same answer, said out loud.
-      const isCorrect =
-        cleanSpoken.length > 0 &&
-        accepted.some((candidate) => {
-          const cleanTarget = normalize(candidate);
-          if (!cleanTarget) return false;
-          if (cleanSpoken === cleanTarget) return true;
-          return new RegExp(`\\b${cleanTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(cleanSpoken);
-        });
+      // Speech recognition hands back a whole sentence ("uh, I think it's Lagos")
+      // and, with an accent, a near miss ("Legos"). See triviaGrade.ts.
+      const isCorrect = gradeSpokenAnswer(spoken, accepted).correct;
 
       state.phase = 'reveal';
       state.revealedAt = Date.now();
@@ -2919,9 +2852,11 @@ async function applyAction(
       // how often that is honoured lives in forgiveMicFault. The recap needs
       // to know a life was waived, or it shows a bombed card for a round the
       // player never got to attempt.
-      if (performance <= MINIGAME_FAIL_THRESHOLD) {
-        const waived = chargeFailedChallenge(room, active, game, body.micFault === true);
-        if (waived && room.turnResult) room.turnResult.micFaultForgiven = true;
+      // A shaky round costs nothing but the steps it would have earned. Lives are
+      // for attacks and mines. The flag is kept only so the recap can say the mic
+      // never opened, instead of showing a bad round for one that was never played.
+      if (performance <= MINIGAME_FAIL_THRESHOLD && body.micFault === true && room.turnResult) {
+        room.turnResult.micFaultForgiven = true;
       }
 
       room.phase = 'roast_intermission';
@@ -3035,9 +2970,11 @@ async function applyAction(
       // how often that is honoured lives in forgiveMicFault. The recap needs
       // to know a life was waived, or it shows a bombed card for a round the
       // player never got to attempt.
-      if (performance <= MINIGAME_FAIL_THRESHOLD) {
-        const waived = chargeFailedChallenge(room, active, game, body.micFault === true);
-        if (waived && room.turnResult) room.turnResult.micFaultForgiven = true;
+      // A shaky round costs nothing but the steps it would have earned. Lives are
+      // for attacks and mines. The flag is kept only so the recap can say the mic
+      // never opened, instead of showing a bad round for one that was never played.
+      if (performance <= MINIGAME_FAIL_THRESHOLD && body.micFault === true && room.turnResult) {
+        room.turnResult.micFaultForgiven = true;
       }
 
       // Open the roast so the room can laugh at what just happened.

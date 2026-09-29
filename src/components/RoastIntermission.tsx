@@ -296,39 +296,19 @@ export default function RoastIntermission({
           </div>
         </div>
 
-        {/* Bombing the task costs a life, so say so here rather than leaving it
-            to a heart quietly going dark in the sidebar. */}
+        {/* The mic never opening is worth saying: it explains a round of nothing. */}
         {turnResult?.micFaultForgiven && (
           <div className="rounded-2xl border border-partyCyan/40 bg-partyCyan/10 p-4 text-left">
             <p className="flex items-center gap-2 text-sm font-black text-partyCyan">
-              <Mic className="w-4 h-4 shrink-0" /> MIC DIDN&apos;T OPEN — NO LIFE LOST
+              <Mic className="w-4 h-4 shrink-0" /> MIC DIDN&apos;T OPEN
             </p>
             <p className="text-[11px] text-partyCyan/70 mt-0.5">
               {isPerformer
                 ? 'Allow the microphone from the padlock in the address bar, then the next round counts normally.'
-                : `${activePlayer.name} never got a turn — the round was not counted against them.`}
+                : `${activePlayer.name} never got a turn — that round says nothing about how they play.`}
             </p>
           </div>
         )}
-
-        {(room.roomType ?? 'board_game') !== 'team_battle' &&
-          turnResult !== null &&
-          turnResult !== undefined &&
-          !turnResult.micFaultForgiven &&
-          turnResult.performance <= MINIGAME_FAIL_THRESHOLD && (
-            <div className="rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-left">
-              <p className="text-sm font-black text-red-300">
-                {(activePlayer.lives ?? STARTING_LIVES) === STARTING_LIVES && activePlayer.boardPosition === 0
-                  ? '☠️ WIPED OUT — back to the launchpad with a fresh bar'
-                  : `💔 BOMBED IT — ${activePlayer.lives ?? STARTING_LIVES} ${
-                      (activePlayer.lives ?? STARTING_LIVES) === 1 ? 'life' : 'lives'
-                    } left`}
-              </p>
-              <p className="text-[11px] text-red-200/70 mt-0.5">
-                Lose them all and you restart from the beginning — the points stay, the road does not.
-              </p>
-            </div>
-          )}
 
         {/* Interactive Soundboard Pad */}
         <div className="space-y-2 pt-2 text-left">

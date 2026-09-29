@@ -277,17 +277,18 @@ export function getPhaseChrome(phase: GamePhase, roomType?: RoomType): PhaseChro
 
 // ─── Lives ──────────────────────────────────────────────────────────────────
 //
-// Points are what you win on; lives are what you survive on. They deliberately
-// do not interact: a player can be top of the table and still one bad round
-// from the launchpad, which is what keeps a runaway leader watchable.
+// Points are what you win on; lives are what you survive on. On the board a
+// life is only ever lost to a buried mine — a bad mini-game round costs the
+// steps it would have earned and nothing else. (The AI Master is different: its
+// whole match is played for lives.)
 
 export const STARTING_LIVES = 3;
 
 /**
  * Performance at or below which a round counts as bombed.
  *
- * Lines up with the "Shaky round" tier in describePerformance, so the words the
- * room reads and the life they just lost agree with each other.
+ * Lines up with the "Shaky round" tier in describePerformance. It feeds the
+ * match stats and the awards; it no longer costs a life.
  */
 export const MINIGAME_FAIL_THRESHOLD = 0.2;
 

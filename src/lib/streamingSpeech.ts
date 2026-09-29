@@ -14,6 +14,7 @@
 import { roomStore } from './roomStore';
 import { appCheckHeaders } from './firebase/client';
 import { micStream } from './micStream';
+import { AudioBacklog } from './audioBacklog';
 
 export type StreamingProvider = 'deepgram' | 'gemini';
 
@@ -55,6 +56,11 @@ const TARGET_SAMPLE_RATE = 16000;
 /** 100 ms of audio per message, which both providers recommend. */
 const CHUNK_SAMPLES = 1600;
 const CONNECT_TIMEOUT_MS = 5000;
+/**
+ * Audio held while a provider connects: six seconds, comfortably longer than the
+ * two to three and a half the handshake takes, and it covers a reconnect too.
+ */
+const MAX_BACKLOG_CHUNKS = 60;
 /** Reconnects allowed per session before handing back to the browser recogniser. */
 const MAX_FAILOVERS = 3;
 /**
@@ -319,6 +325,7 @@ export async function startStreamingRecognition(opts: StreamingOptions): Promise
   let node: AudioWorkletNode | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
   let link: ProviderLink | null = null;
+  const backlog = new AudioBacklog<ArrayBuffer>(MAX_BACKLOG_CHUNKS);
   let current: StreamingProvider | null = null;
   let stopped = false;
   let failovers = 0;
@@ -369,7 +376,12 @@ export async function startStreamingRecognition(opts: StreamingOptions): Promise
     workletUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }));
     await ctx.audioWorklet.addModule(workletUrl);
     node = new AudioWorkletNode(ctx, 'pcm-tap');
-    node.port.onmessage = (event: MessageEvent<ArrayBuffer>) => link?.send(event.data);
+    // Until a provider is connected the audio is held, not dropped: the player
+    // starts talking the moment they tap, and the handshake takes seconds.
+    node.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+      if (link) link.send(event.data);
+      else backlog.hold(event.data);
+    };
     attachSource(micStream.getStream() ?? stream);
   } catch {
     teardown();
@@ -407,6 +419,8 @@ export async function startStreamingRecognition(opts: StreamingOptions): Promise
         return false;
       }
       link = next;
+      // Everything said while connecting goes first, in order.
+      for (const chunk of backlog.drain()) link.send(chunk);
       if (current !== provider) {
         if (current !== null) opts.onProviderChange?.(provider);
         current = provider;

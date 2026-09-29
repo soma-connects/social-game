@@ -32,8 +32,26 @@ function formatTime(seconds: number): string {
 
 /** Long enough to read the question and decide whether you know it. */
 const READING_SECONDS = 18;
-/** The window after buzzing. Short on purpose — buzzing is a commitment. */
-const ANSWER_SECONDS = 8;
+/**
+ * The window after buzzing. Still short — buzzing is a commitment — but not so
+ * short that the connection to the speech service eats it: that takes two to
+ * three seconds, and eight left a player about five to answer in.
+ */
+const ANSWER_SECONDS = 12;
+/** Extra time when nothing at all has been heard, so a silent mic gets one more go. */
+const RETRY_SECONDS = 8;
+/**
+ * How long the transcript has to stand still before it is taken as the answer.
+ *
+ * Grading the first segment the recogniser calls final marked half-said answers
+ * wrong, and a fixed pause after speech ends made every answer feel slow. This
+ * waits for the words to stop changing instead.
+ */
+const SETTLE_MS = 1400;
+/** After a final segment, when the recogniser itself has decided the speaker is done. */
+const SETTLE_AFTER_FINAL_MS = 600;
+/** Listening with nothing heard for this long earns a hint. */
+const QUIET_HINT_MS = 4000;
 
 export default function TriviaShowdownGame({
   room,
@@ -54,6 +72,10 @@ export default function TriviaShowdownGame({
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sessionRef = useRef<ListenSession | null>(null);
   const isEvaluatedRef = useRef(false);
+  const settleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retriedRef = useRef(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [quiet, setQuiet] = useState(false);
 
   // Initialize Speech Capabilities
   useEffect(() => {
@@ -76,6 +98,10 @@ export default function TriviaShowdownGame({
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
+    }
+    if (settleRef.current) {
+      clearTimeout(settleRef.current);
+      settleRef.current = null;
     }
     sessionRef.current?.stop();
     sessionRef.current = null;
@@ -152,13 +178,35 @@ export default function TriviaShowdownGame({
       setTimeLeft(next);
       // Fired here rather than inside a setState updater: updaters have to stay
       // pure, and React is free to run them more than once.
-      if (next <= 0) void evaluateRef.current(answerRef.current);
+      if (next <= 0) {
+        // Buzzed in, and not a word heard, from a mic that may simply not have
+        // been picking anything up: one more go before it counts as wrong. Not
+        // before the buzz — somebody who never buzzed simply did not know it.
+        if (status !== 'asking' && !answerRef.current.trim() && !retriedRef.current) {
+          retriedRef.current = true;
+          timeLeftRef.current = RETRY_SECONDS;
+          setTimeLeft(RETRY_SECONDS);
+          setNotice("We didn't catch that — say it again, or type it below.");
+          return;
+        }
+        void evaluateRef.current(answerRef.current);
+      }
     }, 1000);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [status]);
+
+  // A mic that is open and hearing nothing looks exactly like a working one.
+  useEffect(() => {
+    if (status !== 'listening' || transcript) {
+      setQuiet(false);
+      return;
+    }
+    const timer = setTimeout(() => setQuiet(true), QUIET_HINT_MS);
+    return () => clearTimeout(timer);
+  }, [status, transcript]);
 
   /**
    * Keep the room in the loop.
@@ -200,6 +248,10 @@ export default function TriviaShowdownGame({
     setStatus('buzzed');
     timeLeftRef.current = ANSWER_SECONDS;
     setTimeLeft(ANSWER_SECONDS);
+    // Buzzing opens the mic. Connecting takes seconds, so waiting for a second
+    // tap on "Speak" spent the short clock before anyone could be heard. The
+    // button stays for anyone whose mic needs another go.
+    void startListening();
     try {
       await roomStore.buzzTrivia(room.roomId, activePlayer.id);
     } catch {
@@ -210,12 +262,19 @@ export default function TriviaShowdownGame({
 
   // Listen via Mic
   const startListening = async () => {
-    if (status === 'listening') return;
+    if (sessionRef.current || isEvaluatedRef.current) return;
     setStatus('listening');
     setTranscript('');
+    setNotice(null);
     try {
       const accessError = await speechEngine.probeMicPermission();
-      if (accessError) return;
+      if (accessError) {
+        // Not stuck on "Listening" with nothing listening: say why, and leave the
+        // text box and the button available.
+        setStatus('buzzed');
+        setNotice(accessError.message);
+        return;
+      }
       beginListening();
     } catch (err) {
       console.error('Speech recognition error:', err);
@@ -237,8 +296,18 @@ export default function TriviaShowdownGame({
       targetWord: '',
       onResult: (res) => {
         setTranscript(res.transcript);
-        if (res.isFinal && res.transcript.trim()) {
-          void handleEvaluate(res.transcript);
+        // Any new words mean they are still talking; only words that stop
+        // changing are an answer.
+        if (settleRef.current) {
+          clearTimeout(settleRef.current);
+          settleRef.current = null;
+        }
+        const said = res.transcript.trim();
+        if (said) {
+          settleRef.current = setTimeout(
+            () => void evaluateRef.current(said),
+            res.isFinal ? SETTLE_AFTER_FINAL_MS : SETTLE_MS
+          );
         }
       },
       onError: (err) => {
@@ -264,7 +333,7 @@ export default function TriviaShowdownGame({
     return (
       <div className="glass-card rounded-3xl p-8 border border-purple-500/20 text-center space-y-4">
         <Brain className="w-12 h-12 text-purple-400 animate-pulse mx-auto" />
-        <h2 className="text-xl font-bold text-purple-200">AI Game Master is loading a Trivia Question...</h2>
+        <h2 className="text-xl font-bold text-purple-200">Loading a question...</h2>
       </div>
     );
   }
@@ -279,7 +348,7 @@ export default function TriviaShowdownGame({
           </div>
           <div>
             <h2 className="text-xl font-bold text-white tracking-wide">TRIVIA SHOWDOWN</h2>
-            <p className="text-xs text-purple-300">Answer the AI's question using your voice!</p>
+            <p className="text-xs text-purple-300">Buzz in, then say the answer out loud!</p>
           </div>
         </div>
 
@@ -336,6 +405,17 @@ export default function TriviaShowdownGame({
           {status === 'buzzed' && (
             <p className="text-center text-sm font-black text-amber-300 animate-pulse">
               You're in — answer now!
+            </p>
+          )}
+
+          {notice && (
+            <p className="text-center text-sm font-bold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-xl px-3 py-2">
+              {notice}
+            </p>
+          )}
+          {quiet && !notice && (
+            <p className="text-center text-xs font-bold text-amber-300/90">
+              Not hearing anything yet — check your mic is on, or type the answer below.
             </p>
           )}
 

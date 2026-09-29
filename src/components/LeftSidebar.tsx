@@ -167,9 +167,12 @@ export default function LeftSidebar({
 
                 <div className="flex flex-col items-end gap-1 shrink-0">
                   {isTurn && <Mic className="w-4 h-4 text-emerald-400 animate-pulse" />}
-                  <span className="text-[9px] font-mono text-gray-400 flex items-center gap-0.5">
-                    <MapPin className="w-2.5 h-2.5" /> {boardProgress(player.boardPosition)}/{BOARD_LENGTH}
-                  </span>
+                  {/* Where you are on the road. Only the board game has one. */}
+                  {roomType === 'board_game' && inMatch && (
+                    <span className="text-[9px] font-mono text-gray-400 flex items-center gap-0.5">
+                      <MapPin className="w-2.5 h-2.5" /> {boardProgress(player.boardPosition)}/{BOARD_LENGTH}
+                    </span>
+                  )}
 
                   {/* Presence — a dropped player is why a round would otherwise hang */}
                   {player.connected === false && (
@@ -206,10 +209,6 @@ export default function LeftSidebar({
             );
           })}
         </div>
-      </div>
-
-      <div className="pt-4 border-t border-white/10 text-center">
-        <p className="text-[10px] text-gray-400 font-mono">MARIO PARTY + JACKBOX VIBES</p>
       </div>
 
       {safetyTarget && (

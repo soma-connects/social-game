@@ -15,6 +15,7 @@ import {
   alternateByTeam,
   boardProgress,
   forgiveMicFault,
+  getPhaseChrome,
   isStrangerRoom,
   loseLife,
   personalDaresAllowed,
@@ -354,5 +355,40 @@ describe('public rooms', () => {
 
   it('has something to tell the person who tried anyway', () => {
     expect(TRUTH_OR_DARE_BLOCKED_MESSAGE).toMatch(/public rooms/i);
+  });
+});
+
+
+describe('which chrome belongs to which mode', () => {
+  it('gives the roadmap board its powerups and map themes', () => {
+    expect(getPhaseChrome('roadmap_turn', 'board_game')).toEqual({ themes: true, inventory: true });
+    expect(getPhaseChrome('qualifying_voice', 'board_game')).toEqual({ themes: true, inventory: true });
+    expect(getPhaseChrome('powerup_shop', 'board_game')).toEqual({ themes: true, inventory: true });
+  });
+
+  it('treats a room with no type yet as the board game', () => {
+    expect(getPhaseChrome('roadmap_turn')).toEqual({ themes: true, inventory: true });
+  });
+
+  it('keeps every other mode free of the board’s furniture', () => {
+    // A Rocket Nitro in the AI Master's sidebar is an item that can never be used.
+    for (const [phase, type] of [
+      ['ai_master_round', 'ai_master'],
+      ['truth_or_dare_round', 'truth_or_dare'],
+      ['chess_match', 'chess'],
+      ['ludo_match', 'ludo'],
+      ['qualifying_voice', 'team_battle'],
+    ] as const) {
+      expect(getPhaseChrome(phase, type)).toEqual({ themes: false, inventory: false });
+    }
+  });
+
+  it('offers nothing in the lobby, whatever the mode', () => {
+    expect(getPhaseChrome('lobby', 'board_game')).toEqual({ themes: false, inventory: false });
+  });
+
+  it('still hides the board from the standalone boards when the room has no type', () => {
+    expect(getPhaseChrome('ludo_match')).toEqual({ themes: false, inventory: false });
+    expect(getPhaseChrome('chess_match')).toEqual({ themes: false, inventory: false });
   });
 });

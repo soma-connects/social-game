@@ -1,4 +1,7 @@
-import { BoardNode, GamePhase, MiniGameId, Player, PowerupType, SocialReactionId, TileNodeType } from './types';
+import { BoardNode, GamePhase, MiniGameId, Player, PowerupType, RoomState, SocialReactionId, TileNodeType } from './types';
+
+/** Which mode a room is running. */
+type RoomType = NonNullable<RoomState['roomType']>;
 
 /**
  * Shared between the client, the board renderer and the server.
@@ -261,10 +264,15 @@ export type PhaseChrome = {
  * The roster and the event feed are deliberately absent: those describe the
  * room rather than the game, so they belong on every screen.
  */
-export function getPhaseChrome(phase: GamePhase): PhaseChrome {
+export function getPhaseChrome(phase: GamePhase, roomType?: RoomType): PhaseChrome {
   if (phase === 'lobby') return { themes: false, inventory: false };
-  const standalone = STANDALONE_BOARDS.includes(phase);
-  return { themes: !standalone, inventory: !standalone };
+  // The roadmap is one mode's board, not the room's. The AI Master, Truth or
+  // Dare and Team Battle have no road to fly down, so a Rocket Nitro sitting in
+  // their sidebar is an item that can never be used — and a hint that the game
+  // is borrowing another one's furniture. Keyed on the mode, with the phase list
+  // kept as a second guard for a room that has no type yet.
+  const board = (roomType === undefined || roomType === 'board_game') && !STANDALONE_BOARDS.includes(phase);
+  return { themes: board, inventory: board };
 }
 
 // ─── Lives ──────────────────────────────────────────────────────────────────

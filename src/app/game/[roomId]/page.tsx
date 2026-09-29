@@ -342,7 +342,7 @@ export default function GameRoomPage() {
   const currentTheme: MapTheme = room.theme || 'forest';
   const isMyTurn = activePlayer?.id === myPlayer.id;
   /** Which of the roadmap's controls this phase actually has a use for. */
-  const chrome = getPhaseChrome(room.phase);
+  const chrome = getPhaseChrome(room.phase, room.roomType);
 
   const handleStartMatch = () => {
     audioSFX.playNollywoodBrass();
@@ -752,28 +752,24 @@ export default function GameRoomPage() {
           {room.phase === 'chess_match' && (
             <div className="space-y-6">
               <ChessGame room={room} myPlayer={myPlayer} roomId={roomId} />
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
             </div>
           )}
 
           {room.phase === 'ludo_match' && (
             <div className="space-y-6">
               <LudoGame room={room} myPlayer={myPlayer} roomId={roomId} />
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
             </div>
           )}
 
           {room.phase === 'ai_master_round' && (
             <div className="space-y-6">
               <AiMasterGame room={room} myPlayer={myPlayer} roomId={roomId} />
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
             </div>
           )}
 
           {room.phase === 'truth_or_dare_round' && (
             <div className="space-y-6">
               <TruthOrDareGame room={room} myPlayer={myPlayer} roomId={roomId} />
-              <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
             </div>
           )}
 

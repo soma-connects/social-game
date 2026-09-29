@@ -8,6 +8,7 @@ import { roomStore } from '@/lib/roomStore';
 import { SpeechDiagnostics, speechEngine } from '@/lib/speechService';
 import { isMobileAudioPlatform, micStream } from '@/lib/micStream';
 import { StreamingProvider, startStreamingRecognition } from '@/lib/streamingSpeech';
+import { matchAsteroidWord } from '@/lib/asteroidMatch';
 import { measurePixelText } from '@/lib/pixelFont';
 import { BakedSprite, ROCK_PALETTES, makeAsteroidSprite, makeHeartSprite } from '@/lib/pixelSprites';
 import {
@@ -315,13 +316,18 @@ export default function AsteroidDefenseGame({
     // the debounce on the word — rather than on "the last word changed", which
     // is what this used to do — means saying the same word twice in a row
     // works, and so does calling two targets in one breath.
+    //
+    // What was said is matched to the words on screen by how it sounds, not
+    // letter for letter: with an accent a recogniser writes "tunder" for THUNDER,
+    // and an exact match made those words impossible to hit.
     for (const word of spoken) {
-      if (now - (s.firedAt.get(word) ?? 0) < 1000) continue;
-      const target = s.asteroids
-        .filter((a) => !a.dead && !a.locked && a.word === word)
-        .sort((p, q) => q.y - p.y)[0];
+      const live = s.asteroids.filter((a) => !a.dead && !a.locked);
+      const matched = matchAsteroidWord(word, live.map((a) => a.word));
+      if (!matched) continue;
+      if (now - (s.firedAt.get(matched) ?? 0) < 1000) continue;
+      const target = live.filter((a) => a.word === matched).sort((p, q) => q.y - p.y)[0];
       if (!target) continue;
-      s.firedAt.set(word, now);
+      s.firedAt.set(matched, now);
       destroy(target);
     }
   };

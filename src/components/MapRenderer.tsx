@@ -1,115 +1,194 @@
 'use client';
 
-import React from 'react';
-import { Trophy } from 'lucide-react';
+import React, { useMemo } from 'react';
 import { MapTheme, Player } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
-import { BOARD_GRAPH, TOTAL_TILES, boardProgress, BOARD_LENGTH } from '@/lib/gameRules';
+// Shared with the server so the board shown matches the tile effects applied.
+import { BOARD_GRAPH, BOARD_LENGTH, FINISH_NODE, boardProgress } from '@/lib/gameRules';
+import { themeArt } from '@/lib/gameIcons';
+import GameIcon from './GameIcon';
 import TileNode from './TileNode';
 import PlayerToken from './PlayerToken';
+import BoardCamera from './board/BoardCamera';
+import BoardProps from './board/BoardProps';
+import BoardRoad from './board/BoardRoad';
+import StepTile from './board/StepTile';
+import SpaceBackdrop from './board/SpaceBackdrop';
+
+/**
+ * The board.
+ *
+ * Rendered two ways from the same graph:
+ *
+ *   'full' — the board you play on. A world several times the size of the
+ *            viewport, panned and zoomed, with the camera walking to whoever is
+ *            up. The old board was one square capped at 560px, so the entire
+ *            journey was squeezed into a picture that always fit on screen —
+ *            which is why it felt cramped however much detail went into it.
+ *   'peek' — the small overview shown beside a mini-game. Whole board, no
+ *            camera, no chrome: it answers "where is everyone" at a glance.
+ *
+ * Both keep the 0..100 coordinate space the graph has always used, so tiles,
+ * tokens and the road all position themselves as percentages and none of them
+ * had to learn about the camera.
+ */
 
 interface MapRendererProps {
   theme: MapTheme;
   players: Player[];
   activePlayerId: string;
-  totalTiles?: number;
+  variant?: 'full' | 'peek';
 }
 
-const generateRoadPath = () => {
-  const paths: string[] = [];
-  const visited = new Set<string>();
-  const traverse = (nodeId: number) => {
-    const node = BOARD_GRAPH[nodeId];
-    if (!node) return;
-    for (const nextId of node.next) {
-      const edge = `${nodeId}-${nextId}`;
-      if (visited.has(edge)) continue;
-      visited.add(edge);
-      const nextNode = BOARD_GRAPH[nextId];
-      if (nextNode) {
-        paths.push(`M ${node.x} ${node.y} L ${nextNode.x} ${nextNode.y}`);
-        traverse(nextId);
-      }
-    }
-  };
-  traverse(0);
-  return paths.join(' ');
-};
+/** World edge in CSS pixels at zoom 1 — several screens wide, by design. */
+const WORLD_SIZE = 1500;
 
-const ROAD_SVG_PATH = generateRoadPath();
+/** Tile diameters as a fraction of the world, so zoom scales them with the road. */
+const EVENT_TILE = 0.046;
+const STEP_TILE = 0.033;
 
-export default function MapRenderer({ theme, players, activePlayerId, totalTiles = TOTAL_TILES }: MapRendererProps) {
-  const themeConfig = THEMES[theme] || THEMES.forest;
-  const activePlayer = players.find((player) => player.id === activePlayerId);
+export default function MapRenderer({
+  theme,
+  players,
+  activePlayerId,
+  variant = 'full',
+}: MapRendererProps) {
+  const themeConfig = THEMES[theme] || THEMES.space;
+  const peek = variant === 'peek';
+  const worldSize = peek ? 460 : WORLD_SIZE;
+
+  const activePlayer = players.find((p) => p.id === activePlayerId);
+  // In steps walked, not node ids — ids are names, not distances.
   const activeProgress = activePlayer ? boardProgress(activePlayer.boardPosition) : 0;
+  const focusNode = activePlayer ? BOARD_GRAPH[activePlayer.boardPosition] : undefined;
+  // Only changes when the active player actually moves, so the camera is not
+  // re-aimed on every poll the room does.
+  const focus = useMemo(
+    () => (focusNode ? { x: focusNode.x, y: focusNode.y } : null),
+    [focusNode?.x, focusNode?.y]
+  );
 
-  return (
-    <section className="relative w-full overflow-hidden rounded-[28px] border border-white/15 bg-slate-950 shadow-2xl" aria-label="Roadmap board">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_20%,rgba(0,240,255,0.10),transparent_32%),radial-gradient(circle_at_18%_80%,rgba(255,209,102,0.08),transparent_30%)] pointer-events-none" />
+  const eventSize = worldSize * EVENT_TILE;
+  const stepSize = worldSize * STEP_TILE;
 
-      <header className="relative z-10 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
-        <div>
-          <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-200/75">Main game</p>
-          <h2 className="mt-1 text-lg font-black tracking-tight text-white sm:text-xl">{themeConfig.name} roadmap</h2>
-        </div>
-        <div className="flex items-center gap-2 text-right">
-          <div className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2">
-            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-gray-400">Board progress</p>
-            <p className="font-mono text-sm font-black tabular-nums text-partyYellow">{activeProgress} <span className="text-gray-500">/ {BOARD_LENGTH}</span></p>
+  // Tokens bunch up all game; without a fan-out they land on identical
+  // coordinates and read as one player.
+  const tokens = players.map((player) => {
+    const sharing = players.filter((p) => p.boardPosition === player.boardPosition);
+    const slot = sharing.findIndex((p) => p.id === player.id);
+    return {
+      player,
+      spreadX: sharing.length > 1 ? (slot - (sharing.length - 1) / 2) * 3.4 : 0,
+      spreadY: sharing.length > 1 ? (slot % 2 === 0 ? -1.4 : 1.4) : 0,
+    };
+  });
+
+  const world = (
+    <>
+      {/* Under the road on purpose: scenery frames the board, it never
+          competes with the thing you are trying to read. */}
+      <BoardProps quiet={peek} />
+      <BoardRoad width={peek ? 4.4 : 5.6} quiet={peek} />
+
+      {Object.values(BOARD_GRAPH).map((node) => {
+        const isStep = node.type === 'empty';
+        // On the overview the road steps are noise — the shape and the players
+        // are the whole point of it.
+        if (isStep && peek) return null;
+
+        return (
+          <div
+            key={node.id}
+            // Event tiles sit above plain spaces. Nodes render in id order and
+            // the steps are numbered after the tiles, so at equal depth every
+            // plain space painted over the coloured tile beside it — invisible
+            // while these were studs, obvious once they are full size.
+            className={`absolute -translate-x-1/2 -translate-y-1/2 ${isStep ? 'z-10' : 'z-20'}`}
+            style={{ left: `${node.x}%`, top: `${node.y}%` }}
+          >
+            {isStep ? (
+              <StepTile size={stepSize} />
+            ) : (
+              <TileNode
+                index={node.id}
+                nodeType={node.type}
+                theme={theme}
+                isFinish={node.id === FINISH_NODE}
+                size={peek ? worldSize * 0.062 : eventSize}
+                quiet={peek}
+              />
+            )}
           </div>
-          <div className="hidden rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 sm:block">
-            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-gray-400">Nodes</p>
-            <p className="font-mono text-sm font-black tabular-nums text-cyan-200">{totalTiles}</p>
+        );
+      })}
+
+      {tokens.map(({ player, spreadX, spreadY }) => (
+        <PlayerToken
+          key={player.id}
+          player={player}
+          isActive={player.id === activePlayerId}
+          spreadX={spreadX}
+          spreadY={spreadY}
+          size={peek ? 'xs' : 'sm'}
+        />
+      ))}
+    </>
+  );
+
+  if (peek) {
+    return (
+      <div className="relative w-full rounded-2xl border border-white/15 overflow-hidden bg-[#070a1a]">
+        <div className="relative w-full aspect-square">
+          <div className="absolute inset-0 opacity-70">
+            <SpaceBackdrop x={50} y={50} zoom={1} worldSize={worldSize} />
           </div>
-        </div>
-      </header>
-
-      <div className="relative z-10 px-2 py-3 sm:px-5 sm:py-5">
-        <div className="relative mx-auto aspect-square w-full max-w-[560px] rounded-2xl border border-white/10 bg-[url('/images/galactic_background.jpg')] bg-cover bg-center p-1.5 sm:p-3">
-          <div className="absolute inset-0 rounded-2xl bg-slate-950/55" />
-          <div className="absolute inset-0 z-0 overflow-hidden rounded-2xl pointer-events-none">
-            <img src="/images/planet_ringed.jpg" alt="" aria-hidden className="absolute -right-8 -top-8 w-36 opacity-35 mix-blend-screen sm:w-56" />
-            <img src="/images/asteroids.jpg" alt="" aria-hidden className="absolute -left-5 top-4 w-24 opacity-35 mix-blend-screen sm:w-36" />
-            <img src="/images/satellite.jpg" alt="" aria-hidden className="absolute -bottom-2 right-2 w-24 opacity-30 mix-blend-screen sm:w-32" />
-          </div>
-
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 z-0 h-full w-full pointer-events-none" aria-hidden="true">
-            <path d={ROAD_SVG_PATH} stroke={themeConfig.roadStroke} strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.42" />
-            <path d={ROAD_SVG_PATH} stroke="rgba(226,232,240,0.72)" strokeWidth="2.2" strokeDasharray="1 3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          </svg>
-
-          {Object.values(BOARD_GRAPH).map((node) => {
-            const isFinish = node.next.length === 0;
-            return (
-              <div key={node.id} className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center" style={{ left: `${node.x}%`, top: `${node.y}%` }}>
-                {node.type === 'empty' ? (
-                  <div className="h-1.5 w-1.5 rounded-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.65)] sm:h-2 sm:w-2" />
-                ) : (
-                  <div className="z-10">
-                    <TileNode index={node.id} nodeType={node.type} theme={theme} isFinish={isFinish} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {players.map((player) => {
-            const isTurn = player.id === activePlayerId;
-            const sharing = players.filter((p) => p.boardPosition === player.boardPosition);
-            const slot = sharing.findIndex((p) => p.id === player.id);
-            const spreadX = sharing.length > 1 ? (slot - (sharing.length - 1) / 2) * 4.5 : 0;
-            const spreadY = sharing.length > 1 ? (slot % 2 === 0 ? -1.5 : 1.5) : 0;
-            return <PlayerToken key={player.id} player={player} isActive={isTurn} spreadX={spreadX} spreadY={spreadY} />;
-          })}
+          <div className="absolute inset-0">{world}</div>
         </div>
       </div>
+    );
+  }
 
-      <footer className="relative z-10 flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.1em] text-gray-400 sm:px-6">
-        <span>Launchpad</span>
-        <span className="flex items-center gap-1.5 text-partyYellow">
-          Finish line <Trophy className="h-3 w-3" aria-hidden />
-        </span>
-      </footer>
-    </section>
+  return (
+    <div className="relative w-full rounded-3xl border border-white/20 shadow-2xl overflow-hidden">
+      <BoardCamera
+        worldSize={worldSize}
+        focus={focus}
+        // Tall enough to feel like a place, capped so the roll button and the
+        // event feed are still reachable on a phone.
+        className="w-full h-[58vh] min-h-[340px] max-h-[720px]"
+        renderBackdrop={(view) => (
+          <SpaceBackdrop x={view.x} y={view.y} zoom={view.zoom} worldSize={worldSize} />
+        )}
+        overlay={
+          <>
+            <div className="absolute top-3 left-3 z-30 flex items-center gap-2 pointer-events-none">
+              <span className="glass-pill px-3 py-1.5 rounded-full border border-white/20 text-[11px] font-black text-white flex items-center gap-1.5 shadow-lg">
+                <GameIcon src={themeArt(theme)} emoji={themeConfig.icon} className="w-4 h-4 text-sm" />
+                <span className="hidden sm:inline">{themeConfig.name.toUpperCase()}</span>
+                <span className="sm:hidden">MAP</span>
+              </span>
+              {/* How far along whoever is up has got. This replaced a node
+                  count, which described the data structure rather than the
+                  race — nobody playing wants to know there are 99 nodes. */}
+              {activePlayer && (
+                <span className="glass-pill px-2.5 py-1.5 rounded-full border border-white/15 text-[10px] font-bold text-white shadow-lg flex items-center gap-1.5">
+                  <span className="max-w-[80px] truncate text-cyan-200/90">{activePlayer.name}</span>
+                  <span className="font-mono tabular-nums text-partyYellow">
+                    {activeProgress}
+                    <span className="text-white/40"> / {BOARD_LENGTH}</span>
+                  </span>
+                </span>
+              )}
+            </div>
+
+            <div className="absolute bottom-3 left-3 z-30 text-[10px] font-bold text-cyan-200/60 pointer-events-none">
+              Drag to explore · pinch to zoom
+            </div>
+          </>
+        }
+      >
+        {world}
+      </BoardCamera>
+    </div>
   );
 }

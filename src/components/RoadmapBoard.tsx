@@ -11,7 +11,7 @@ import MapRenderer from './MapRenderer';
 import BackgroundMusic from './BackgroundMusic';
 import DiceRoller, { type RollBonus } from './DiceRoller';
 import TileEventOverlay from './TileEventOverlay';
-import { TOTAL_TILES, boardProgress, heatTier, leaderProgressOf, slipstreamSteps } from '@/lib/gameRules';
+import { boardProgress, heatTier, leaderProgressOf, slipstreamSteps } from '@/lib/gameRules';
 
 interface RoadmapBoardProps {
   room: RoomState;
@@ -269,7 +269,6 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
             : p
         )}
         activePlayerId={activePlayer.id}
-        totalTiles={TOTAL_TILES}
       />
 
       {/* STICKY FLOATING ACTION BUTTON (FAB) IN THE MIDDLE AT THE BOTTOM — MOBILE OPTIMIZED! */}

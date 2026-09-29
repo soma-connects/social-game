@@ -9,12 +9,14 @@ import { AVATARS } from '@/lib/gameContent';
 import AvatarIllustration from '@/components/AvatarIllustration';
 import PublicRoomBrowser from '@/components/PublicRoomBrowser';
 import PublicRoomGate, { hasAcknowledged } from '@/components/PublicRoomGate';
+import FeedbackDialog from '@/components/FeedbackDialog';
 
 export default function HomePage() {
   const router = useRouter();
   const [hostName, setHostName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The public room waiting on the safety acknowledgement, if one is pending.
   const [pendingPublicRoom, setPendingPublicRoom] = useState<string | null>(null);
@@ -197,7 +199,21 @@ export default function HomePage() {
           <span className="flex items-center gap-1.5"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp Invite</span>
           <span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5" /> Opponent Traps</span>
         </div>
+
+        {/* Here as well as in the game, because the problems that happen before
+            a room exists — "I can't join", "the code doesn't work" — are the
+            ones nobody can report from inside one. */}
+        <p className="text-center">
+          <button
+            onClick={() => setShowFeedback(true)}
+            className="text-xs text-gray-400 underline underline-offset-4 decoration-white/20 hover:text-white transition-colors"
+          >
+            Something not working? Send feedback
+          </button>
+        </p>
       </div>
+
+      {showFeedback && <FeedbackDialog onClose={() => setShowFeedback(false)} />}
     </main>
   );
 }

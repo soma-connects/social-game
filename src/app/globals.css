@@ -122,3 +122,59 @@ button:focus-visible, input:focus-visible {
     scroll-behavior: auto !important;
   }
 }
+
+/* ── Board map ─────────────────────────────────────────────────────────────
+   Starfield, drifting debris and the flow along the road. Kept here rather
+   than inline so the whole board shares one set of timings, and so anything
+   that runs forever can be switched off in one place for reduced motion. */
+
+@keyframes boardTwinkle {
+  0%, 100% { opacity: var(--twinkle-lo, 0.35); }
+  50%      { opacity: 1; }
+}
+
+@keyframes boardDrift {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to   { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes boardRoadFlow {
+  to { stroke-dashoffset: -20; }
+}
+
+.board-road-flow {
+  animation: boardRoadFlow 2.4s linear infinite;
+}
+
+.board-road-chevrons {
+  animation: boardRoadFlow 3.6s linear infinite;
+}
+
+/* The board animates constantly by design — a sky that never stops moving is
+   the wrong thing to show someone who has asked the system to calm down. */
+@media (prefers-reduced-motion: reduce) {
+  .board-road-flow,
+  .board-road-chevrons {
+    animation: none;
+  }
+}
+
+/* A comet crosses, then the track sits empty for most of the cycle — the pause
+   is what keeps this from reading as a screensaver behind the board. */
+@keyframes boardComet {
+  0%        { opacity: 0; transform: rotate(var(--comet-angle, 30deg)) translateX(0); }
+  4%        { opacity: 0.9; }
+  16%       { opacity: 0; transform: rotate(var(--comet-angle, 30deg)) translateX(360px); }
+  100%      { opacity: 0; transform: rotate(var(--comet-angle, 30deg)) translateX(360px); }
+}
+
+.board-comet {
+  animation-name: boardComet;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.9, 0.6);
+  animation-iteration-count: infinite;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-comet { animation: none; }
+}

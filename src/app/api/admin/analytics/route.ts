@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/server';
 import { isAdminRequest } from '@/lib/server/adminAuth';
-import { buildAnalytics, type PlayerRecord } from '@/lib/server/analytics';
+import { buildAnalytics, buildRecentSessions, type PlayerRecord } from '@/lib/server/analytics';
 import type { SessionRecord } from '@/lib/server/sessionArchive';
 import type { MatchRecord } from '@/lib/server/matchArchive';
 
@@ -83,6 +83,9 @@ export async function GET(request: Request) {
     return NextResponse.json({
       summary,
       recentMatches,
+      // Every room opened, including the ones that never finished — the match
+      // table above only ever sees the successes.
+      recentSessions: buildRecentSessions(sessions, now),
       truncated: {
         sessions: sessions.length >= MAX_DOCS,
         matches: matches.length >= MAX_DOCS,

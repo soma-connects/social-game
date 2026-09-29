@@ -82,8 +82,8 @@ import {
   writeSecrets,
   type RoomSecrets,
 } from '@/lib/server/roomServer';
+import { isPlayableTheme } from '@/lib/themeConfig';
 import { acceptedAnswers, pickTriviaQuestion, rememberTrivia } from '@/lib/triviaBank';
-import { generateTriviaFromAi } from '@/lib/server/aiHost';
 import {
   PERFORMER_PHASES,
   clearPhaseDeadline,
@@ -93,6 +93,9 @@ import {
 import { archiveMatch } from '@/lib/server/matchArchive';
 import {
   newSessionId,
+  flushSessionNotes,
+  noteRoundFailure,
+  noteSessionPulse,
   recordSessionCompleted,
   recordSessionCreated,
   recordSessionStarted,
@@ -100,9 +103,16 @@ import {
 import { verifyUid } from '@/lib/firebase/server';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES } from '@/lib/roomVibes';
-import { askHost, coerceVibe, generateChallenge } from '@/lib/server/aiHost';
-import { AiMasterBribe, AiMasterCategory, AiMasterState } from '@/lib/types';
+import { coerceVibe, fallbackChallenge } from '@/lib/server/aiHost';
+import { takeChallenge, takeHostQuip, takeTrivia, warmHostPool, warmTriviaPool } from '@/lib/server/hostLinePool';
+import { AiMasterBribe, AiMasterCategory, AiMasterState, RoomChatMessage } from '@/lib/types';
 import { TruthOrDareCategoryId, TruthOrDareSelectionMode, TruthOrDareSettings, TruthOrDareState } from '@/lib/types';
+import {
+  CHAT_EMOJI_KEPT,
+  CHAT_TEXT_KEPT,
+  MAX_COMMENT_CHARS,
+  findChatEmoji,
+} from '@/lib/chatEmoji';
 import {
   DEFAULT_TRUTH_OR_DARE_SETTINGS,
   TRUTH_OR_DARE_CATEGORIES,
@@ -131,17 +141,6 @@ function makePlayer(name: string, index: number, isHost: boolean): Player {
     isHost,
     isReady: true,
   };
-}
-
-const REACTION_LABELS: Record<SocialReactionId, string> = {
-  laugh: 'big laugh',
-  fire: 'fire',
-  almost: 'almost had it',
-  drama: 'drama mode',
-};
-
-function isSocialReaction(value: unknown): value is SocialReactionId {
-  return value === 'laugh' || value === 'fire' || value === 'almost' || value === 'drama';
 }
 
 function updatePlayerLevel(player: Player): void {
@@ -185,6 +184,28 @@ function pickSocialBadge(round: SocialRound | null, performance: number): string
   if (performance >= 0.4) return 'Almost There';
   if (count > 0) return 'Good Sport';
   return 'Voice Rookie';
+}
+
+/**
+ * How often one player may add to the stream.
+ *
+ * Emoji are meant to be tapped fast — that is what a live reaction bar is — so
+ * they are held only to a rate that keeps the room document from being rewritten
+ * on every frame. Comments are slower because they are read.
+ */
+const CHAT_EMOJI_COOLDOWN_MS = 400;
+const CHAT_TEXT_COOLDOWN_MS = 1_200;
+
+/**
+ * Keeps the newest of each kind, then puts them back in order.
+ *
+ * Trimming one shared list would let a burst of emoji push every comment out of
+ * the feed in a couple of seconds, which is exactly what a busy room produces.
+ */
+function trimChat(log: RoomChatMessage[]): RoomChatMessage[] {
+  const text = log.filter((m) => m.kind === 'text').slice(-CHAT_TEXT_KEPT);
+  const emoji = log.filter((m) => m.kind === 'emoji').slice(-CHAT_EMOJI_KEPT);
+  return [...text, ...emoji].sort((a, b) => a.at - b.at);
 }
 
 // PRESENCE_TIMEOUT_MS now lives in gameRules: the board previews the bonuses a
@@ -1371,9 +1392,27 @@ async function expireStalledAiMaster(room: RoomState, now: number): Promise<void
   const state = room.aiMasterState;
   if (!state || !aiMasterHasStalled(room, now)) return;
 
+  // Spent before anything else runs, the way expireStalledPhase does it.
+  //
+  // Without this, a branch that fails to change the phase leaves the beat key
+  // unchanged with a deadline still in the past — so this fires again on the
+  // very next heartbeat, and the one after that, forever: a duplicate event and
+  // a full room write every time, and a round that never moves. Which is the
+  // deadlock the clock was added to remove.
+  //
+  // It really is reachable: resolveAiMasterRound returns early at `if (!target)
+  // return` when the target has been kicked or has left mid-vote, and
+  // startAiMasterRound does the same when nobody is left. Clearing here means
+  // the worst case is one wasted beat before syncAiMasterDeadline re-arms.
+  state.deadline = null;
+  state.deadlineFor = null;
+
   const target = room.players.find((p) => p.id === state.targetId);
 
-  if (state.phase === 'announcing') {
+  // 'responding' is declared on the phase union and nothing ever sets it, but
+  // aiMasterWaitMs hands it a deadline all the same. Answering to both means a
+  // beat that somehow lands there is carried rather than left to spin.
+  if (state.phase === 'announcing' || state.phase === 'responding') {
     // Silence is an answer the room is entitled to judge, so this hands them
     // the vote rather than deciding it. Failing them outright here would take a
     // life for a dropped connection.
@@ -1447,7 +1486,13 @@ async function startAiMasterRound(room: RoomState): Promise<void> {
   if (!target) return;
 
   const category = pickCategory(room);
-  const { challenge, hostLine } = await generateChallenge(roomVibeOf(room), category, target.name);
+  // Pre-generated, so the round opens the moment the action lands. A cold
+  // bucket falls through to the curated pools, which is what a failed call
+  // already did — the round never waits on the network either way.
+  const { challenge, hostLine } = takeChallenge(roomVibeOf(room), category, target.name) ?? {
+    hostLine: `${target.name}, you are up. Let's see what you have got!`,
+    challenge: fallbackChallenge(category),
+  };
 
   draft.targetId = target.id;
   draft.category = category;
@@ -1495,7 +1540,7 @@ async function resolveAiMasterRound(room: RoomState): Promise<void> {
     updatePlayerLevel(target);
     pushEvent(room, `✅ ${target.name} survived the round ${passes}–${fails} (+${AI_MASTER_PASS_POINTS} pts)`, 'buff');
     state.hostLine =
-      (await askHost(roomVibeOf(room), `In one short sentence, congratulate ${target.name} for surviving their challenge ${passes} votes to ${fails}.`)) ??
+      takeHostQuip(roomVibeOf(room), 'praise', target.name) ??
       `${target.name} pulls it off! The room says yes.`;
     return;
   }
@@ -1505,7 +1550,7 @@ async function resolveAiMasterRound(room: RoomState): Promise<void> {
     target.eliminated = true;
     pushEvent(room, `☠️ ${target.name} is OUT — no lives left!`, 'debuff');
     state.hostLine =
-      (await askHost(roomVibeOf(room), `In one short sentence, dramatically announce that ${target.name} has run out of lives and is eliminated.`)) ??
+      takeHostQuip(roomVibeOf(room), 'eliminate', target.name) ??
       `That is the end of the road for ${target.name}. Out!`;
   } else {
     pushEvent(
@@ -1514,7 +1559,7 @@ async function resolveAiMasterRound(room: RoomState): Promise<void> {
       'debuff'
     );
     state.hostLine =
-      (await askHost(roomVibeOf(room), `In one short sentence, tease ${target.name} for failing their challenge. They have ${livesLeft} lives left.`)) ??
+      takeHostQuip(roomVibeOf(room), 'taunt', target.name) ??
       `Not good enough, ${target.name}. That costs you a life.`;
   }
 }
@@ -1720,6 +1765,37 @@ async function expireStalledTruthOrDare(room: RoomState, now: number): Promise<v
   }
 }
 
+/**
+ * Marks the start of a match, for the permanent record.
+ *
+ * Every mode has to do this or it is invisible to the dashboard: a room
+ * without a matchId never archives, and its session row never leaves
+ * `created` — so Chess, Ludo and Team Battle, which skipped it, were each
+ * counted as a lobby somebody opened and walked away from.
+ */
+function openMatch(room: RoomState): void {
+  room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  room.matchStartedAt = Date.now();
+  room.matchArchived = false;
+}
+
+/**
+ * Whether the match in this room has just reached its end, and how.
+ *
+ * Only the board game and the AI Master end by setting `phase = 'game_over'`.
+ * The others finish on their own terms — a chess or Ludo winner is a colour on
+ * that game's state, a Team Battle series ends on its recap screen — and a
+ * check for game_over alone never saw any of them finish.
+ */
+function matchEndedOutcome(room: RoomState): 'winner' | null {
+  if (!room.matchId || room.matchArchived) return null;
+  if (room.phase === 'game_over') return 'winner';
+  if (room.phase === 'team_battle_recap') return 'winner';
+  if (room.roomType === 'chess' && room.chessState?.winner) return 'winner';
+  if (room.roomType === 'ludo' && room.ludoState?.winner) return 'winner';
+  return null;
+}
+
 /** Ends the match. In team mode one player crossing wins it for their whole crew. */
 function declareWinner(room: RoomState, player: Player, reason: 'finish' | 'last_standing' = 'finish'): void {
   room.winner = player;
@@ -1915,6 +1991,16 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       body.callerId = callerId;
     }
 
+    // Refilled here rather than inside the round, because here is the only
+    // place with time to spare: heartbeats land every few seconds and a round
+    // lasts minutes, so the lines are always written well before the moment
+    // that spends them. Returns immediately and no-ops on a full bucket, so
+    // the replays this loop does cost nothing.
+    if (room.roomType === 'ai_master' || action === 'ai_master_start') {
+      warmHostPool(coerceVibe(room.roomVibe));
+    }
+    if (room.phase !== 'lobby') warmTriviaPool(coerceVibe(room.roomVibe));
+
     try {
       const response = await applyAction(room, action, body);
 
@@ -1925,11 +2011,19 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       //
       // After the response is built, so recording a match never delays the
       // game-over screen, and guarded by archiveMatch's own idempotency rather
-      // than by anything this loop tracks.
-      if (room.phase === 'game_over' && !room.matchArchived) {
-        await archiveMatch(room, 'winner');
-        await recordSessionCompleted(room, 'winner');
+      // than by anything this loop tracks. The session row is closed only when
+      // this request is the one that archived the match — otherwise every
+      // heartbeat from the end screen closed it again and dragged its end
+      // time out to whenever the last player left.
+      const ended = matchEndedOutcome(room);
+      if (ended && (await archiveMatch(room, ended))) {
+        await recordSessionCompleted(room, ended);
       }
+
+      // Anything the action noted for the dashboard — a round that timed out,
+      // a pulse of who is here and what they are playing. Written here, after
+      // the room write, so an attempt that lost its race records nothing.
+      await flushSessionNotes(room);
 
       return response;
     } catch (error) {
@@ -2066,7 +2160,13 @@ async function applyAction(
     }
 
     case 'set_theme': {
-      if (body.theme) room.theme = body.theme;
+      // Validated rather than trusted: the picker only offers themes that have
+      // art, and a theme without one silently renders as outer space with a few
+      // recoloured tiles.
+      if (!isPlayableTheme(body.theme)) {
+        return NextResponse.json({ error: 'That map is not available yet' }, { status: 400 });
+      }
+      room.theme = body.theme;
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -2088,48 +2188,93 @@ async function applyAction(
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
-    case 'add_social_reaction': {
-      const voter = room.players.find((p) => p.id === body.voterId);
-      const target = room.players.find((p) => p.id === body.targetPlayerId);
-      if (!voter || !target) {
-        return NextResponse.json({ error: 'Player not found' }, { status: 404 });
-      }
-      if (voter.id === target.id) {
-        return NextResponse.json({ error: 'React to another player, not yourself' }, { status: 400 });
-      }
-      if (!isSocialReaction(body.reaction)) {
-        return NextResponse.json({ error: 'Unknown reaction' }, { status: 400 });
+    /**
+     * Posts an emoji or a comment into the live stream.
+     *
+     * The four scoring emoji go through exactly the same one-per-player-per-kind
+     * gate the reaction buttons used, so the laugh meter and the badge that
+     * reads the reaction mix are unchanged by any amount of spamming. Everything
+     * else is decoration that never reaches a score.
+     */
+    case 'post_chat': {
+      const author = room.players.find((p) => p.id === body.callerId);
+      if (!author) return NextResponse.json({ error: 'Player not found' }, { status: 404 });
+
+      const kind = body.kind === 'emoji' ? 'emoji' : 'text';
+      const emoji = kind === 'emoji' ? findChatEmoji(String(body.body ?? '')) : null;
+      // Anything outside the palette is refused rather than trusted: the glyph
+      // is rendered straight into every other player's screen.
+      if (kind === 'emoji' && !emoji) {
+        return NextResponse.json({ error: 'Unknown emoji' }, { status: 400 });
       }
 
-      if (!room.socialRound || room.socialRound.targetPlayerId !== target.id) {
-        room.socialRound = { targetPlayerId: target.id, reactions: [], judgeVotes: [] };
+      const text = String(body.body ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_COMMENT_CHARS);
+      if (kind === 'text' && text.length === 0) {
+        return NextResponse.json({ error: 'Say something first' }, { status: 400 });
       }
 
-      const alreadyReacted = room.socialRound.reactions.some(
-        (r) => r.voterId === voter.id && r.reaction === body.reaction
-      );
-      if (!alreadyReacted) {
-        room.socialRound.reactions.push({
-          id: `react_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          reaction: body.reaction,
-          voterId: voter.id,
-          voterName: voter.name,
-          targetPlayerId: target.id,
-          timestamp: new Date().toISOString(),
-        });
-        pushEvent(room, `${voter.name} gave ${target.name} a ${REACTION_LABELS[body.reaction]}`, 'social');
+      const now = Date.now();
+      const log = room.chat ?? [];
 
-        // The roast intermission is the moment the room is actually watching and
-        // reacting, but by then the turn is scored and the dice locked. Board
-        // movement stays earned by accuracy — late reactions pay out in vibe,
-        // which drives levels and badges. Without this the roast buttons record
-        // a reaction and award nothing at all.
-        if (room.phase === 'roast_intermission') {
-          target.vibeScore = (target.vibeScore ?? 0) + REACTION_POINTS[body.reaction];
-          updatePlayerLevel(target);
+      /**
+       * Throttled against the room's own log rather than a counter.
+       *
+       * A token bucket kept in memory would be a side effect: this handler is
+       * replayed whenever another write lands first, so a losing attempt would
+       * spend the caller's allowance and the replay would find it gone. Reading
+       * the log instead makes the check a pure function of the room, which is
+       * the rule every action here follows.
+       */
+      const mine = log.filter((m) => m.authorId === author.id && m.kind === kind);
+      const sinceLast = now - (mine[mine.length - 1]?.at ?? 0);
+      const cooldown = kind === 'emoji' ? CHAT_EMOJI_COOLDOWN_MS : CHAT_TEXT_COOLDOWN_MS;
+      if (sinceLast < cooldown) {
+        // Not an error the player should see — they tapped fast, which is
+        // allowed, it just does not need to reach everybody else.
+        return NextResponse.json({ room });
+      }
+
+      const target = room.players[room.activePlayerIndex];
+      const message: RoomChatMessage = {
+        id: `chat_${now}_${Math.random().toString(36).slice(2, 8)}`,
+        kind,
+        body: kind === 'emoji' ? emoji!.glyph : text,
+        authorId: author.id,
+        authorName: author.name,
+        at: now,
+      };
+      if (target && target.id !== author.id) message.targetPlayerId = target.id;
+
+      // Scoring, on exactly the terms the old buttons had.
+      if (emoji?.scoresAs && target && target.id !== author.id) {
+        if (!room.socialRound || room.socialRound.targetPlayerId !== target.id) {
+          room.socialRound = { targetPlayerId: target.id, reactions: [], judgeVotes: [] };
+        }
+        const alreadyReacted = room.socialRound.reactions.some(
+          (r) => r.voterId === author.id && r.reaction === emoji.scoresAs
+        );
+        if (!alreadyReacted) {
+          room.socialRound.reactions.push({
+            id: `react_${now}_${Math.random().toString(36).slice(2, 8)}`,
+            reaction: emoji.scoresAs,
+            voterId: author.id,
+            voterName: author.name,
+            targetPlayerId: target.id,
+            timestamp: new Date(now).toISOString(),
+          });
+          message.scoredAs = emoji.scoresAs;
+
+          // Same rule the reaction buttons had: the roast is the moment the
+          // room is actually watching, but the turn is already scored by then,
+          // so a late reaction pays in vibe rather than in board movement.
+          if (room.phase === 'roast_intermission') {
+            target.vibeScore = (target.vibeScore ?? 0) + REACTION_POINTS[emoji.scoresAs];
+            updatePlayerLevel(target);
+          }
         }
       }
 
+      room.chat = trimChat([...log, message]);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -2528,7 +2673,7 @@ async function applyAction(
      */
     case 'trivia_generate': {
       if (!room.triviaState) {
-        const fromAi = await generateTriviaFromAi(roomVibeOf(room));
+        const fromAi = takeTrivia(roomVibeOf(room));
 
         const banked = fromAi ? null : pickTriviaQuestion(room.recentTrivia);
         const question = fromAi?.question ?? banked!.question;
@@ -3214,14 +3359,23 @@ async function applyAction(
               { status: 409 }
             );
           }
-          await writeSecrets(roomId, secrets);
-
           // The room is told a mine exists but never where. Half the value of
           // the item is everyone walking the next few spaces nervously.
           pushEvent(room, `💥 ${active.name} buried something up the road…`, 'debuff');
+
+          // Secrets are committed only once the room write has landed, the same
+          // way resolveMineLanding does it, and for the same reason: this action
+          // can lose its write race and be replayed against fresh state. Burying
+          // the mine first meant the replay found it already there, returned
+          // "no clear ground", handed the item back — and left a live mine on
+          // the board that nobody had paid for and the planter did not know was
+          // there.
+          const planted = await writeRoom(room);
+          await writeSecrets(roomId, secrets);
+
           // The planter alone gets the space, in the response rather than in
           // room state — the room document is readable by every browser in it.
-          return NextResponse.json({ room: await writeRoom(room), minePlantedAt: mine.nodeId });
+          return NextResponse.json({ room: planted, minePlantedAt: mine.nodeId });
         }
       }
 
@@ -3317,6 +3471,8 @@ async function applyAction(
       room.teamScores = { red: 0, blue: 0 };
       room.roundResults = [];
       room.currentMiniGame = games[0];
+      openMatch(room);
+      await recordSessionStarted(room);
       pushEvent(
         room,
         `⚔️ Team Battle: ${games.length} game${games.length === 1 ? '' : 's'}, Red Crew vs Blue Crew`,
@@ -3370,9 +3526,7 @@ async function applyAction(
         return NextResponse.json({ error: 'The AI Master needs at least 2 players' }, { status: 409 });
       }
       room.roomType = 'ai_master';
-      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      room.matchStartedAt = Date.now();
-      room.matchArchived = false;
+      openMatch(room);
       room.winner = null;
       room.aiMasterState = null;
       await recordSessionStarted(room);
@@ -3485,12 +3639,12 @@ async function applyAction(
           }
         }
         record.hostLine =
-          (await askHost(roomVibeOf(room), `In one short sentence, corruptly accept ${player.name}'s bribe of ${amount} points. Be shameless about it.`)) ??
+          takeHostQuip(roomVibeOf(room), 'bribe_accept', player.name) ??
           `${player.name}, your generosity has been noted. Consider it handled.`;
         pushEvent(room, `🤝 The AI Master took ${player.name}'s ${cost} points…`, 'social');
       } else {
         record.hostLine =
-          (await askHost(roomVibeOf(room), `In one short sentence, publicly refuse ${player.name}'s bribe of ${amount} points and mock them for trying.`)) ??
+          takeHostQuip(roomVibeOf(room), 'bribe_refuse', player.name) ??
           `${player.name} tried to buy me off. Adorable. Keep playing.`;
         pushEvent(room, `🚫 ${player.name} tried to bribe the AI Master and lost ${cost} points`, 'social');
       }
@@ -3526,9 +3680,7 @@ async function applyAction(
         return NextResponse.json({ error: 'Truth or Dare needs at least 2 players' }, { status: 409 });
       }
       room.roomType = 'truth_or_dare';
-      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      room.matchStartedAt = Date.now();
-      room.matchArchived = false;
+      openMatch(room);
       room.winner = null;
       room.truthOrDareState = null;
       if (!room.truthOrDareSettings) room.truthOrDareSettings = DEFAULT_TRUTH_OR_DARE_SETTINGS;
@@ -3683,9 +3835,7 @@ async function applyAction(
       // here rather than at archive time so every row is traceable back to the
       // room and the moment it started, and so a match that ends twice cannot
       // produce two rows.
-      room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      room.matchStartedAt = Date.now();
-      room.matchArchived = false;
+      openMatch(room);
 
       // This action starts the board game and Team Battle only — chess, ludo
       // and AI Master each have their own. Without this a room that had just
@@ -3761,8 +3911,12 @@ async function applyAction(
       // and the winner, which is most of what the record is made of. If this
       // match already ended with a winner it was archived then, and
       // archiveMatch's create() makes the second call a no-op.
-      await archiveMatch(room, room.winner ? 'winner' : 'ended_early');
-      await recordSessionCompleted(room, room.winner ? 'winner' : 'ended_early');
+      //
+      // The outcome comes from matchEndedOutcome rather than `room.winner`,
+      // which chess and Ludo never set: a finished chess game would otherwise
+      // be filed as ended early.
+      const outcome = matchEndedOutcome(room) ?? 'ended_early';
+      if (await archiveMatch(room, outcome)) await recordSessionCompleted(room, outcome);
 
       for (const player of room.players) {
         player.boardPosition = 0;
@@ -3864,6 +4018,16 @@ async function applyAction(
         pushEvent(room, `🔌 ${me.name} reconnected`, 'system');
       }
       prunePresence(room);
+
+      // For the dashboard's "where do rounds fail". Noted before the expiries
+      // below move the room on, so each records the phase that actually ran
+      // out of time rather than the one that replaced it.
+      if (rollStalled) noteRoundFailure(room, 'roll', now);
+      if (phaseStalled) noteRoundFailure(room, 'phase', now);
+      if (aiStalled) noteRoundFailure(room, 'ai_master', now);
+      if (truthOrDareStalled) noteRoundFailure(room, 'truth_or_dare', now);
+      noteSessionPulse(room, now);
+
       expireStalledRoll(room, now);
       expireStalledPhase(room, now);
       await expireStalledAiMaster(room, now);
@@ -4011,6 +4175,8 @@ async function applyAction(
         lastMove: null,
       };
 
+      openMatch(room);
+      await recordSessionStarted(room);
       pushEvent(room, `♟️ Chess Match started! Mode: ${mode.toUpperCase()}`, 'system');
       return NextResponse.json({ room: await writeRoom(room) });
     }
@@ -4243,6 +4409,8 @@ async function applyAction(
         lastActionText: 'Game started! Red rolls first.',
       };
 
+      openMatch(room);
+      await recordSessionStarted(room);
       pushEvent(room, `🎲 Ludo Match started! 4 Players ready.`, 'system');
       return NextResponse.json({ room: await writeRoom(room) });
     }

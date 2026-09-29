@@ -9,6 +9,8 @@ interface PlayerTokenProps {
   isActive: boolean;
   spreadX: number;
   spreadY: number;
+  /** Smaller on the overview, where six tokens share a much smaller board. */
+  size?: 'xs' | 'sm';
 }
 
 /**
@@ -48,7 +50,13 @@ function graphPath(from: number, to: number): number[] {
   );
 }
 
-export default function PlayerToken({ player, isActive, spreadX, spreadY }: PlayerTokenProps) {
+export default function PlayerToken({
+  player,
+  isActive,
+  spreadX,
+  spreadY,
+  size = 'sm',
+}: PlayerTokenProps) {
   const controls = useAnimation();
   const prevPosRef = useRef(player.boardPosition);
 
@@ -154,7 +162,7 @@ export default function PlayerToken({ player, isActive, spreadX, spreadY }: Play
 
         <AvatarIllustration
           avatar={player.avatar}
-          size="sm"
+          size={size}
           isSpeaking={isActive}
           className={`relative z-10 shadow-2xl border-2 ${isActive ? 'border-partyYellow' : 'border-white/20'}`}
         />
@@ -171,18 +179,20 @@ export default function PlayerToken({ player, isActive, spreadX, spreadY }: Play
           On the token rather than in a corner because that is where a player is
           already looking on their turn.
         */}
-        <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 flex items-center gap-[3px] z-20">
-          {Array.from({ length: STARTING_LIVES }).map((_, i) => (
-            <span
-              key={i}
-              className={`block w-[7px] h-[7px] rounded-full border border-black/50 shadow-sm transition-colors ${
-                i < (player.lives ?? STARTING_LIVES)
-                  ? 'bg-rose-500 shadow-[0_0_5px_rgba(244,63,94,0.9)]'
-                  : 'bg-slate-700'
-              }`}
-            />
-          ))}
-        </div>
+        {size !== 'xs' && (
+          <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 flex items-center gap-[3px] z-20">
+            {Array.from({ length: STARTING_LIVES }).map((_, i) => (
+              <span
+                key={i}
+                className={`block w-[7px] h-[7px] rounded-full border border-black/50 shadow-sm transition-colors ${
+                  i < (player.lives ?? STARTING_LIVES)
+                    ? 'bg-rose-500 shadow-[0_0_5px_rgba(244,63,94,0.9)]'
+                    : 'bg-slate-700'
+                }`}
+              />
+            ))}
+          </div>
+        )}
       </motion.div>
     </motion.div>
   );

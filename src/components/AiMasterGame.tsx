@@ -2,9 +2,10 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, Heart, Mic, Send, ThumbsDown, ThumbsUp, Coins, Sparkles, Skull, Headphones, Check, HeartCrack, Handshake, Ban } from 'lucide-react';
+import { Bot, Heart, Mic, Send, ThumbsDown, ThumbsUp, Coins, Sparkles, Skull, Headphones, Check, HeartCrack, Handshake, Ban, Ghost, Target, ShoppingBag } from 'lucide-react';
 import { AiMasterState, Player, RoomState } from '@/lib/types';
 import { STARTING_LIVES } from '@/lib/gameRules';
+import { AI_MASTER_ITEMS, AI_MASTER_PASS_POINTS, AI_MASTER_VOTE_POINTS, type AiMasterItem } from '@/lib/aiMasterShop';
 import { aiGameMaster } from '@/lib/aiGameMaster';
 import { useCountdown } from '@/hooks/useCountdown';
 import { audioSFX } from '@/lib/audioFeedback';
@@ -44,6 +45,8 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
   const [listening, setListening] = useState(false);
   const [showBribe, setShowBribe] = useState(false);
   const [bribeAmount, setBribeAmount] = useState(50);
+  /** The price-list item waiting on a victim to be named. */
+  const [choosingVictimFor, setChoosingVictimFor] = useState<AiMasterItem | null>(null);
   const sessionRef = useRef<{ stop: () => void } | null>(null);
 
   /**
@@ -141,6 +144,27 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
     audioSFX.playPowerUpZap();
     await roomStore.aiMasterBribe(roomId, bribeAmount, ask);
   };
+
+  const buy = async (item: AiMasterItem, victimId?: string) => {
+    setChoosingVictimFor(null);
+    audioSFX.playPowerUpZap();
+    await roomStore.aiMasterBuy(roomId, item.id, victimId);
+  };
+
+  /** Why an item cannot be bought right now, or null if it can. Mirrors the server's rules. */
+  const blockedReason = (item: AiMasterItem): string | null => {
+    if (myPlayer.score < item.price) return `Needs ${item.price} pts`;
+    if (item.targetOnly && !amTarget) return 'Only on your own round';
+    if (item.id === 'skip' && state.phase === 'verdict') return 'Round is decided';
+    if (item.id === 'redirect' && state.phase !== 'announcing') return 'Too late — you answered';
+    if (item.id === 'spotlight' && state.spotlight) return 'Already bought this round';
+    if (item.id === 'life' && (myPlayer.lives ?? STARTING_LIVES) >= STARTING_LIVES) return 'Hearts are full';
+    return null;
+  };
+
+  const victimChoices = room.players.filter(
+    (p) => p.id !== myPlayer.id && !p.eliminated && p.connected !== false
+  );
 
   const myVote = state.votes?.[myPlayer.id];
   const votesIn = Object.keys(state.votes ?? {}).length;
@@ -380,16 +404,40 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             className={`glass-card rounded-3xl p-6 border text-center space-y-3 ${
-              state.passed ? 'border-emerald-400/50' : 'border-red-500/50'
+              state.outcome === 'dodged' || state.outcome === 'skipped'
+                ? 'border-amber-400/50'
+                : state.passed
+                ? 'border-emerald-400/50'
+                : 'border-red-500/50'
             }`}
           >
-            <p className={`flex items-center justify-center gap-2 text-2xl font-black ${state.passed ? 'text-emerald-300' : 'text-red-300'}`}>
-              {state.passed ? (
+            {/* Says how it ended, not just whether. A player who paid their way out,
+                one who said nothing, and one who earned a pass all used to read
+                as SURVIVED. */}
+            <p
+              className={`flex items-center justify-center gap-2 text-2xl font-black ${
+                state.outcome === 'dodged' || state.outcome === 'skipped'
+                  ? 'text-amber-300'
+                  : state.passed
+                  ? 'text-emerald-300'
+                  : 'text-red-300'
+              }`}
+            >
+              {state.outcome === 'dodged' ? (
+                <><Ghost className="w-6 h-6" /> NO SHOW</>
+              ) : state.outcome === 'skipped' ? (
+                <><Coins className="w-6 h-6" /> BOUGHT THEIR WAY OUT</>
+              ) : state.passed ? (
                 <><Check className="w-6 h-6" /> SURVIVED</>
               ) : (
                 <><HeartCrack className="w-6 h-6" /> BOMBED IT</>
               )}
             </p>
+            {state.outcome === 'dodged' && (
+              <p className="text-xs font-bold text-gray-400">
+                {target?.name} said nothing — no points, and no life lost.
+              </p>
+            )}
             {myPlayer.isHost && (
               <button
                 onClick={() => roomStore.aiMasterNextRound(roomId)}
@@ -405,7 +453,7 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
         )}
       </AnimatePresence>
 
-      {/* Bribery. Public on purpose — the joke is everyone seeing you try. */}
+      {/* What was just bought or offered. Public on purpose — the joke is everyone seeing you try. */}
       {latestBribe && (
         <div
           className={`rounded-2xl border px-4 py-3 text-sm font-bold ${
@@ -423,51 +471,129 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
         </div>
       )}
 
-      {!amEliminated && state.phase !== 'verdict' && (
-        <div className="glass-card rounded-3xl p-4 border border-amber-400/25 space-y-3">
-          <button
-            onClick={() => setShowBribe((s) => !s)}
-            className="w-full glass-pill hover:bg-white/15 text-amber-200 font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 border border-amber-400/30 transition-all"
-          >
-            <Coins className="w-4 h-4" />
-            {showBribe ? 'NEVER MIND' : 'SLIDE THE HOST SOMETHING…'}
-          </button>
+      {/* A bought spotlight, shown to everyone — the person it points at should see who did it. */}
+      {state.spotlight && (
+        <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm font-bold text-rose-200 flex items-center gap-2">
+          <Target className="w-4 h-4 shrink-0" />
+          <span>
+            {state.spotlight.byName} paid {state.spotlight.price} pts to put{' '}
+            {state.spotlight.target === myPlayer.id ? 'YOU' : state.spotlight.targetName} on the spot next round.
+          </span>
+        </div>
+      )}
 
-          {showBribe && (
-            <div className="space-y-3 animate-fadeIn">
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={10}
-                  max={Math.max(10, myPlayer.score)}
-                  step={10}
-                  value={Math.min(bribeAmount, Math.max(10, myPlayer.score))}
-                  onChange={(e) => setBribeAmount(Number(e.target.value))}
-                  className="flex-1 accent-partyYellow"
-                />
-                <span className="text-sm font-black text-partyYellow w-16 text-right">{bribeAmount} pts</span>
-              </div>
-              <p className="text-[10px] text-gray-400">
-                You have {myPlayer.score} points. A refused bribe still costs you a third of it — and the
-                whole room hears about it.
+      {!amEliminated && (
+        <div className="glass-card rounded-3xl p-4 border border-amber-400/25 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="flex items-center gap-2 text-xs font-black text-amber-200 tracking-widest uppercase">
+              <ShoppingBag className="w-4 h-4" /> The host&apos;s price list
+            </p>
+            <span className="text-sm font-black text-partyYellow">{myPlayer.score} pts</span>
+          </div>
+
+          <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
+            {AI_MASTER_ITEMS.map((item) => {
+              const blocked = blockedReason(item);
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => (item.needsVictim ? setChoosingVictimFor(item) : buy(item))}
+                  disabled={!!blocked}
+                  className={`p-2.5 rounded-xl border text-left transition-all active:scale-95 disabled:opacity-40 ${
+                    choosingVictimFor?.id === item.id
+                      ? 'border-partyYellow bg-partyYellow/10'
+                      : 'border-white/10 bg-white/5 hover:border-amber-400/40'
+                  }`}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-extrabold text-white">{item.label}</span>
+                    <span className="text-[10px] font-black text-partyYellow shrink-0">{item.price}</span>
+                  </span>
+                  <span className="block text-[10px] text-gray-400 leading-tight mt-0.5">{item.blurb}</span>
+                  {blocked && <span className="block text-[9px] font-bold text-amber-300/80 mt-1">{blocked}</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          {choosingVictimFor && (
+            <div className="space-y-2 animate-fadeIn">
+              <p className="text-[11px] font-bold text-gray-300">
+                {choosingVictimFor.id === 'spotlight' ? 'Who does the host go after next round?' : 'Who gets your challenge?'}
               </p>
-              <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
-                {BRIBE_ASKS.map((ask) => (
+              <div className="flex flex-wrap gap-2">
+                {victimChoices.length === 0 && (
+                  <span className="text-[11px] text-gray-500">Nobody else is around to pick on.</span>
+                )}
+                {victimChoices.map((p) => (
                   <button
-                    key={ask.id}
-                    onClick={() => offerBribe(ask.id)}
-                    disabled={myPlayer.score < bribeAmount || (ask.id !== 'life' && !amTarget)}
-                    className="p-2.5 rounded-xl border border-white/10 bg-white/5 hover:border-amber-400/40 disabled:opacity-30 text-left transition-all active:scale-95"
+                    key={p.id}
+                    onClick={() => buy(choosingVictimFor, p.id)}
+                    className="flex items-center gap-2 rounded-full border border-white/15 bg-white/5 hover:border-partyYellow hover:bg-partyYellow/10 pl-1 pr-3 py-1 text-xs font-extrabold text-white active:scale-95"
                   >
-                    <span className="block text-xs font-extrabold text-white">{ask.label}</span>
-                    <span className="block text-[10px] text-gray-400 leading-tight mt-0.5">{ask.blurb}</span>
+                    <AvatarIllustration avatar={p.avatar} size="sm" />
+                    {p.name}
                   </button>
                 ))}
+                <button
+                  onClick={() => setChoosingVictimFor(null)}
+                  className="rounded-full border border-white/10 px-3 py-1 text-[11px] font-bold text-gray-400 hover:text-white"
+                >
+                  Never mind
+                </button>
               </div>
-              <p className="text-[10px] text-gray-500 flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-partyYellow" />
-                Skipping and redirecting only work on your own round.
-              </p>
+            </div>
+          )}
+
+          <p className="text-[10px] text-gray-500 flex items-center gap-1">
+            <Sparkles className="w-3 h-3 text-partyYellow shrink-0" />
+            Surviving a round pays {AI_MASTER_PASS_POINTS}. Judging one pays {AI_MASTER_VOTE_POINTS}.
+          </p>
+
+          {/* The gamble. Cheaper to try, and the host may just take the money. */}
+          {state.phase !== 'verdict' && (
+            <div className="pt-2 border-t border-white/10 space-y-3">
+              <button
+                onClick={() => setShowBribe((s) => !s)}
+                className="w-full glass-pill hover:bg-white/15 text-amber-200 font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 border border-amber-400/30 transition-all"
+              >
+                <Coins className="w-4 h-4" />
+                {showBribe ? 'NEVER MIND' : 'OR SLIDE THE HOST SOMETHING… (A GAMBLE)'}
+              </button>
+
+              {showBribe && (
+                <div className="space-y-3 animate-fadeIn">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={10}
+                      max={Math.max(10, myPlayer.score)}
+                      step={10}
+                      value={Math.min(bribeAmount, Math.max(10, myPlayer.score))}
+                      onChange={(e) => setBribeAmount(Number(e.target.value))}
+                      className="flex-1 accent-partyYellow"
+                    />
+                    <span className="text-sm font-black text-partyYellow w-16 text-right">{bribeAmount} pts</span>
+                  </div>
+                  <p className="text-[10px] text-gray-400">
+                    A refused bribe still costs you a third of it — and the whole room hears about it.
+                  </p>
+                  <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
+                    {BRIBE_ASKS.map((ask) => (
+                      <button
+                        key={ask.id}
+                        onClick={() => offerBribe(ask.id)}
+                        disabled={myPlayer.score < bribeAmount || (ask.id !== 'life' && !amTarget)}
+                        className="p-2.5 rounded-xl border border-white/10 bg-white/5 hover:border-amber-400/40 disabled:opacity-30 text-left transition-all active:scale-95"
+                      >
+                        <span className="block text-xs font-extrabold text-white">{ask.label}</span>
+                        <span className="block text-[10px] text-gray-400 leading-tight mt-0.5">{ask.blurb}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-gray-500">Skipping and redirecting only work on your own round.</p>
+                </div>
+              )}
             </div>
           )}
         </div>

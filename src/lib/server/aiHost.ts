@@ -10,27 +10,56 @@ import { AiMasterCategory } from '../types';
  * generate text through here, so the persona cannot drift between the two.
  */
 
-export const HOST_SYSTEM_PROMPT = `You are the AI Game Master for "Voice Party", a high-energy multiplayer voice gaming platform.
+export const HOST_SYSTEM_PROMPT = `You are the AI Game Master for "Voice Party", a live voice party game that friends play together on a call.
 
-YOUR ROLE & PERSONALITY:
-- You are a witty, charismatic, energetic, and encouraging party host.
-- Speak in smooth, natural, clever English with punchy humor.
-- DO NOT force unnatural slang, awkward tropes, or fake accents (avoid forcing "yam", "Oya", or cliché slang unless completely natural).
-- Keep ALL responses under 2 short sentences (5-8 seconds when spoken aloud).
-- Never replace players, never insult players, and keep prompts fun, clever, and engaging.
-`;
+YOUR PERSONALITY:
+- A sharp, quick comedy-club host. You tease; you do not gush.
+- React to what actually happened: quote or twist the player's real words, their score, how many lives they have left, who they are up against. If you have nothing specific to react to, say less.
+- Praise only what was earned. Somebody who said nothing, dodged, or bombed is teased for exactly that and never congratulated. Somebody who was good gets grudging respect, not a parade.
+- Plain, natural English with punchy timing. No filler openers ("All right party people", "Let's go", "Woo"), no forced slang or accents.
+- ONE or TWO short sentences, about five to eight seconds spoken. Never a list, never a label.
+- Roast the performance and the choices, never who someone is: nothing about race, religion, gender, sexuality, disability, body, family or tribe. No slurs, nothing sexual. The person on the mic should laugh, not hurt.
+- Never replace players or speak for them.`;
+
+const STRANGER_RULES = `MILD MODE: some people in this room may not know each other. Tease lightly and keep it PG — poke at the moment, never at the person, and drop anything cutting.`;
+
+export type HostProvider = 'gemini' | 'grok';
+
+/** What the caller knows about the room, so the host can be specific rather than generic. */
+export type HostOptions = {
+  /** The room has, or has had, strangers in it: stay mild and stay on the default model. */
+  strangers?: boolean;
+  /** Plain-text facts: who is in the room, their lives and points, what was said. */
+  facts?: string;
+};
+
+const warned = new Set<string>();
+function warnOnce(key: string, message: string): void {
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(message);
+}
 
 /**
- * Room-vibe presets can name a 'grok' provider (e.g. the flirty_wild room), but
- * there is no xAI integration yet — this is the single place that would change
- * once a Grok key exists. Everything falls through to Gemini today.
+ * Which model speaks for this room.
+ *
+ * Grok is the sharper roaster, so it takes the vibes that ask for it (the Roast
+ * Room, Flirty & Wild) whenever an xAI key is configured — or every vibe, if
+ * AI_HOST_PROVIDER=grok. It is never used for a room with strangers in it: a
+ * model with fewer brakes is exactly what a public lobby should not get.
+ * Everything else, and every failure, is Gemini.
  */
-export function resolveProvider(vibe: RoomVibeId): 'gemini' {
+export function resolveProvider(vibe: RoomVibeId, strangers = false): HostProvider {
+  if (strangers) return 'gemini';
   const preset = ROOM_VIBES[vibe] ?? ROOM_VIBES[DEFAULT_ROOM_VIBE];
-  if (preset.provider === 'grok') {
-    console.warn(`aiHost: room vibe "${vibe}" wants Grok, no xAI key configured yet — using Gemini.`);
+  const forced = process.env.AI_HOST_PROVIDER?.trim().toLowerCase();
+  const wantsGrok = forced === 'grok' || (forced !== 'gemini' && preset.provider === 'grok');
+  if (!wantsGrok) return 'gemini';
+  if (!process.env.XAI_API_KEY) {
+    warnOnce(`grok:${vibe}`, `aiHost: room vibe "${vibe}" wants Grok, no XAI_API_KEY is set — using Gemini.`);
+    return 'gemini';
   }
-  return 'gemini';
+  return 'grok';
 }
 
 /** Normalises whatever the caller passed into a vibe we actually have. */
@@ -38,19 +67,21 @@ export function coerceVibe(value: unknown): RoomVibeId {
   return typeof value === 'string' && value in ROOM_VIBES ? (value as RoomVibeId) : DEFAULT_ROOM_VIBE;
 }
 
-/**
- * Asks Gemini for one line in the host's voice, coloured by the room's vibe.
- *
- * Returns null rather than throwing on any failure — a missing key, a rate
- * limit or a bad response should cost the room a witty line, never the round.
- * Callers supply their own fallback.
- */
-export async function askHost(vibe: RoomVibeId, task: string): Promise<string | null> {
+/** Everything the model is told before the task: who it is, the room's mood, and what it knows. */
+export function hostInstructions(vibe: RoomVibeId, options: HostOptions = {}): string {
+  const persona = (ROOM_VIBES[vibe] ?? ROOM_VIBES[DEFAULT_ROOM_VIBE]).hostPersona;
+  const parts = [HOST_SYSTEM_PROMPT, `ROOM VIBE: ${persona}`];
+  if (options.strangers) parts.push(STRANGER_RULES);
+  if (options.facts?.trim()) parts.push(`WHAT YOU KNOW RIGHT NOW:\n${options.facts.trim()}`);
+  return parts.join('\n\n');
+}
+
+/** A host line is spoken aloud inside a request the room is waiting on, so nothing here may hang. */
+const HOST_TIMEOUT_MS = 9000;
+
+async function askGemini(system: string, task: string): Promise<string | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
-
-  resolveProvider(vibe);
-  const persona = (ROOM_VIBES[vibe] ?? ROOM_VIBES[DEFAULT_ROOM_VIBE]).hostPersona;
 
   try {
     const response = await fetch(
@@ -58,8 +89,14 @@ export async function askHost(vibe: RoomVibeId, task: string): Promise<string | 
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
         body: JSON.stringify({
-          contents: [{ parts: [{ text: `${HOST_SYSTEM_PROMPT}\n\nROOM VIBE: ${persona}\n\nTask: ${task}` }] }],
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: task }] }],
+          // Thinking is off: a one-line quip does not need it, and its tokens
+          // count against the output budget, which is how a short reply comes
+          // back empty.
+          generationConfig: { temperature: 1, maxOutputTokens: 400, thinkingConfig: { thinkingBudget: 0 } },
         }),
       }
     );
@@ -69,9 +106,59 @@ export async function askHost(vibe: RoomVibeId, task: string): Promise<string | 
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     return typeof text === 'string' && text.length > 0 ? text : null;
   } catch (error) {
-    console.error('aiHost: generation failed', error);
+    console.error('aiHost: Gemini generation failed', error);
     return null;
   }
+}
+
+/** xAI's API speaks the OpenAI chat-completions dialect. */
+async function askGrok(system: string, task: string): Promise<string | null> {
+  const apiKey = process.env.XAI_API_KEY;
+  if (!apiKey) return null;
+  // A non-reasoning model by default: the room is waiting on this line.
+  const model = process.env.XAI_MODEL?.trim() || 'grok-4-fast-non-reasoning';
+
+  try {
+    const response = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: task },
+        ],
+        temperature: 1,
+        max_tokens: 400,
+        stream: false,
+      }),
+    });
+    if (!response.ok) throw new Error(`xAI API HTTP ${response.status} (model ${model})`);
+
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content?.trim();
+    return typeof text === 'string' && text.length > 0 ? text : null;
+  } catch (error) {
+    console.error('aiHost: Grok generation failed, falling back to Gemini', error);
+    return null;
+  }
+}
+
+/**
+ * Asks the host model for one line in the host's voice, coloured by the room's vibe.
+ *
+ * Returns null rather than throwing on any failure — a missing key, a rate
+ * limit or a bad response should cost the room a witty line, never the round.
+ * Callers supply their own fallback.
+ */
+export async function askHost(vibe: RoomVibeId, task: string, options: HostOptions = {}): Promise<string | null> {
+  const system = hostInstructions(vibe, options);
+  if (resolveProvider(vibe, options.strangers) === 'grok') {
+    const line = await askGrok(system, task);
+    if (line) return line;
+  }
+  return askGemini(system, task);
 }
 
 /** What each category actually asks the player to do, for the prompt and the fallback. */
@@ -115,15 +202,18 @@ function fallbackChallenge(category: AiMasterCategory): string {
 export async function generateChallenge(
   vibe: RoomVibeId,
   category: AiMasterCategory,
-  playerName: string
+  playerName: string,
+  options: HostOptions = {}
 ): Promise<{ challenge: string; hostLine: string }> {
   const brief = CATEGORY_BRIEF[category];
   const generated = await askHost(
     vibe,
     `Set a challenge for the player "${playerName}" in front of the whole room. Give them ${brief}. ` +
+      `Make it specific and a little uncomfortable — something the room will want to hear the answer to, not a generic icebreaker. ` +
       `Reply with EXACTLY two lines and no labels:\n` +
-      `Line 1: one short sentence you say to the room as you call ${playerName} out.\n` +
-      `Line 2: the challenge itself, addressed directly to ${playerName}.`
+      `Line 1: one short sentence you say to the room as you call ${playerName} out. Make it about them or the moment, never a generic hype line.\n` +
+      `Line 2: the challenge itself, addressed directly to ${playerName}.`,
+    options
   );
 
   if (generated) {
@@ -134,16 +224,31 @@ export async function generateChallenge(
     if (lines.length >= 2) return { hostLine: lines[0], challenge: lines.slice(1).join(' ') };
     // One usable line back: it is the challenge, and the call-out is canned.
     if (lines.length === 1) {
-      return { hostLine: `${playerName}, you are up. Let's see it.`, challenge: lines[0] };
+      return { hostLine: cannedCallOut(playerName), challenge: lines[0] };
     }
   }
 
-  return {
-    hostLine: `${playerName}, you are up. Let's see what you have got!`,
-    challenge: fallbackChallenge(category),
-  };
+  return { hostLine: cannedCallOut(playerName), challenge: fallbackChallenge(category) };
 }
 
+/**
+ * The line used when the model is unreachable.
+ *
+ * One line, repeated, is what "the host keeps saying the same thing" sounds
+ * like. A handful still cost nothing, and each one at least sounds like it is
+ * talking to somebody.
+ */
+const CALL_OUTS: ((name: string) => string)[] = [
+  (n) => `${n}, the room chose you. Nobody here is sorry about it.`,
+  (n) => `Spotlight's on ${n}. Try to look like you meant to be here.`,
+  (n) => `${n}. Yes, you. Take the mic before it takes you.`,
+  (n) => `Somebody has to go, and it is ${n}. Congratulations, I suppose.`,
+  (n) => `${n}, I have a question, and you have nowhere to hide.`,
+];
+
+export function cannedCallOut(name: string): string {
+  return CALL_OUTS[Math.floor(Math.random() * CALL_OUTS.length)](name);
+}
 
 /**
  * Asks Gemini for a fresh trivia question.

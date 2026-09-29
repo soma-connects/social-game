@@ -310,8 +310,8 @@ export type AiMasterBribe = {
   playerId: string;
   playerName: string;
   amount: number;
-  /** Skip the challenge, buy a life back, or push it onto somebody else. */
-  ask: 'skip' | 'life' | 'redirect';
+  /** Skip the challenge, buy a life back, push it onto somebody else, or name the next victim. */
+  ask: 'skip' | 'life' | 'redirect' | 'spotlight';
   /** Null while the host is still deciding. */
   accepted: boolean | null;
   hostLine?: string;
@@ -347,6 +347,28 @@ export type AiMasterState = {
   grudgeId?: string | null;
   bribes?: AiMasterBribe[];
   revealedAt?: number;
+  /**
+   * How the round ended, for the screen to say so.
+   *
+   * `passed` alone could not tell somebody who earned a pass from somebody who
+   * paid their way out, or from somebody who said nothing and was waved through
+   * by a room that never voted — and all three were shown as SURVIVED.
+   */
+  outcome?: 'survived' | 'bombed' | 'dodged' | 'skipped';
+  /** The host's last few lines, so the next ones are not the same joke in a new coat. */
+  hostHistory?: string[];
+  /**
+   * A player who paid the host to call somebody out next round.
+   *
+   * Public on purpose, like a bribe: the target should see who did it to them.
+   */
+  spotlight?: {
+    by: string;
+    byName: string;
+    target: string;
+    targetName: string;
+    price: number;
+  } | null;
   /**
    * Epoch ms by which this beat of the round has to have moved on.
    *

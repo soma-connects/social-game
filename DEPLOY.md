@@ -100,7 +100,8 @@ built* — build args, via `cloudbuild.yaml`. They cannot be added afterwards, a
 they are not secrets: they ship to every browser, and `firestore.rules` is what
 actually guards the data.
 
-**Runtime, secret.** `GEMINI_API_KEY`, `ADMIN_DASHBOARD_TOKEN`,
+**Runtime, secret.** `GEMINI_API_KEY`, `XAI_API_KEY` (optional — the Grok
+voice for the Roast Room, see `.env.local.example`), `ADMIN_DASHBOARD_TOKEN`,
 `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY`, the Cloudflare TURN pair and
 the Twilio pair are read by the server per request. They live on the Cloud Run
 service, set once and left alone — `cloudbuild.yaml` uses `--update-env-vars`,

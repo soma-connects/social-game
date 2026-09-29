@@ -41,6 +41,7 @@ import {
   personalDaresAllowed,
   TRUTH_OR_DARE_BLOCKED_MESSAGE,
   truthOrDareAllowed,
+  isStrangerRoom,
   PRESENCE_TIMEOUT_MS,
   isPresent,
   leaderProgressOf,
@@ -114,6 +115,8 @@ import {
   pickTruthOrDarePrompt,
 } from '@/lib/truthOrDareContent';
 import { addIdea, countIdeas, ideasBy, removeIdea, withoutAuthors } from '@/lib/truthOrDareIdeas';
+import { AI_MASTER_PASS_POINTS, AI_MASTER_STARTING_PURSE, AI_MASTER_VOTE_POINTS, buyFromHost } from '@/lib/aiMasterShop';
+import { fallbackLine, hostFacts, rememberHostLine, spokenAnswer, type LineKind } from '@/lib/aiMasterLines';
 
 export const dynamic = 'force-dynamic';
 
@@ -685,6 +688,7 @@ const SELF_PLAYER_ID_ACTIONS = new Set([
   'ai_master_respond',
   'ai_master_vote',
   'ai_master_bribe',
+  'ai_master_buy',
   'truth_or_dare_choose',
 ]);
 
@@ -1430,7 +1434,7 @@ async function expireStalledAiMaster(room: RoomState, now: number): Promise<void
     // life for a dropped connection.
     state.response = '';
     state.phase = 'voting';
-    state.hostLine = `${target?.name ?? 'They'} said nothing at all. Room — your call.`;
+    hostSays(state, `${target?.name ?? 'They'} said nothing at all. Room — your call.`);
     pushEvent(room, `⏳ ${target?.name ?? 'The target'} ran out of time to answer`, 'system');
     return;
   }
@@ -1471,15 +1475,33 @@ function rerollBias(room: RoomState, state: AiMasterState): void {
   state.grudgeId = shuffled[1]?.id ?? null;
 }
 
+/** What the host is told alongside a task, so it can be specific instead of generic. */
+function hostOptions(room: RoomState, state: AiMasterState | null | undefined, extra: string[] = []) {
+  return { strangers: isStrangerRoom(room), facts: hostFacts(room.players, state, extra) };
+}
+
+/** Sets the line the room hears, and remembers it so the next one is not a rerun. */
+function hostSays(state: AiMasterState, line: string): void {
+  state.hostLine = line;
+  rememberHostLine(state, line);
+}
+
 /** Opens the next round: new target, new task, fresh votes. */
 async function startAiMasterRound(room: RoomState): Promise<void> {
   const previous = room.aiMasterState ?? null;
-  const left = survivors(room);
 
-  if (left.length <= 1) {
-    if (left[0]) declareWinner(room, left[0], 'last_standing');
+  // The match is over when one player is left standing — counted from who is
+  // still IN, not from who happens to be connected this second. It counted
+  // present players, so a phone that had been in the background for a moment
+  // left "one survivor" and the match ended before its first round.
+  const alive = room.players.filter((p) => !p.eliminated);
+  if (alive.length <= 1) {
+    if (alive[0]) declareWinner(room, alive[0], 'last_standing');
     return;
   }
+  // Nobody is here to be called on: leave the room where it is until somebody is.
+  const here = survivors(room);
+  if (here.length === 0) return;
 
   const draft: AiMasterState = {
     round: (previous?.round ?? 0) + 1,
@@ -1491,19 +1513,44 @@ async function startAiMasterRound(room: RoomState): Promise<void> {
     favorId: previous?.favorId ?? null,
     grudgeId: previous?.grudgeId ?? null,
     bribes: [],
+    hostHistory: previous?.hostHistory ?? [],
+    spotlight: null,
   };
   rerollBias(room, draft);
 
-  const target = pickTarget(room, previous);
+  // A bought spotlight beats the draw. If the chosen player has left or been
+  // knocked out in the meantime, the buyer gets their points back.
+  let target: Player | null = null;
+  const extra: string[] = [];
+  const bought = previous?.spotlight ?? null;
+  if (bought) {
+    const chosen = here.find((p) => p.id === bought.target);
+    if (chosen) {
+      target = chosen;
+      extra.push(`${bought.byName} paid ${bought.price} points to put ${chosen.name} on the spot this round. Say so, with relish.`);
+    } else {
+      const buyer = room.players.find((p) => p.id === bought.by);
+      if (buyer) {
+        buyer.score = (buyer.score ?? 0) + bought.price;
+        pushEvent(room, `💸 ${bought.targetName} is not available — ${buyer.name} gets ${bought.price} points back`, 'system');
+      }
+    }
+  }
+  if (!target) target = pickTarget(room, previous);
   if (!target) return;
 
   const category = pickCategory(room);
-  const { challenge, hostLine } = await generateChallenge(roomVibeOf(room), category, target.name);
+  const { challenge, hostLine } = await generateChallenge(
+    roomVibeOf(room),
+    category,
+    target.name,
+    hostOptions(room, draft, extra)
+  );
 
   draft.targetId = target.id;
   draft.category = category;
   draft.challenge = challenge;
-  draft.hostLine = hostLine;
+  hostSays(draft, hostLine);
 
   room.aiMasterState = draft;
   room.phase = 'ai_master_round';
@@ -1511,14 +1558,15 @@ async function startAiMasterRound(room: RoomState): Promise<void> {
   pushEvent(room, `🎙️ Round ${draft.round}: the AI Master calls out ${target.name}`, 'system');
 }
 
-/** Points a passed round is worth, matching the social bonus the board pays. */
-const AI_MASTER_PASS_POINTS = 120;
-
 /**
  * Closes a round: tallies the room's verdict and makes it cost something.
  *
  * A tie counts as a fail. Somebody has to actually speak up for you — that is
  * the whole tension of being the one on the mic.
+ *
+ * The host is told what actually happened — the challenge, the words, the
+ * tally — because it used to be told only "congratulate them", and so it did,
+ * for a player who had said nothing at all.
  */
 async function resolveAiMasterRound(room: RoomState): Promise<void> {
   const state = room.aiMasterState;
@@ -1530,43 +1578,85 @@ async function resolveAiMasterRound(room: RoomState): Promise<void> {
   const verdicts = Object.values(state.votes ?? {});
   const passes = verdicts.filter((v) => v === 'pass').length;
   const fails = verdicts.filter((v) => v === 'fail').length;
-  // Nobody objecting counts as nobody objecting. A bare `passes > fails` fails
-  // the target on an empty tally, which takes a life off somebody because the
-  // room wandered off — reachable both from a timed-out vote and from the host
-  // forcing a verdict before anyone had pressed anything.
-  const passed = verdicts.length === 0 ? true : passes > fails;
+  const said = spokenAnswer(state.response);
+  const vibe = roomVibeOf(room);
 
   state.phase = 'verdict';
-  state.passed = passed;
   state.revealedAt = Date.now();
 
+  const scene =
+    `${target.name} was challenged: "${state.challenge}". ` +
+    (said ? `They answered: "${said.slice(0, 300)}". ` : 'They gave no answer at all. ');
+
+  // Said nothing, and the room did not vote either. Waving that through as a
+  // pass is what had the host congratulating an empty round — but it is not a
+  // fail either, because it is just as likely to be a dropped connection as a
+  // dodge, and a life is a lot to take for that.
+  if (!said && verdicts.length === 0) {
+    state.passed = false;
+    state.outcome = 'dodged';
+    pushEvent(room, `👻 ${target.name} said nothing — no points, no penalty`, 'system');
+    hostSays(
+      state,
+      (await askHost(
+        vibe,
+        `${scene}The room did not vote either. Roast them for ghosting the round. Do not congratulate them.`,
+        hostOptions(room, state)
+      )) ?? fallbackLine('dodged', target.name)
+    );
+    return;
+  }
+
+  // Nobody objecting to somebody who did speak counts as nobody objecting. A
+  // bare `passes > fails` fails the target on an empty tally, which takes a life
+  // because the room wandered off.
+  const passed = verdicts.length === 0 ? true : passes > fails;
+  state.passed = passed;
+
   if (passed) {
+    state.outcome = 'survived';
     target.score += AI_MASTER_PASS_POINTS;
     target.vibeScore = (target.vibeScore ?? 0) + passes * 10;
     updatePlayerLevel(target);
     pushEvent(room, `✅ ${target.name} survived the round ${passes}–${fails} (+${AI_MASTER_PASS_POINTS} pts)`, 'buff');
-    state.hostLine =
-      (await askHost(roomVibeOf(room), `In one short sentence, congratulate ${target.name} for surviving their challenge ${passes} votes to ${fails}.`)) ??
-      `${target.name} pulls it off! The room says yes.`;
+    hostSays(
+      state,
+      (await askHost(
+        vibe,
+        `${scene}The room voted ${passes} to ${fails} in their favour, so they survive. React to what they actually said: grudging respect at most, and a jab if the answer earned one. Do not just say well done.`,
+        hostOptions(room, state)
+      )) ?? fallbackLine('survived', target.name)
+    );
     return;
   }
 
+  state.outcome = 'bombed';
   const { livesLeft, empty } = loseLife(target);
   if (empty) {
     target.eliminated = true;
     pushEvent(room, `☠️ ${target.name} is OUT — no lives left!`, 'debuff');
-    state.hostLine =
-      (await askHost(roomVibeOf(room), `In one short sentence, dramatically announce that ${target.name} has run out of lives and is eliminated.`)) ??
-      `That is the end of the road for ${target.name}. Out!`;
+    hostSays(
+      state,
+      (await askHost(
+        vibe,
+        `${scene}The room voted ${fails} to ${passes} against them, and that was their last life: they are OUT of the game. Give them a send-off that roasts how they went out.`,
+        hostOptions(room, state)
+      )) ?? fallbackLine('eliminated', target.name)
+    );
   } else {
     pushEvent(
       room,
       `💔 ${target.name} bombed it ${fails}–${passes} — ${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left`,
       'debuff'
     );
-    state.hostLine =
-      (await askHost(roomVibeOf(room), `In one short sentence, tease ${target.name} for failing their challenge. They have ${livesLeft} lives left.`)) ??
-      `Not good enough, ${target.name}. That costs you a life.`;
+    hostSays(
+      state,
+      (await askHost(
+        vibe,
+        `${scene}The room voted ${fails} to ${passes} against them. They now have ${livesLeft} ${livesLeft === 1 ? 'life' : 'lives'} left. Roast what they actually said.`,
+        hostOptions(room, state)
+      )) ?? fallbackLine('bombed', target.name)
+    );
   }
 }
 
@@ -3442,6 +3532,21 @@ async function applyAction(
       if (room.players.length < 2) {
         return NextResponse.json({ error: 'The AI Master needs at least 2 players' }, { status: 409 });
       }
+      // Everybody has to be on the line to start. A player whose phone has been
+      // in the background for half a minute (off copying the invite link, say)
+      // counts as away, and starting anyway used to leave a single "survivor" —
+      // the match was over before its first round.
+      const away = room.players.filter((p) => !activePlayers(room).some((a) => a.id === p.id));
+      if (activePlayers(room).length < 2) {
+        return NextResponse.json(
+          {
+            error: `Everyone has to be connected to start — ${away.map((p) => p.name).join(', ')} ${
+              away.length === 1 ? 'is' : 'are'
+            } away right now. Give it a few seconds.`,
+          },
+          { status: 409 }
+        );
+      }
       room.roomType = 'ai_master';
       room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       room.matchStartedAt = Date.now();
@@ -3453,6 +3558,9 @@ async function applyAction(
         player.lives = STARTING_LIVES;
         delete player.eliminated;
         resetMatchStats(player);
+        // Points are this mode's currency, so everyone starts with the same
+        // purse rather than whatever the room happened to play before.
+        player.score = AI_MASTER_STARTING_PURSE;
       }
       pushEvent(room, `🤖 The AI Master takes the stage — ${ROOM_VIBES[roomVibeOf(room)].label}`, 'system');
       await startAiMasterRound(room);
@@ -3487,6 +3595,8 @@ async function applyAction(
         return NextResponse.json({ error: 'You cannot vote on your own round' }, { status: 403 });
       }
       const verdict = body.verdict === 'pass' ? 'pass' : 'fail';
+      // Paid on the first vote only, so changing your mind is free and pointless.
+      if (!(voter.id in (state.votes ?? {}))) voter.score = (voter.score ?? 0) + AI_MASTER_VOTE_POINTS;
       state.votes = { ...(state.votes ?? {}), [voter.id]: verdict };
 
       // Close automatically once everybody entitled to a say has had one.
@@ -3545,6 +3655,7 @@ async function applyAction(
         } else if (ask === 'skip' && state.targetId === player.id && state.phase !== 'verdict') {
           state.phase = 'verdict';
           state.passed = true;
+          state.outcome = 'skipped';
           state.revealedAt = Date.now();
         } else if (ask === 'redirect' && state.targetId === player.id && state.phase === 'announcing') {
           const victim = survivors(room).filter((p) => p.id !== player.id)[
@@ -3558,18 +3669,96 @@ async function applyAction(
           }
         }
         record.hostLine =
-          (await askHost(roomVibeOf(room), `In one short sentence, corruptly accept ${player.name}'s bribe of ${amount} points. Be shameless about it.`)) ??
-          `${player.name}, your generosity has been noted. Consider it handled.`;
+          (await askHost(
+            roomVibeOf(room),
+            `${player.name} just slipped you ${amount} points to ${
+              ask === 'life' ? 'buy a life back' : ask === 'redirect' ? 'dump their challenge on somebody else' : 'get out of their challenge'
+            }. Accept it shamelessly and in character, and say what they were after.`,
+            hostOptions(room, state)
+          )) ?? `${player.name}, your generosity has been noted. Consider it handled.`;
         pushEvent(room, `🤝 The AI Master took ${player.name}'s ${cost} points…`, 'social');
       } else {
         record.hostLine =
-          (await askHost(roomVibeOf(room), `In one short sentence, publicly refuse ${player.name}'s bribe of ${amount} points and mock them for trying.`)) ??
-          `${player.name} tried to buy me off. Adorable. Keep playing.`;
+          (await askHost(
+            roomVibeOf(room),
+            `${player.name} offered you ${amount} points to ${
+              ask === 'life' ? 'buy a life back' : ask === 'redirect' ? 'dump their challenge on somebody else' : 'get out of their challenge'
+            }, and you are refusing. Refuse in public, and mock them for thinking that was enough.`,
+            hostOptions(room, state)
+          )) ?? `${player.name} tried to buy me off. Adorable. Keep playing.`;
         pushEvent(room, `🚫 ${player.name} tried to bribe the AI Master and lost ${cost} points`, 'social');
       }
 
       state.bribes = [...(state.bribes ?? []), record].slice(-8);
-      state.hostLine = record.hostLine;
+      hostSays(state, record.hostLine ?? '');
+      return NextResponse.json({ room: await writeRoom(room) });
+    }
+
+    /**
+     * A purchase from the host's price list: a fixed price, and it always works.
+     *
+     * Kept apart from `ai_master_bribe`, which is a gamble — the host may take
+     * the money and refuse. This is for the things a player is sure they want.
+     */
+    case 'ai_master_buy': {
+      const state = room.aiMasterState;
+      if (!state || room.phase !== 'ai_master_round') {
+        return NextResponse.json({ error: 'No AI Master game in progress' }, { status: 409 });
+      }
+      const buyer = room.players.find((p) => p.id === body.playerId);
+      if (!buyer) return NextResponse.json({ error: 'Unknown player' }, { status: 403 });
+
+      const result = buyFromHost({
+        state,
+        buyer,
+        players: room.players,
+        standingIds: survivors(room).map((p) => p.id),
+        itemId: body.item,
+        targetId: body.targetId,
+      });
+      if (result.status === 'refused') {
+        return NextResponse.json({ error: result.error }, { status: result.http });
+      }
+
+      const { item, victim } = result;
+      const price = item.price;
+      let scene = '';
+      let kind: LineKind = 'skipped';
+      let event = '';
+
+      if (item.id === 'skip') {
+        kind = 'skipped';
+        scene = `${buyer.name} just paid ${price} points to get out of their own challenge ("${state.challenge}"). Announce it, and roast them for paying instead of answering.`;
+        event = `💸 ${buyer.name} paid ${price} points to skip their challenge`;
+      } else if (item.id === 'redirect' && victim) {
+        kind = 'redirected';
+        room.activePlayerIndex = Math.max(0, room.players.findIndex((p) => p.id === victim.id));
+        scene = `${buyer.name} paid ${price} points to dump their challenge ("${state.challenge}") on ${victim.name}. Announce it and take neither side.`;
+        event = `🔀 ${buyer.name} paid ${price} points to shove the challenge onto ${victim.name}`;
+      } else if (item.id === 'spotlight' && victim) {
+        kind = 'spotlight';
+        scene = `${buyer.name} paid ${price} points to make ${victim.name} the next victim. Announce it and needle ${victim.name} about who is coming for them.`;
+        event = `🎯 ${buyer.name} paid ${price} points — ${victim.name} is next`;
+      } else {
+        kind = 'life';
+        scene = `${buyer.name} paid ${price} points to buy a heart back and now has ${buyer.lives} of ${STARTING_LIVES}. Mock the price.`;
+        event = `❤️ ${buyer.name} paid ${price} points for a life`;
+      }
+
+      pushEvent(room, event, 'social');
+      const hostLine =
+        (await askHost(roomVibeOf(room), scene, hostOptions(room, state))) ?? fallbackLine(kind, buyer.name);
+
+      const record: AiMasterBribe = {
+        playerId: buyer.id,
+        playerName: buyer.name,
+        amount: price,
+        ask: item.id,
+        accepted: true,
+        hostLine,
+      };
+      state.bribes = [...(state.bribes ?? []), record].slice(-8);
+      hostSays(state, hostLine);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 

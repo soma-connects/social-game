@@ -1,7 +1,7 @@
 import type { AiHostPrompt } from './aiGameMaster';
 import type { MiniGameId } from './types';
 
-export type RoomVibeId = 'classic_party' | 'getting_to_know' | 'bros_hangout' | 'anime_squad' | 'flirty_wild';
+export type RoomVibeId = 'classic_party' | 'getting_to_know' | 'bros_hangout' | 'anime_squad' | 'flirty_wild' | 'roast_room';
 
 export type RoomVibePreset = {
   id: RoomVibeId;
@@ -15,7 +15,7 @@ export type RoomVibePreset = {
   preferredCategories: AiHostPrompt['category'][];
   /** Biases mini-game rotation toward what fits this room's mood. */
   preferredGames: MiniGameId[];
-  /** 'grok' resolves to Gemini today — see resolveProvider() in ai-master/route.ts. */
+  /** 'grok' is used when an xAI key is configured and the room has no strangers in it — see resolveProvider() in aiHost.ts. */
   provider: 'gemini' | 'grok';
   /** Only true for flirty_wild — drives the lobby "coming soon" badge. */
   comingSoon?: boolean;
@@ -28,9 +28,9 @@ export const ROOM_VIBES: Record<RoomVibeId, RoomVibePreset> = {
     id: 'classic_party',
     label: 'Classic Party',
     emoji: '🎉',
-    blurb: 'The default mixed-crowd host — energetic, silly, for any group.',
+    blurb: 'The default mixed-crowd host — quick, silly, and not afraid to tease.',
     hostPersona:
-      'Keep your usual high-energy, silly, crowd-pleasing party host tone. No particular theme — just keep everyone laughing.',
+      'Playful and quick, a host with teeth. Tease people about what they actually said and did — light, silly, never mean. No particular theme; the joke is always the specific thing that just happened.',
     preferredCategories: [],
     preferredGames: [],
     provider: 'gemini',
@@ -67,6 +67,17 @@ export const ROOM_VIBES: Record<RoomVibeId, RoomVibePreset> = {
     preferredCategories: ['personality', 'debate'],
     preferredGames: ['trivia_showdown', 'debate'],
     provider: 'gemini',
+  },
+  roast_room: {
+    id: 'roast_room',
+    label: 'Roast Room',
+    emoji: '🔥',
+    blurb: 'Everybody gets roasted. Thick skin only.',
+    hostPersona:
+      'This room signed up to be roasted. Be a savage stand-up comic: specific, fast and merciless about what people actually said and did — their answers, their scores, their excuses, their lives left. Rivalries between players are gold, so escalate them. Punch at choices and performance, never at who someone is.',
+    preferredCategories: ['dare', 'debate'],
+    preferredGames: ['debate', 'trivia_showdown', 'asteroid_defense'],
+    provider: 'grok',
   },
   flirty_wild: {
     id: 'flirty_wild',

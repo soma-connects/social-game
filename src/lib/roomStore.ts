@@ -385,6 +385,11 @@ class RoomStoreManager {
     return this.post(roomId, { action: 'ai_master_bribe', amount, ask });
   }
 
+  /** A fixed-price purchase from the host's list. Some items need a victim named. */
+  public aiMasterBuy(roomId: string, item: string, targetId?: string) {
+    return this.post(roomId, { action: 'ai_master_buy', item, targetId });
+  }
+
   // ── Truth or Dare game ───────────────────────────────────────────────────
 
   public updateTruthOrDareSettings(

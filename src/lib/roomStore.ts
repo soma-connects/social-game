@@ -612,9 +612,14 @@ class RoomStoreManager {
    * document and pushes a snapshot to every client, so this is the most
    * expensive thing the game does per second — and spectators only need the
    * gist of the attempt, not a frame-accurate mirror of it.
+   *
+   * One change is exempt: the attempt starting or ending. That is what tells
+   * everyone else's replay recorder when to run, and a listener told a second
+   * late has already missed the first word.
    */
   private lastLivePush = 0;
   private lastLiveBody = '';
+  private lastLiveAttempting: boolean | undefined;
   public pushLiveState(
     roomId: string,
     playerId: string,
@@ -622,7 +627,8 @@ class RoomStoreManager {
     minIntervalMs = 1500
   ): void {
     const now = Date.now();
-    if (now - this.lastLivePush < minIntervalMs) return;
+    const attemptChanged = state.attempting !== undefined && state.attempting !== this.lastLiveAttempting;
+    if (!attemptChanged && now - this.lastLivePush < minIntervalMs) return;
 
     // Nothing spectators can see has changed — don't pay for a write.
     const body = JSON.stringify(state);
@@ -630,6 +636,7 @@ class RoomStoreManager {
 
     this.lastLivePush = now;
     this.lastLiveBody = body;
+    this.lastLiveAttempting = state.attempting;
 
     void fetch(`/api/room/${roomId}`, {
       method: 'POST',

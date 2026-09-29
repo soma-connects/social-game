@@ -18,6 +18,7 @@ import { usePitchDetection, CALIBRATION_MS } from '@/hooks/usePitchDetection';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
 import { publishFrame } from '@/lib/liveFrames';
+import { useAttemptWindow } from '@/hooks/useAttemptWindow';
 import { Mic, MicOff, Volume2 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -143,6 +144,10 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
   const [micError, setMicError] = useState(false);
   const [calCountdown, setCalCountdown] = useState(Math.round(CALIBRATION_MS / 1000));
 
+  // Calibration is warm-up. The attempt is the flight, and the room's replay
+  // recorder runs only while this is open. See attemptWindow.ts.
+  useAttemptWindow(player.id, gameState === 'playing');
+
   // Game state refs (mutated in the animation loop, not React state)
   const stateRef = useRef({
     playerY: CANVAS_H / 2,
@@ -222,6 +227,21 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
   liftRef.current = lift;
   volumeRef.current = volume;
   pitchRef.current = pitch;
+
+  // Tell the room the flight is over. The loop only reports while flying, so
+  // without this the last thing anyone was told is "in the air" -- and the replay
+  // recorder on every other device keeps running through the crash screen.
+  useEffect(() => {
+    if (gameState !== 'crashed' || !roomId) return;
+    roomStore.pushLiveState(roomId, player.id, {
+      prompt: `${Math.floor(stateRef.current.distance / 10)}m`,
+      detail: 'flying on pitch',
+      score: finalScore,
+      status: 'CRASHED',
+      good: false,
+      attempting: false,
+    });
+  }, [gameState, roomId, player.id, finalScore]);
 
   const handleCrash = useCallback((score: number) => {
     setGameState('crashed');
@@ -351,6 +371,7 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
           score: s.score,
           status: s.overheating ? 'straining!' : 'in the air',
           good: true,
+          attempting: true,
         });
       }
 

@@ -24,6 +24,7 @@ import {
 } from '@/lib/speechService';
 import { roomStore } from '@/lib/roomStore';
 import { micStream } from '@/lib/micStream';
+import { useAttemptWindow } from '@/hooks/useAttemptWindow';
 import AvatarIllustration from './AvatarIllustration';
 import MicContentionNotice from './MicContentionNotice';
 
@@ -50,6 +51,10 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
   const [error, setError] = useState<SpeechError | null>(null);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [caps, setCaps] = useState<MicCapabilities | null>(null);
+
+  // The attempt is the stretch after the tap, not the whole turn: the room's replay
+  // recorder runs only while this is open. See attemptWindow.ts.
+  useAttemptWindow(activePlayer.id, status === 'listening');
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sessionRef = useRef<ListenSession | null>(null);
@@ -280,6 +285,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
           ? 'listeningâ€¦'
           : 'about to start',
       good: status === 'matched' ? true : status === 'failed' ? false : undefined,
+      attempting: status === 'listening',
     });
   }, [challenge, transcript, status, timeLeft, room.roomId, room.turnTimeLimit, activePlayer.id]);
 

@@ -26,6 +26,7 @@ import { Player } from '@/lib/types';
 import { usePitchDetection } from '@/hooks/usePitchDetection';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
+import { useAttemptWindow } from '@/hooks/useAttemptWindow';
 import {
   CLOSE_CENTS,
   GRACE_SECONDS,
@@ -73,6 +74,12 @@ export default function SolfegeGame({ player, roomId, onComplete }: SolfegeGameP
   const [listenPhase, setListenPhase] = useState<'tonic' | 'target'>('tonic');
   const [holdLeft, setHoldLeft] = useState(HOLD_SECONDS);
   const [verdict, setVerdict] = useState<{ text: string; points: number; accuracy: number } | null>(null);
+
+  // Calibration is warm-up and 'finished' is over. Everything between is the
+  // attempt, so the room's replay recorder runs across the whole run of rounds
+  // instead of restarting each one and keeping only the last. See attemptWindow.ts.
+  const attempting = stage !== 'calibrating' && stage !== 'finished';
+  useAttemptWindow(player.id, attempting);
 
   // Sampled while the player holds the note. A ref, because the sampling loop
   // must not re-render on every frame.
@@ -249,8 +256,9 @@ export default function SolfegeGame({ player, roomId, onComplete }: SolfegeGameP
             : 'silent'
           : verdict?.text,
       good: stage === 'sing' ? direction === 'hold' : verdict ? verdict.points >= 50 : undefined,
+      attempting,
     });
-  }, [target, stage, direction, totalScore, roundIndex, verdict, roomId, player.id]);
+  }, [target, stage, direction, totalScore, roundIndex, verdict, roomId, player.id, attempting]);
 
   // Marker position, inverted because higher pitch belongs at the top.
   const markerPct = Math.max(0, Math.min(100, 50 - (off / METER_RANGE) * 50));

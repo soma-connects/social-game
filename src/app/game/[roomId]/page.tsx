@@ -46,6 +46,7 @@ import TeamBattleIntro from '@/components/TeamBattleIntro';
 import TeamBattleRecap from '@/components/TeamBattleRecap';
 import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
+import { useAttemptOpen } from '@/hooks/useAttemptWindow';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
 import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam, micIsLive, isStrangerRoom, getPhaseChrome } from '@/lib/gameRules';
@@ -134,9 +135,26 @@ export default function GameRoomPage() {
     return () => clearInterval(timer);
   }, [isAttemptPhase, isPerformer, performer?.id]);
 
+  /**
+   * The replay is of the attempt, not of the phase.
+   *
+   * It is the performer's turn from the moment the phase starts, but nothing has
+   * been attempted until they tap START, or the mic has calibrated, or the
+   * reference note has played -- and with the first-time briefing on screen that
+   * is a minute, not a moment. Recording for the whole phase put that minute at
+   * the front of the clip and, capped at fifteen seconds, could stop before the
+   * attempt began. See attemptWindow.ts.
+   */
+  const attemptOpen = useAttemptOpen({
+    isPerformer,
+    performerId: performer?.id,
+    game: room?.currentMiniGame,
+    liveState: room?.liveState,
+  });
+
   const { clip: replayClip, isRecording: isCapturing } = useVoiceRecorder({
     stream: captureStream,
-    active: isAttemptPhase && !!captureStream,
+    active: isAttemptPhase && attemptOpen && !!captureStream,
     /**
      * A clip belongs to exactly one attempt: this performer, this round, this
      * game. Any of those changing discards it.

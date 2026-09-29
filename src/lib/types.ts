@@ -507,6 +507,12 @@ export type LiveMiniGameState = {
   status?: string;
   /** Whether it is currently going well, for colour. */
   good?: boolean;
+  /**
+   * Whether the attempt itself is under way — as opposed to being the performer's
+   * turn, which starts long before they do anything. Everybody else's replay
+   * recorder runs only while this is true; see attemptWindow.ts.
+   */
+  attempting?: boolean;
 };
 
 /** Every dramatic thing the board can do to somebody. */

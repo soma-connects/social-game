@@ -331,3 +331,56 @@ describe('buying from the host', () => {
     expect(playerOf(roomId, buyer.id).score).toBe(300);
   });
 });
+
+describe('calling the next round', () => {
+  it('is refused while the round in front of the room is still going', async () => {
+    const { roomId, host } = await match();
+
+    const res = await call(roomId, { action: 'ai_master_next_round' }, host);
+
+    expect(res.status).toBe(409);
+    expect(state(roomId).round).toBe(1);
+    expect(state(roomId).phase).toBe('announcing');
+  });
+
+  it('starts exactly one round from a verdict, however many times it is tapped', async () => {
+    // Rounds were being replaced five and thirteen seconds after they began: the
+    // auto-advance and a tap on NEXT ROUND each started one, and the first was
+    // thrown away unfinished.
+    const { roomId, host } = await match();
+    await call(roomId, { action: 'ai_master_verdict' }, host);
+    expect(state(roomId).phase).toBe('verdict');
+
+    const first = await call(roomId, { action: 'ai_master_next_round' }, host);
+    const second = await call(roomId, { action: 'ai_master_next_round' }, host);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    expect(state(roomId).round).toBe(2);
+    expect(state(roomId).phase).toBe('announcing');
+  });
+});
+
+describe('what the server logs', () => {
+  it('says which action was refused and why, without a token', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { roomId, host } = await match();
+
+    await call(roomId, { action: 'ai_master_next_round' }, host);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const entry = warn.mock.calls.find((c) => c[0] === 'room action refused');
+    expect(entry).toBeDefined();
+    expect(entry![1]).toMatchObject({ room: roomId, action: 'ai_master_next_round', status: 409, error: 'The round is not over yet' });
+    expect(JSON.stringify(entry)).not.toContain(host.token);
+    warn.mockRestore();
+  });
+
+  it('records whether a player’s tab was in the foreground, so a drop can be explained', async () => {
+    const { roomId, ada } = await match();
+
+    await call(roomId, { action: 'heartbeat', visible: false }, ada);
+
+    expect(playerOf(roomId, ada.id).lastVisible).toBe(false);
+  });
+});

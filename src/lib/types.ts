@@ -46,6 +46,8 @@ export type Player = {
    * updating it, which is the only way to tell them apart from someone thinking.
    */
   lastSeen?: number;
+  /** Whether their tab was in the foreground at the last heartbeat that was written. */
+  lastVisible?: boolean;
   /** Set when they left on purpose, or were dropped for going quiet. */
   connected?: boolean;
   /**

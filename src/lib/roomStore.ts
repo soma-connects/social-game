@@ -684,7 +684,11 @@ class RoomStoreManager {
    * identical to somebody taking a long turn, and the room waits forever.
    */
   public heartbeat(roomId: string, playerId: string) {
-    return this.post(roomId, { action: 'heartbeat', playerId });
+    return this.post(roomId, {
+      action: 'heartbeat',
+      playerId,
+      visible: typeof document === 'undefined' ? true : document.visibilityState === 'visible',
+    });
   }
 
   public leaveRoom(roomId: string, playerId: string) {

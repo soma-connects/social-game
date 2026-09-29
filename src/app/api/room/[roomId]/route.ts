@@ -227,6 +227,15 @@ function prunePresence(room: RoomState): boolean {
   for (const player of room.players) {
     const gone = now - (player.lastSeen ?? now) >= PRESENCE_TIMEOUT_MS;
     if (gone && player.connected !== false) {
+      // Two players were dropped within a minute or two of the AI Master
+      // starting. Whether the tab was hidden or simply frozen decides the fix.
+      console.warn('presence: dropped', {
+        room: room.roomId,
+        player: player.name,
+        silentForMs: now - (player.lastSeen ?? now),
+        lastSeenVisible: player.lastVisible,
+        phase: room.phase,
+      });
       player.connected = false;
       changed = true;
       pushEvent(room, `📴 ${player.name} dropped out`, 'system');
@@ -2065,7 +2074,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
     if (!UNAUTHENTICATED_ACTIONS.has(action)) {
       const { tokens } = await readSecrets(roomId);
       const auth = authorize(room, action, String(body.token ?? ''), tokens);
-      if ('error' in auth) return auth.error;
+      if ('error' in auth) return refusal(roomId, action, auth.error);
       const callerId = auth.caller.player.id;
 
       // Overwrite the identity fields rather than trusting the body. Note this
@@ -2080,6 +2089,7 @@ export async function POST(request: Request, { params }: { params: { roomId: str
 
     try {
       const response = await applyAction(room, action, body);
+      if (response.status >= 400) return refusal(roomId, action, response);
 
       // Matches are won deep inside synchronous helpers (a tile landing, a
       // powerup shove), which cannot await a Firestore write. This is the one
@@ -2108,6 +2118,25 @@ export async function POST(request: Request, { params }: { params: { roomId: str
       }
     }
   }
+}
+
+/**
+ * Logs a refused request and hands it back unchanged.
+ *
+ * The request log records only a status, so a burst of 409s could not be told
+ * apart — a double-tapped button, a stale screen and a genuinely stuck room all
+ * looked the same. The action and the reason are enough to tell them apart, and
+ * carry nothing private: no token, no body.
+ */
+function refusal(roomId: string, action: string, response: NextResponse): NextResponse {
+  void response
+    .clone()
+    .json()
+    .then((body: { error?: string; code?: string }) => {
+      console.warn('room action refused', { room: roomId, action, status: response.status, error: body?.error, code: body?.code });
+    })
+    .catch(() => {});
+  return response;
 }
 
 /** How many times a losing write is replayed before the caller is told to retry. */
@@ -3619,6 +3648,13 @@ async function applyAction(
       if (!room.aiMasterState) {
         return NextResponse.json({ error: 'No AI Master game in progress' }, { status: 409 });
       }
+      // Only once the round in front of the room is over. This used to start a
+      // new round from any state, so the auto-advance timer and a tap on NEXT
+      // ROUND (or two taps) each started one, and the first was thrown away
+      // unfinished — rounds replaced five and thirteen seconds after they began.
+      if (room.aiMasterState.phase !== 'verdict') {
+        return NextResponse.json({ error: 'The round is not over yet' }, { status: 409 });
+      }
       await startAiMasterRound(room);
       return NextResponse.json({ room: await writeRoom(room) });
     }
@@ -4176,6 +4212,8 @@ async function applyAction(
       }
 
       me.lastSeen = now;
+      // Recorded only so a later drop can say whether the tab was in the foreground.
+      me.lastVisible = body.visible !== false;
       if (wasAway) {
         me.connected = true;
         pushEvent(room, `🔌 ${me.name} reconnected`, 'system');

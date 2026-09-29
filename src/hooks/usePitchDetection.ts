@@ -6,6 +6,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { PitchDetector } from 'pitchy';
 import { micStream } from '@/lib/micStream';
+import { DEFAULT_RANGE, PitchSmoother, rangeFromSamples } from '@/lib/pitchTracking';
 
 export interface PitchData {
   /** Detected fundamental frequency in Hz, or 0 if unvoiced / silent. */
@@ -49,7 +50,8 @@ export function usePitchDetection() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number>(0);
   const historyRef = useRef<number[]>([]);
-  const smoothLiftRef = useRef<number>(0);
+  // Turns detected pitches into a steady height for the bird - see pitchTracking.ts.
+  const smootherRef = useRef(new PitchSmoother(DEFAULT_RANGE));
   const calibrationSamplesRef = useRef<number[]>([]);
   const calibrationRef = useRef<CalibrationRange>({ low: 90, high: 450 });
 
@@ -89,6 +91,8 @@ export function usePitchDetection() {
       activeRef.current = true;
       calibratingRef.current = true;
       calibrationSamplesRef.current = [];
+      smootherRef.current.reset();
+      smootherRef.current.setRange(DEFAULT_RANGE);
 
       setData((d) => ({ ...d, isActive: true, isCalibrated: false }));
 
@@ -114,7 +118,8 @@ export function usePitchDetection() {
 
         let pitch = 0;
         // Require clear periodic vocal sound (clarity > 0.70 and min volume)
-        if (clarity > 0.62 && volume > 6 && detectedPitch >= 60 && detectedPitch <= 1000) {
+        const voiced = clarity > 0.62 && volume > 6 && detectedPitch >= 60 && detectedPitch <= 1000;
+        if (voiced) {
           historyRef.current.push(detectedPitch);
           if (historyRef.current.length > MEDIAN_WINDOW) historyRef.current.shift();
           pitch = median(historyRef.current);
@@ -127,23 +132,15 @@ export function usePitchDetection() {
           calibrationSamplesRef.current.push(pitch);
         }
 
-        // 3. Map pitch to 0.0 -> 1.0 lift
-        const range = calibrationRef.current;
-        const span = Math.max(range.high - range.low, 50);
-
-        const rawLift = pitch > 0 ? Math.max(0, Math.min(1, (pitch - range.low) / span)) : 0.0;
-
-        // Instant lift on voice, instant drop on silence
-        const factor = pitch > 0 ? 0.45 : 0.6;
-        smoothLiftRef.current = smoothLiftRef.current * (1 - factor) + rawLift * factor;
-        if (pitch === 0 && smoothLiftRef.current < 0.02) {
-          smoothLiftRef.current = 0.0;
-        }
+        // 3. Height for the bird. Fed the raw detection rather than `pitch`, which
+        // is already smoothed for the karaoke game: the bird does its own, longer,
+        // smoothing and would only add lag on top of that one.
+        const lift = smootherRef.current.update(voiced ? detectedPitch : 0, performance.now());
 
         setData({
           pitch: Math.round(pitch),
           volume,
-          lift: smoothLiftRef.current,
+          lift,
           isCalibrated: !calibratingRef.current,
           isActive: true,
         });
@@ -157,6 +154,8 @@ export function usePitchDetection() {
       setTimeout(() => {
         if (!activeRef.current) return;
         calibratingRef.current = false;
+        // The bird's own range, in semitones and never narrower than an octave.
+        smootherRef.current.setRange(rangeFromSamples(calibrationSamplesRef.current));
         const samples = calibrationSamplesRef.current.sort((a, b) => a - b);
         if (samples.length >= 5) {
           const p10 = samples[Math.floor(samples.length * 0.1)];

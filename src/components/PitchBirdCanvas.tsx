@@ -18,6 +18,7 @@ import { usePitchDetection, CALIBRATION_MS } from '@/hooks/usePitchDetection';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
 import { publishFrame } from '@/lib/liveFrames';
+import { stepBird } from '@/lib/pitchBirdPhysics';
 import { useAttemptWindow } from '@/hooks/useAttemptWindow';
 import { Mic, MicOff, Volume2 } from 'lucide-react';
 
@@ -38,12 +39,9 @@ const CANVAS_H = 500;
 // by a damped spring. Sing a note, sit at that height. This is how pitch-driven
 // games like Pitch Hero handle it.
 
-/** Pull toward the pitch's target height. Lower = smooth & controlled acceleration. */
-const SPRING = 0.06;
-/** Velocity retained per frame for smooth, stable damping. */
-const DAMPING = 0.82;
-/** Safety clamp so the bird moves at a controlled, comfortable speed. */
-const MAX_VY = 7;
+// The spring, its damping and gravity live in pitchBirdPhysics.ts, where they are
+// tested. The loop used to hard-code its own, which resonated at about three
+// cycles a second and made the bird swing further than the voice that moved it.
 
 /** Playable band, inset from the canvas edges so the extremes stay reachable. */
 const TOP_MARGIN = 60;
@@ -292,46 +290,30 @@ export default function PitchBirdCanvas({ player, roomId, onComplete }: PitchBir
       const currentLift = liftRef.current;
       const currentVolume = volumeRef.current;
 
-      // ── Pitch & Volume → Responsive Flight Physics ─────────────
-      if (currentLift > 0.01) {
-        const lowY = CANVAS_H - BOTTOM_MARGIN - PLAYER_RADIUS;
-        const highY = TOP_MARGIN + PLAYER_RADIUS;
-        // Pitch/Volume drives target height with instant 0.12 spring factor
-        const targetY = lowY - currentLift * (lowY - highY);
-        s.vy += (targetY - s.playerY) * 0.12;
-        s.vy *= 0.82;
-      } else {
-        // Gravity pulls bird down instantly when voice stops
-        s.vy += 0.55;
-        s.vy *= 0.88;
-      }
+      // ── Pitch → flight ─────────────────────────────────────────────
+      const stepped = stepBird({ y: s.playerY, vy: s.vy }, currentLift, {
+        lowY: CANVAS_H - BOTTOM_MARGIN - PLAYER_RADIUS,
+        highY: TOP_MARGIN + PLAYER_RADIUS,
+        minY: PLAYER_RADIUS,
+        maxY: CANVAS_H - PLAYER_RADIUS,
+      });
+      s.playerY = stepped.body.y;
+      s.vy = stepped.body.vy;
 
-      s.vy = Math.max(-8, Math.min(8, s.vy));
-      s.playerY += s.vy;
-
-      // Clamp to canvas bounds
-      if (s.playerY < PLAYER_RADIUS) {
-        s.playerY = PLAYER_RADIUS;
-        s.vy = 0;
-      }
-      if (s.playerY > CANVAS_H - PLAYER_RADIUS) {
-        s.playerY = CANVAS_H - PLAYER_RADIUS;
-        s.vy = 0;
+      if (stepped.onFloor && s.scrapeThrottle <= 0) {
         // Ground scrape effect
-        if (s.scrapeThrottle <= 0) {
-          audioSFX.playTireScrape();
-          s.scrapeThrottle = 15;
-          // Spark particles
-          for (let i = 0; i < 3; i++) {
-            s.particles.push({
-              x: 100 - PLAYER_RADIUS,
-              y: CANVAS_H - PLAYER_RADIUS + 5,
-              vx: -1 - Math.random() * 2,
-              vy: -1 - Math.random() * 3,
-              life: 15 + Math.random() * 10,
-              color: Math.random() > 0.5 ? '#FFD000' : '#FF5722',
-            });
-          }
+        audioSFX.playTireScrape();
+        s.scrapeThrottle = 15;
+        // Spark particles
+        for (let i = 0; i < 3; i++) {
+          s.particles.push({
+            x: 100 - PLAYER_RADIUS,
+            y: CANVAS_H - PLAYER_RADIUS + 5,
+            vx: -1 - Math.random() * 2,
+            vy: -1 - Math.random() * 3,
+            life: 15 + Math.random() * 10,
+            color: Math.random() > 0.5 ? '#FFD000' : '#FF5722',
+          });
         }
       }
       if (s.scrapeThrottle > 0) s.scrapeThrottle--;

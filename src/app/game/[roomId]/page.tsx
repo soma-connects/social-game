@@ -1270,7 +1270,7 @@ function BoardPeek({
 
       {open && (
         <div className="animate-fadeIn">
-          <MapRenderer theme={theme} players={players} activePlayerId={activePlayerId} />
+          <MapRenderer theme={theme} players={players} activePlayerId={activePlayerId} defaultFollow="me" />
         </div>
       )}
     </div>

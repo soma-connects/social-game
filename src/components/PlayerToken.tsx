@@ -7,6 +7,8 @@ import AvatarIllustration from './AvatarIllustration';
 interface PlayerTokenProps {
   player: Player;
   isActive: boolean;
+  /** This browser's own player, so the turn tag can say whose turn it is. */
+  isMe?: boolean;
   spreadX: number;
   spreadY: number;
 }
@@ -37,7 +39,7 @@ function bfs(from: number, to: number, edges: (id: number) => number[]): number[
   return null;
 }
 
-function graphPath(from: number, to: number): number[] {
+export function graphPath(from: number, to: number): number[] {
   if (from === to) return [from];
 
   return (
@@ -48,7 +50,7 @@ function graphPath(from: number, to: number): number[] {
   );
 }
 
-export default function PlayerToken({ player, isActive, spreadX, spreadY }: PlayerTokenProps) {
+export default function PlayerToken({ player, isActive, isMe = false, spreadX, spreadY }: PlayerTokenProps) {
   const controls = useAnimation();
   const prevPosRef = useRef(player.boardPosition);
 
@@ -135,7 +137,8 @@ export default function PlayerToken({ player, isActive, spreadX, spreadY }: Play
       >
         {isActive && (
           <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-partyYellow text-partyDark font-black text-[9px] px-2 py-0.5 rounded-full uppercase shadow-lg animate-bounce whitespace-nowrap z-20">
-            YOUR TURN
+            {/* It said YOUR TURN over whoever was up, whoever was looking. */}
+            {isMe ? 'YOUR TURN' : `${player.name.slice(0, 10)}'S TURN`}
           </div>
         )}
 

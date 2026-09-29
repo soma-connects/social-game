@@ -1,18 +1,36 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Trophy } from 'lucide-react';
 import { MapTheme, Player } from '@/lib/types';
 import { THEMES } from '@/lib/themeConfig';
 import { BOARD_GRAPH, TOTAL_TILES, boardProgress, BOARD_LENGTH } from '@/lib/gameRules';
 import TileNode from './TileNode';
-import PlayerToken from './PlayerToken';
+import PlayerToken, { graphPath } from './PlayerToken';
+import { mapZoomForWidth, viewportOffset } from '@/lib/mapViewport';
+import { roomStore } from '@/lib/roomStore';
 
 interface MapRendererProps {
   theme: MapTheme;
   players: Player[];
   activePlayerId: string;
   totalTiles?: number;
+  /** Who the camera follows on a phone until the player chooses otherwise. */
+  defaultFollow?: 'active' | 'me';
+}
+
+type Follow = 'active' | 'me' | 'map';
+
+/** Screen width, watched, so the map is redrawn at the right size when a phone turns. */
+function useMapZoom(): number {
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => {
+    const update = () => setZoom(mapZoomForWidth(window.innerWidth));
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+  return zoom;
 }
 
 const generateRoadPath = () => {
@@ -38,10 +56,39 @@ const generateRoadPath = () => {
 
 const ROAD_SVG_PATH = generateRoadPath();
 
-export default function MapRenderer({ theme, players, activePlayerId, totalTiles = TOTAL_TILES }: MapRendererProps) {
+export default function MapRenderer({
+  theme,
+  players,
+  activePlayerId,
+  totalTiles = TOTAL_TILES,
+  defaultFollow = 'active',
+}: MapRendererProps) {
   const themeConfig = THEMES[theme] || THEMES.forest;
   const activePlayer = players.find((player) => player.id === activePlayerId);
   const activeProgress = activePlayer ? boardProgress(activePlayer.boardPosition) : 0;
+
+  // On a phone the whole road does not fit at a size anyone can read, so the map
+  // is drawn larger than its window and the camera follows one player. "Map"
+  // shows all of it, small, for finding your bearings.
+  const screenZoom = useMapZoom();
+  const [follow, setFollow] = useState<Follow>(defaultFollow);
+  const myPlayerId = roomStore.getMyPlayerId();
+  const me = players.find((player) => player.id === myPlayerId);
+  const focusPlayer = follow === 'me' && me ? me : activePlayer ?? players[0];
+  const zoom = follow === 'map' ? 1 : screenZoom;
+  const focusNode = focusPlayer?.boardPosition ?? 0;
+  const focusPoint = BOARD_GRAPH[focusNode] ?? { x: 50, y: 50 };
+  const offset = viewportOffset(focusPoint, zoom);
+
+  // The camera takes as long over a move as the token does (half a second a
+  // tile), so the token is still in view while it walks.
+  const previousNode = useRef(focusNode);
+  const moved = previousNode.current !== focusNode;
+  const hops = moved ? Math.max(1, graphPath(previousNode.current, focusNode).length - 1) : 0;
+  const cameraSeconds = moved ? Math.max(0.7, hops * 0.5) : 0.7;
+  useEffect(() => {
+    previousNode.current = focusNode;
+  }, [focusNode]);
 
   return (
     <section className="relative w-full overflow-hidden rounded-[28px] border border-white/15 bg-slate-950 shadow-2xl" aria-label="Roadmap board">
@@ -65,7 +112,7 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
       </header>
 
       <div className="relative z-10 px-2 py-3 sm:px-5 sm:py-5">
-        <div className="relative mx-auto aspect-square w-full max-w-[560px] rounded-2xl border border-white/10 bg-[url('/images/galactic_background.jpg')] bg-cover bg-center p-1.5 sm:p-3">
+        <div className="relative mx-auto aspect-square w-full max-w-[560px] overflow-hidden rounded-2xl border border-white/10 bg-[url('/images/galactic_background.jpg')] bg-cover bg-center p-1.5 sm:p-3">
           <div className="absolute inset-0 rounded-2xl bg-slate-950/55" />
           <div className="absolute inset-0 z-0 overflow-hidden rounded-2xl pointer-events-none">
             <img src="/images/planet_ringed.jpg" alt="" aria-hidden className="absolute -right-8 -top-8 w-36 opacity-35 mix-blend-screen sm:w-56" />
@@ -73,6 +120,21 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
             <img src="/images/satellite.jpg" alt="" aria-hidden className="absolute -bottom-2 right-2 w-24 opacity-30 mix-blend-screen sm:w-32" />
           </div>
 
+          {/* The world: everything positioned in percent of the map lives in here,
+              so it can be drawn larger than the window and slid under it. */}
+          <div
+            data-map-world
+            className="absolute z-[1]"
+            style={{
+              width: `${zoom * 100}%`,
+              height: `${zoom * 100}%`,
+              left: `${offset.left}%`,
+              top: `${offset.top}%`,
+              // Size animates too: switching to the whole map shrinks it, and a map
+              // that shrank at once while it slid back would be off screen for a second.
+              transition: `left ${cameraSeconds}s ${hops > 1 ? 'linear' : 'ease-out'}, top ${cameraSeconds}s ${hops > 1 ? 'linear' : 'ease-out'}, width 0.7s ease-out, height 0.7s ease-out`,
+            }}
+          >
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 z-0 h-full w-full pointer-events-none" aria-hidden="true">
             <path d={ROAD_SVG_PATH} stroke={themeConfig.roadStroke} strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.42" />
             <path d={ROAD_SVG_PATH} stroke="rgba(226,232,240,0.72)" strokeWidth="2.2" strokeDasharray="1 3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
@@ -99,8 +161,32 @@ export default function MapRenderer({ theme, players, activePlayerId, totalTiles
             const slot = sharing.findIndex((p) => p.id === player.id);
             const spreadX = sharing.length > 1 ? (slot - (sharing.length - 1) / 2) * 4.5 : 0;
             const spreadY = sharing.length > 1 ? (slot % 2 === 0 ? -1.5 : 1.5) : 0;
-            return <PlayerToken key={player.id} player={player} isActive={isTurn} spreadX={spreadX} spreadY={spreadY} />;
+            return <PlayerToken key={player.id} player={player} isActive={isTurn} isMe={player.id === myPlayerId} spreadX={spreadX} spreadY={spreadY} />;
           })}
+          </div>
+
+          {/* Who to follow. Only on a screen small enough to need it. */}
+          {screenZoom > 1 && (
+            <div className="absolute bottom-2 left-2 z-30 flex gap-1 rounded-full border border-white/15 bg-slate-950/80 p-1 backdrop-blur">
+              {([
+                ['me', '📍 Me'],
+                ['active', '▶ Turn'],
+                ['map', '🗺 All'],
+              ] as [Follow, string][]).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setFollow(id)}
+                  aria-pressed={follow === id}
+                  className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide transition-colors ${
+                    follow === id ? 'bg-partyYellow text-partyDark' : 'text-gray-300 hover:text-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

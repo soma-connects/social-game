@@ -564,6 +564,8 @@ const HOST_ONLY_ACTIONS = new Set([
   'ai_master_next_round',
   'truth_or_dare_start',
   'truth_or_dare_next_round',
+  'chess_start_match',
+  'ludo_start_match',
   'update_truth_or_dare_settings',
   'update_phase',
   'start_match',

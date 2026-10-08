@@ -95,7 +95,7 @@ export default function BackgroundMusic({ screen, showToggle = true }: Backgroun
           onClick={toggle}
           aria-label={muted ? 'Turn music on' : 'Turn music off'}
           title={muted ? 'Music off' : 'Music on'}
-          className={`fixed bottom-24 left-4 lg:bottom-6 z-40 w-11 h-11 rounded-full border shadow-xl backdrop-blur-md transition active:scale-95 flex items-center justify-center ${
+          className={`fixed ${screen === 'lobby' ? 'bottom-44' : 'bottom-24'} left-4 lg:bottom-6 z-40 w-11 h-11 rounded-full border shadow-xl backdrop-blur-md transition active:scale-95 flex items-center justify-center ${
             muted
               ? 'bg-slate-900/90 border-white/15 text-gray-500'
               : 'bg-slate-900/90 border-partyCyan/50 text-partyCyan'

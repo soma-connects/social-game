@@ -185,8 +185,13 @@ export default function GameRoomPage() {
    *
    * Spectators get it too — they are about to play the same game next turn, and
    * watching something you do not understand is worse than playing it.
+   *
+   * Never in the lobby: a new room carries a default `currentMiniGame` before
+   * anyone has picked a game, so without this check every first-time player
+   * was greeted by the rules of a game nobody had chosen.
    */
-  const inMiniGame = !!room && !!room.currentMiniGame && !!MINIGAME_BRIEFINGS[room.currentMiniGame];
+  const inMiniGame =
+    !!room && room.phase !== 'lobby' && !!room.currentMiniGame && !!MINIGAME_BRIEFINGS[room.currentMiniGame];
   const {
     showing: briefingGame,
     dismiss: dismissBriefing,
@@ -270,7 +275,7 @@ export default function GameRoomPage() {
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white">JOIN AS GUEST PLAYER</h2>
             <p className="text-xs text-gray-300">
-              {room.players[0]?.name || 'The host'} invited you to the Voice Party Roadmap Game.
+              {room.players[0]?.name || 'The host'} invited you to Voice Party Arcade.
             </p>
           </div>
 

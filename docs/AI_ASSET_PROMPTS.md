@@ -657,9 +657,9 @@ the most visual weight of any icon in the game.
 ```
 [STYLE BLOCK]
 
-Generate ONE image: a 4-column × 2-row grid of seven bold game-mode emblems on a single
+Generate ONE image: a 4-column × 2-row grid of eight bold game-mode emblems on a single
 canvas, identical scale and lighting, each centred in its own invisible square cell.
-Leave the 8th cell empty. These are large hero icons for big tappable menu cards —
+These are large hero icons for big tappable menu cards —
 chunky, confident, high contrast.
 
 1. ROADMAP BOARD  — a pair of gold #FFD166 dice resting on a winding neon board path
@@ -672,13 +672,19 @@ chunky, confident, high contrast.
 6. CHESS          — a chess knight in profile, glossy navy #0B132B with gold rim light.
 7. LUDO           — four ludo tokens in red, blue, emerald and gold arranged around a
                     single die.
+8. TRUTH OR DARE  — a spinning wheel split into two halves, one cyan #00F0FF and one
+                    hot pink #FF3D81, with a gold pointer and a small flame rising from
+                    the pink half.
 
 Background: transparent, or pure #000000 flat black.
 Must read at 64×64 px. No text, no letters, no numbers. Output 2048×1024.
 ```
 
 Slice → `board.png`, `voice.png`, `party.png`, `ai_master.png`, `team_battle.png`,
-`chess.png`, `ludo.png`.
+`chess.png`, `ludo.png`, `truth_or_dare.png`.
+
+`truth_or_dare.png` is the only one missing today: until it lands the lobby card falls
+back to a 🎯 emoji, which is why it looks different from the others.
 
 ---
 

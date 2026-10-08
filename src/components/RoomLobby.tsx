@@ -35,13 +35,150 @@ import { audioSFX } from '@/lib/audioFeedback';
 import AvatarIllustration from './AvatarIllustration';
 import BackgroundMusic from './BackgroundMusic';
 
+type LobbyMode =
+  | 'board'
+  | 'karaoke'
+  | 'hangout'
+  | 'ai_master'
+  | 'truth_or_dare'
+  | 'team_battle'
+  | 'chess'
+  | 'ludo';
+
+interface ModeCard {
+  id: LobbyMode;
+  title: string;
+  /** Shown on the Start button, so the host can see which game it will launch. */
+  short: string;
+  blurb: string;
+  /** What the game needs, so nobody finds out by pressing Start and being refused. */
+  players: string;
+  /** Mirrors what the server enforces (route.ts), or 1 where it enforces nothing. */
+  minPlayers: number;
+  /** Not playable yet — Start opens the "coming soon" notice instead. */
+  soon?: boolean;
+  art: string;
+  emoji: string;
+  /** Classes for the card while selected. */
+  card: string;
+  iconBox: string;
+  chip: string;
+}
+
+const MODES: ModeCard[] = [
+  {
+    id: 'board',
+    title: 'BOARD GAME ROADMAP',
+    short: 'Board Game',
+    blurb: 'Roll 3D dice, race the roadmap, set traps and shop for powerups.',
+    players: '1–6 players',
+    minPlayers: 1,
+    art: 'board',
+    emoji: '🎲',
+    card: 'bg-cyan-950/40 border-partyCyan text-white shadow-xl glow-cyan',
+    iconBox: 'bg-partyCyan/15 border border-partyCyan/30',
+    chip: 'bg-partyCyan text-partyDark',
+  },
+  {
+    id: 'karaoke',
+    title: 'KARAOKE & PITCH ARCADE',
+    short: 'Karaoke',
+    blurb: 'PitchBird, solfège note matching and Voice Arena fast-mic.',
+    players: 'Coming soon',
+    minPlayers: 1,
+    soon: true,
+    art: 'voice',
+    emoji: '🎤',
+    card: 'bg-gradient-to-r from-pink-950/80 via-slate-900/90 to-pink-900/50 border-partyPink text-white shadow-xl',
+    iconBox: 'bg-partyPink/15 border border-partyPink/30',
+    chip: 'bg-partyPink text-white',
+  },
+  {
+    id: 'hangout',
+    title: '15s ROAST HANGOUT',
+    short: 'Roast Hangout',
+    blurb: 'Open-mic voice lounge with a party soundboard and a roast countdown.',
+    players: 'Coming soon',
+    minPlayers: 1,
+    soon: true,
+    art: 'party',
+    emoji: '🍻',
+    card: 'bg-gradient-to-r from-emerald-950/80 via-slate-900/90 to-emerald-900/50 border-emerald-400 text-white shadow-xl glow-emerald',
+    iconBox: 'bg-emerald-500/15 border border-emerald-400/30',
+    chip: 'bg-emerald-500 text-partyDark',
+  },
+  {
+    id: 'ai_master',
+    title: 'AI GAME MASTER',
+    short: 'AI Game Master',
+    blurb: 'An AI host runs live challenges, Truth or Bluff, debates and voice trivia.',
+    players: '2–6 players',
+    minPlayers: 2,
+    art: 'ai_master',
+    emoji: '🤖',
+    card: 'bg-gradient-to-r from-amber-950/80 via-slate-900/90 to-amber-900/50 border-partyYellow text-white shadow-xl glow-yellow',
+    iconBox: 'bg-partyYellow/15 border border-partyYellow/30',
+    chip: 'bg-partyYellow text-partyDark',
+  },
+  {
+    id: 'truth_or_dare',
+    title: 'TRUTH OR DARE',
+    short: 'Truth or Dare',
+    blurb: 'Spin the wheel or flip a card. Curated categories and a spicy toggle.',
+    players: '2–6 players',
+    minPlayers: 2,
+    art: 'truth_or_dare',
+    emoji: '🎯',
+    card: 'bg-gradient-to-r from-fuchsia-950/80 via-slate-900/90 to-pink-900/50 border-partyPink text-white shadow-xl',
+    iconBox: 'bg-partyPink/15 border border-partyPink/30',
+    chip: 'bg-partyPink text-white',
+  },
+  {
+    id: 'team_battle',
+    title: 'TEAM BATTLE',
+    short: 'Team Battle',
+    blurb: 'Two crews, sudden-death voice duels. Pick your side!',
+    players: '2–6 players · two crews',
+    minPlayers: 2,
+    art: 'team_battle',
+    emoji: '⚔️',
+    card: 'bg-gradient-to-r from-red-950/80 via-slate-900/90 to-red-900/50 border-red-500 text-white shadow-xl glow-red',
+    iconBox: 'bg-red-500/15 border border-red-500/30',
+    chip: 'bg-red-500 text-white',
+  },
+  {
+    id: 'chess',
+    title: 'CHESS ARENA',
+    short: 'Chess',
+    blurb: '1v1 duels, 2v2 team consultation with secret strategy voice, or solo against the AI bot.',
+    players: '1–4 players',
+    minPlayers: 1,
+    art: 'chess',
+    emoji: '♟️',
+    card: 'bg-gradient-to-r from-sky-950/80 via-slate-900/90 to-indigo-900/50 border-cyan-400 text-white shadow-xl glow-cyan',
+    iconBox: 'bg-cyan-500/15 border border-cyan-400/30',
+    chip: 'bg-cyan-400 text-slate-950',
+  },
+  {
+    id: 'ludo',
+    title: 'LUDO VOICE PARTY',
+    short: 'Ludo',
+    blurb: 'Classic Ludo with animated dice and party music. Bots fill the empty seats.',
+    players: '1–4 players',
+    minPlayers: 1,
+    art: 'ludo',
+    emoji: '🎲',
+    card: 'bg-gradient-to-r from-amber-950/80 via-slate-900/90 to-yellow-900/50 border-amber-400 text-white shadow-xl glow-yellow',
+    iconBox: 'bg-amber-500/15 border border-amber-400/30',
+    chip: 'bg-amber-400 text-slate-950',
+  },
+];
+
 interface RoomLobbyProps {
   room: RoomState;
   myPlayer: Player;
   onStartGame: () => void;
-  onSelectMode?: (
-    mode: 'board' | 'karaoke' | 'hangout' | 'ai_master' | 'truth_or_dare' | 'team_battle' | 'chess' | 'ludo'
-  ) => void;
+  onSelectMode?: (mode: LobbyMode) => void;
 }
 
 const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
@@ -55,12 +192,8 @@ const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
 export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }: RoomLobbyProps) {
   const [selectedLangs, setSelectedLangs] = useState<LanguageCode[]>(room.selectedLanguages);
   const [mathEnabled, setMathEnabled] = useState(room.mathEnabled);
-  const [newPlayerName, setNewPlayerName] = useState('');
-  const [addError, setAddError] = useState<string | null>(null);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
-  const [activeMode, setActiveMode] = useState<
-    'board' | 'karaoke' | 'hangout' | 'ai_master' | 'truth_or_dare' | 'team_battle' | 'chess' | 'ludo'
-  >('board');
+  const [activeMode, setActiveMode] = useState<LobbyMode>('board');
   const [showCustomDecks, setShowCustomDecks] = useState(false);
   const [isShuffling, setIsShuffling] = useState(false);
   const [selectedGames, setSelectedGames] = useState<MiniGameId[]>(
@@ -164,30 +297,66 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
     roomStore.updateLanguages(room.roomId, selectedLangs, updated);
   };
 
-  const handleAddPlayer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const name = newPlayerName.trim();
-    if (!name) return;
+  const isHost = myPlayer.isHost;
+  const hostName = room.players.find((p) => p.isHost)?.name ?? 'the host';
+  const selectedMode = MODES.find((m) => m.id === activeMode) ?? MODES[0];
+  // Refuse before the press rather than after it: the server says no to a game
+  // without enough players, and that arrives as an error banner somewhere else.
+  const needsMorePlayers = !selectedMode.soon && room.players.length < selectedMode.minPlayers;
+  // Team Battle takes two presses on purpose: the first switches the room into
+  // team mode so the crew roster appears above and people can arrange sides,
+  // the second actually starts the series.
+  const teamSetupStep = activeMode === 'team_battle' && room.roomType !== 'team_battle';
+  const startLabel = selectedMode.soon
+    ? "SEE WHAT'S COMING"
+    : teamSetupStep
+      ? 'SET UP THE CREWS'
+      : `START ${selectedMode.short.toUpperCase()}`;
 
-    setAddError(null);
-    // Adding a pass-and-play player must not steal this browser's identity, so
-    // the returned playerId is deliberately ignored here.
-    const myId = roomStore.getMyPlayerId(room.roomId);
-    const result = await roomStore.joinRoom(room.roomId, name);
-    if (myId) roomStore.setMyPlayerId(myId, room.roomId);
+  /** Each player gets the control on their own card only. */
+  const changeAvatarButton = (player: Player) =>
+    player.id === myPlayer.id ? (
+      <button
+        type="button"
+        onClick={() => setShowAvatarModal(true)}
+        className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-partyCyan hover:text-white bg-partyCyan/15 hover:bg-partyCyan/30 border border-partyCyan/40 px-3 py-1.5 rounded-xl transition-all active:scale-95"
+      >
+        <Shirt className="w-3.5 h-3.5 text-partyYellow" /> CHANGE AVATAR
+      </button>
+    ) : null;
 
-    if (result.error) {
-      setAddError(result.error);
-      return;
-    }
-    audioSFX.playChoiSuccess();
-    setNewPlayerName('');
-  };
+  /**
+   * The one control that matters in a lobby. Rendered twice — pinned to the
+   * bottom of the screen on a phone (the page used to be three screens tall with
+   * this at the very end) and inline in the picker on a desktop.
+   */
+  const startControl = isHost ? (
+    <div className="space-y-1.5">
+      {needsMorePlayers && (
+        <p className="text-[11px] text-amber-300 font-bold text-center leading-snug">
+          {selectedMode.short} needs {selectedMode.minPlayers}+ players — invite someone with the room code.
+        </p>
+      )}
+      <button
+        onClick={() => (onSelectMode ? onSelectMode(activeMode) : onStartGame())}
+        disabled={needsMorePlayers}
+        className="w-full bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-sm sm:text-base py-3 sm:py-3.5 px-6 sm:px-8 rounded-2xl flex items-center justify-center gap-2 sm:gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-yellow disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
+      >
+        <Play className="w-5 h-5 fill-current" />
+        <span>{startLabel}</span>
+      </button>
+    </div>
+  ) : (
+    <p className="text-center text-sm font-extrabold text-gray-200 py-3">
+      Waiting for {hostName} to start the game…
+    </p>
+  );
 
   return (
-    // pb-28 on small screens keeps the whole lobby clear of the fixed mobile
-    // action bar, which otherwise covers whatever ends up last on the page.
-    <div className="max-w-5xl mx-auto px-2 sm:px-4 pt-4 pb-28 lg:pb-4 space-y-6 animate-fadeIn relative">
+    // pb-52 on small screens keeps the whole lobby clear of the pinned Start bar
+    // and the fixed mobile action bar beneath it, which otherwise cover whatever
+    // ends up last on the page.
+    <div className="max-w-5xl mx-auto px-2 sm:px-4 pt-4 pb-52 lg:pb-4 space-y-6 animate-fadeIn relative">
       {/* Ambient Glow Blobs */}
       <div className="absolute top-10 left-10 w-72 h-72 bg-purple-600/15 blur-3xl rounded-full pointer-events-none" />
       <div className="absolute bottom-10 right-10 w-80 h-80 bg-emerald-500/15 blur-3xl rounded-full pointer-events-none" />
@@ -195,117 +364,76 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
       {/* Ambient Dashboard Background Music */}
       <BackgroundMusic screen="lobby" />
 
-      {/* Compact WhatsApp Direct Invite Banner */}
-      <div className="glass-card rounded-2xl p-3.5 sm:p-4 border border-emerald-400/20 relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-400/30 shrink-0">
-            <MessageCircle className="w-5 h-5 fill-current" />
-          </div>
-          <div>
-            <h3 className="font-extrabold text-sm sm:text-base text-white">
-              INVITE CREW TO PLAY
-            </h3>
-            <p className="text-gray-300 text-xs">
-              Send room code <span className="text-partyYellow font-mono font-bold">{room.roomId}</span> directly via WhatsApp
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={shareToWhatsApp}
-          className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-partyDark font-black text-xs px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all transform hover:scale-105 shadow-lg shrink-0"
-        >
-          <MessageCircle className="w-4 h-4 fill-current" />
-          <span>SHARE TO WHATSAPP</span>
-        </button>
-      </div>
-
-      {/* Public listing. Host-only, and lobby-only on the server: publishing a
-          match in progress would drop strangers into somebody's game and flip
-          the safety rules underneath the people already in it. */}
-      {myPlayer.isHost && (
-        <div className="glass-card rounded-3xl p-4 sm:p-5 border border-white/10 relative z-10 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className={`p-2.5 rounded-xl border shrink-0 ${
-                room.isPublic
-                  ? 'bg-partyCyan/20 text-partyCyan border-partyCyan/40'
-                  : 'bg-white/5 text-gray-400 border-white/10'
-              }`}
-            >
-              <Globe className="w-5 h-5" />
+      {/* One invite card: the code, the share button and — for the host — who may join.
+          Two separate banners used to push the lobby's real content a full screen down.
+          The listing control is host-only, and lobby-only on the server: publishing a
+          match in progress would drop strangers into somebody's game and flip the
+          safety rules underneath the people already in it. */}
+      <div className="glass-card rounded-2xl border border-emerald-400/20 shadow-xl relative z-10 overflow-hidden">
+        <div className="p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-400/30 shrink-0">
+              <MessageCircle className="w-5 h-5 fill-current" />
             </div>
-            <div>
-              <h3 className="font-extrabold text-sm sm:text-base text-white">
-                {room.isPublic ? 'LISTED PUBLICLY' : 'INVITE ONLY'}
-              </h3>
-              <p className="text-gray-300 text-xs max-w-md">
-                {room.isPublic
-                  ? 'Anyone can find this room and join. Mics start muted and dares are off.'
-                  : 'Only people with the code can join. Make it public to fill empty seats with strangers.'}
+            <div className="min-w-0">
+              <h3 className="font-extrabold text-sm sm:text-base text-white">INVITE YOUR CREW</h3>
+              <p className="text-gray-300 text-xs">
+                Room code{' '}
+                <span className="text-partyYellow font-mono font-bold text-sm tracking-wider">{room.roomId}</span>
               </p>
             </div>
           </div>
 
           <button
-            onClick={() => {
-              audioSFX.playTap();
-              void roomStore.setVisibility(room.roomId, !room.isPublic);
-            }}
-            className={`w-full sm:w-auto font-black text-xs px-5 py-2.5 rounded-xl transition-all shrink-0 ${
-              room.isPublic
-                ? 'bg-white/10 hover:bg-white/20 text-gray-200 border border-white/20'
-                : 'bg-partyCyan hover:bg-cyan-300 text-partyDark'
-            }`}
+            onClick={shareToWhatsApp}
+            className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-partyDark font-black text-xs px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all transform hover:scale-105 shadow-lg shrink-0"
           >
-            {room.isPublic ? 'MAKE PRIVATE' : 'MAKE PUBLIC'}
+            <MessageCircle className="w-4 h-4 fill-current" />
+            <span>SHARE TO WHATSAPP</span>
           </button>
         </div>
-      )}
 
-      {/* Two-up grid for Lounging Area & Mode Hub */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 relative z-10">
-        {/* Player Lounging Area */}
-        <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 border border-white/5 shadow-2xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
-                <Users className="w-5 h-5 text-partyYellow" />
-                THE LOUNGING AREA ({room.players.length}/{MAX_PLAYERS} PLAYERS)
-              </h3>
-              <p className="text-xs text-gray-400">Local hangout spot for joined avatars</p>
-            </div>
-            <span className="text-xs text-partyYellow font-mono font-bold bg-partyYellow/20 px-3 py-1 rounded-full border border-partyYellow/30">
-              {room.roomId}
-            </span>
-          </div>
-
-          {/* Compact Profile & Avatar Bar (No page clutter!) */}
-          <div className="rounded-2xl bg-partyDark/70 border border-partyCyan/25 p-4 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <AvatarIllustration avatar={myPlayer.avatar} size="md" />
+        {isHost && (
+          <div className="border-t border-white/10 bg-white/[0.02] p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+            <div className="flex items-start gap-3">
+              <Globe className={`w-4 h-4 mt-0.5 shrink-0 ${room.isPublic ? 'text-partyCyan' : 'text-gray-400'}`} />
               <div>
-                <span className="text-[10px] font-black text-partyYellow uppercase tracking-wider block">YOUR ACTIVE AVATAR</span>
-                <h4 className="text-base font-black text-white">{myPlayer.avatar.name}</h4>
-                <p className="flex items-center gap-1.5 text-[11px] text-partyCyan font-bold uppercase">
-                  <GameIcon
-                    src={badgeArt(myPlayer.avatar.badge.toLowerCase())}
-                    emoji={myPlayer.avatar.emoji}
-                    className="w-4 h-4 text-[11px] shrink-0"
-                  />
-                  {myPlayer.avatar.badge || 'Party Contestant'}
+                <h4 className="font-extrabold text-xs text-white">{room.isPublic ? 'LISTED PUBLICLY' : 'INVITE ONLY'}</h4>
+                <p className="text-gray-300 text-xs max-w-md">
+                  {room.isPublic
+                    ? 'Anyone can find this room and join. Mics start muted and dares are off.'
+                    : 'Only people with the code can join. Make it public to fill empty seats with strangers.'}
                 </p>
               </div>
             </div>
 
             <button
-              type="button"
-              onClick={() => setShowAvatarModal(true)}
-              className="bg-partyCyan/20 hover:bg-partyCyan/35 text-partyCyan font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-md active:scale-95 border border-partyCyan/40"
+              onClick={() => {
+                audioSFX.playTap();
+                void roomStore.setVisibility(room.roomId, !room.isPublic);
+              }}
+              className={`w-full sm:w-auto font-black text-xs px-5 py-2.5 rounded-xl transition-all shrink-0 ${
+                room.isPublic
+                  ? 'bg-white/10 hover:bg-white/20 text-gray-200 border border-white/20'
+                  : 'bg-partyCyan hover:bg-cyan-300 text-partyDark'
+              }`}
             >
-              <Shirt className="w-4 h-4 text-partyYellow" />
-              <span>CHANGE AVATAR</span>
+              {room.isPublic ? 'MAKE PRIVATE' : 'MAKE PUBLIC'}
             </button>
+          </div>
+        )}
+      </div>
+
+      {/* Two-up grid for the players & the game picker */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 relative z-10">
+        {/* Who has joined */}
+        <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 border border-white/5 shadow-2xl">
+          <div>
+            <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
+              <Users className="w-5 h-5 text-partyYellow" />
+              WHO&apos;S HERE ({room.players.length}/{MAX_PLAYERS})
+            </h3>
+            <p className="text-xs text-gray-400">Everyone who has joined this room</p>
           </div>
 
           {/* Before the match, not during a scored round. Half this game is
@@ -425,6 +553,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                           <div className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-1 rounded-full border whitespace-nowrap" style={{ backgroundColor: `${team.color}30`, borderColor: `${team.color}50`, color: team.color }}>
                             <CheckCircle2 className="w-3 h-3 shrink-0" /> READY
                           </div>
+                          {changeAvatarButton(player)}
                         </motion.div>
                       ))}
                       {members.length === 0 && (
@@ -508,457 +637,235 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   <div className="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-400 text-[10px] font-extrabold px-2.5 py-1 rounded-full border border-emerald-500/30 whitespace-nowrap">
                     <CheckCircle2 className="w-3 h-3 shrink-0" /> READY
                   </div>
+                  {changeAvatarButton(player)}
                 </div>
               ))}
             </div>
           )}
-
-          {/* Quick Add Player Form */}
-          {room.players.length < MAX_PLAYERS && (
-            <form onSubmit={handleAddPlayer} className="pt-2 space-y-3">
-              <label className="text-xs font-bold text-gray-300 block">ADD LOCAL HANGOUT PLAYER (PASS & PLAY):</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Enter Player Name..."
-                  value={newPlayerName}
-                  onChange={(e) => setNewPlayerName(e.target.value)}
-                  maxLength={20}
-                  className="flex-1 bg-partyDark/90 border border-white/20 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-partyYellow"
-                />
-                <button
-                  type="submit"
-                  disabled={!newPlayerName.trim()}
-                  className="bg-partyYellow hover:bg-yellow-400 disabled:opacity-50 text-partyDark font-black text-sm px-5 py-2.5 rounded-xl transition-all shadow-md"
-                >
-                  ADD
-                </button>
-              </div>
-              {addError && <p className="text-xs text-red-300">{addError}</p>}
-            </form>
-          )}
         </div>
 
-        {/* Cosmic App Feature Mode Selector Hub */}
+        {/* Game picker */}
         <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 border border-white/5 shadow-2xl">
           <div className="space-y-2">
             <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
               <Gamepad2 className="w-5 h-5 text-partyYellow" />
-              CHOOSE APP GAME MODE
+              {isHost ? 'PICK A GAME' : 'THE GAMES'}
             </h3>
-            <p className="text-xs text-gray-300">Tap a mode to select what you want to play</p>
+            <p className="text-xs text-gray-300">
+              {isHost
+                ? 'Tap a game, then start it when everyone is in.'
+                : `${hostName} picks and starts the game. Tap one to read about it.`}
+            </p>
 
             <div className="grid grid-cols-1 gap-3 pt-2">
-              {/* 1. Board Game Mode */}
-              <button
-                onClick={() => {
-                  setActiveMode('board');
-                  audioSFX.playChoiSuccess();
-                }}
-                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3 ${
-                  activeMode === 'board'
-                    ? 'bg-cyan-950/40 border-partyCyan text-white shadow-xl glow-cyan'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
-                }`}
-              >
-                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyCyan/15 border border-partyCyan/30 shrink-0">
-                  <GameIcon src={modeArt('board')} emoji="🎲" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
-                    BOARD GAME ROADMAP
-                    {activeMode === 'board' && (
-                      <span className="bg-partyCyan text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">
-                        SELECTED
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    Multiplayer 3D dice rolling, roadmap tiles, trap placement & powerup shop!
-                  </p>
-                </div>
-              </button>
-
-              {/* 2. Karaoke Arcade */}
-              <button
-                onClick={() => {
-                  setActiveMode('karaoke');
-                  audioSFX.playChoiSuccess();
-                }}
-                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
-                  activeMode === 'karaoke'
-                    ? 'bg-gradient-to-r from-pink-950/80 via-slate-900/90 to-pink-900/50 border-partyPink text-white shadow-xl'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
-                }`}
-              >
-                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyPink/15 border border-partyPink/30 shrink-0">
-                  <GameIcon src={modeArt('voice')} emoji="🎤" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
-                    KARAOKE & PITCH ARCADE
-                    {activeMode === 'karaoke' && (
-                      <span className="bg-partyPink text-white text-[9px] px-2 py-0.5 rounded-full font-black">
-                        SELECTED
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    PitchBird flying 🐦, Solfege Note Matching 🎵 & Voice Arena fast-mic!
-                  </p>
-                </div>
-              </button>
-
-              {/* 3. Hangout Lounge */}
-              <button
-                onClick={() => {
-                  setActiveMode('hangout');
-                  audioSFX.playChoiSuccess();
-                }}
-                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
-                  activeMode === 'hangout'
-                    ? 'bg-gradient-to-r from-emerald-950/80 via-slate-900/90 to-emerald-900/50 border-emerald-400 text-white shadow-xl glow-emerald'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
-                }`}
-              >
-                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/30 shrink-0">
-                  <GameIcon src={modeArt('party')} emoji="🍻" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
-                    15s ROAST HANGOUT
-                    {activeMode === 'hangout' && (
-                      <span className="bg-emerald-500 text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">
-                        SELECTED
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    Open-mic voice lounge, party soundboard pad (Danfo Horn) & roast countdown!
-                  </p>
-                </div>
-              </button>
-
-              {/* 4. AI Game Master Mode */}
-              <button
-                onClick={() => {
-                  setActiveMode('ai_master');
-                  audioSFX.playChoiSuccess();
-                }}
-                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
-                  activeMode === 'ai_master'
-                    ? 'bg-gradient-to-r from-amber-950/80 via-slate-900/90 to-amber-900/50 border-partyYellow text-white shadow-xl glow-yellow'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
-                }`}
-              >
-                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyYellow/15 border border-partyYellow/30 shrink-0">
-                  <GameIcon src={modeArt('ai_master')} emoji="🤖" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
-                    AI GAME MASTER MODE
-                    {activeMode === 'ai_master' && (
-                      <span className="bg-partyYellow text-partyDark text-[9px] px-2 py-0.5 rounded-full font-black">
-                        SELECTED
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    Live AI Host challenges, Truth or Bluff, Debate topics & voice trivia!
-                  </p>
-                </div>
-              </button>
-
-              {/* The vibe only means anything to the AI Master, so it belongs
-                  behind that mode rather than sitting over the whole lobby. */}
-              {activeMode === 'ai_master' && (
-                <div className="rounded-2xl border border-partyYellow/30 bg-partyYellow/[0.06] p-3.5 space-y-3 animate-fadeIn">
-                  <div>
-                    <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-partyYellow" /> WHO IS IN THIS ROOM?
-                    </h4>
-                    <p className="text-[11px] text-gray-400 mt-0.5">
-                      {myPlayer.isHost
-                        ? 'The AI Master reads this to pick its tone and its games.'
-                        : `${ROOM_VIBES[roomVibe].emoji} ${ROOM_VIBES[roomVibe].label} — set by the host.`}
-                    </p>
-                  </div>
-
-                  {myPlayer.isHost && (
-                    <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
-                      {Object.values(ROOM_VIBES).map((vibe) => {
-                        const isSelected = vibe.id === roomVibe;
-                        return (
-                          <button
-                            key={vibe.id}
-                            type="button"
-                            onClick={() => selectVibe(vibe.id)}
-                            className={`p-2.5 rounded-xl border text-left transition-all relative active:scale-95 ${
-                              isSelected
-                                ? 'bg-partyPink/20 border-partyPink text-white shadow-lg'
-                                : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/30'
-                            }`}
-                          >
-                            {vibe.comingSoon && (
-                              <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-0.5 bg-black/50 text-partyYellow text-[8px] font-black px-1.5 py-0.5 rounded-full border border-partyYellow/30">
-                                <LockKeyhole className="w-2 h-2" /> SOON
-                              </span>
-                            )}
-                            <GameIcon src={vibeArt(vibe.id)} emoji={vibe.emoji} className="w-7 h-7 text-lg mx-auto" />
-                            <span className="font-extrabold text-xs block mt-0.5">{vibe.label}</span>
-                            <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{vibe.blurb}</span>
-                            {isSelected && (
-                              <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-partyPink/30 px-2 py-0.5 text-[9px] font-black text-partyPink">
-                                <CheckCircle2 className="w-2.5 h-2.5" /> SELECTED
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-              {/* 4b. Truth or Dare */}
-              <button
-                onClick={() => {
-                  setActiveMode('truth_or_dare');
-                  audioSFX.playChoiSuccess();
-                }}
-                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
-                  activeMode === 'truth_or_dare'
-                    ? 'bg-gradient-to-r from-fuchsia-950/80 via-slate-900/90 to-pink-900/50 border-partyPink text-white shadow-xl'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
-                }`}
-              >
-                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-partyPink/15 border border-partyPink/30 shrink-0">
-                  <GameIcon src={modeArt('truth_or_dare')} emoji="🎯" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
-                    TRUTH OR DARE
-                    {activeMode === 'truth_or_dare' && (
-                      <span className="bg-partyPink text-white text-[9px] px-2 py-0.5 rounded-full font-black">
-                        SELECTED
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    Spin the wheel 🎡 or flip a card 🃏 — classic Truth or Dare, curated categories, spicy toggle.
-                  </p>
-                </div>
-              </button>
-
-              {/* Setup only means anything to Truth or Dare, so it lives behind
-                  that mode card rather than sitting over the whole lobby. */}
-              {activeMode === 'truth_or_dare' && (
-                <div className="rounded-2xl border border-partyPink/30 bg-partyPink/[0.06] p-3.5 space-y-4 animate-fadeIn">
-                  <div>
-                    <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-partyPink" /> CATEGORIES
-                    </h4>
-                    <p className="text-[11px] text-gray-400 mt-0.5">
-                      {myPlayer.isHost
-                        ? 'Pick what the room draws from. At least one stays on.'
-                        : 'Set by the host.'}
-                    </p>
-                  </div>
-
-                  <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
-                    {TRUTH_OR_DARE_CATEGORIES.filter((c) => !c.spicy).map((category) => {
-                      const isOn = truthOrDareSettings.categories.includes(category.id);
-                      return (
-                        <button
-                          key={category.id}
-                          type="button"
-                          onClick={() => toggleTruthOrDareCategory(category.id)}
-                          disabled={!myPlayer.isHost}
-                          className={`p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
-                            isOn
-                              ? 'bg-partyPink/20 border-partyPink text-white shadow-lg'
-                              : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+              {MODES.map((mode) => {
+                const active = mode.id === activeMode;
+                return (
+                  <React.Fragment key={mode.id}>
+                    <button
+                      onClick={() => {
+                        setActiveMode(mode.id);
+                        audioSFX.playChoiSuccess();
+                      }}
+                      aria-pressed={active}
+                      className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
+                        active ? mode.card : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                      }`}
+                    >
+                      <div className={`text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl shrink-0 ${mode.iconBox}`}>
+                        <GameIcon
+                          src={modeArt(mode.art)}
+                          emoji={mode.emoji}
+                          className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
+                          {mode.title}
+                          {active && (
+                            <span className={`${mode.chip} text-[9px] px-2 py-0.5 rounded-full font-black`}>
+                              {isHost ? 'SELECTED' : 'VIEWING'}
+                            </span>
+                          )}
+                        </h4>
+                        {/* On a phone only the picked game explains itself; eight
+                            paragraphs made the list taller than the rest of the lobby. */}
+                        <p className={`text-xs text-gray-300 mt-1 leading-snug ${active ? '' : 'hidden sm:block'}`}>
+                          {mode.blurb}
+                        </p>
+                        <span
+                          className={`inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            mode.soon
+                              ? 'text-partyYellow border-partyYellow/40 bg-partyYellow/10'
+                              : 'text-gray-300 border-white/15 bg-white/5'
                           }`}
                         >
-                          <span className="font-extrabold text-xs block">
-                            {category.emoji} {category.label}
-                          </span>
-                          <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{category.blurb}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {TRUTH_OR_DARE_CATEGORIES.filter((c) => c.spicy).map((category) => {
-                    const isOn = truthOrDareSettings.spicyEnabled && truthOrDareSettings.categories.includes(category.id);
-                    return (
-                      <button
-                        key={category.id}
-                        type="button"
-                        onClick={() => {
-                          toggleTruthOrDareSpicy();
-                          if (!truthOrDareSettings.categories.includes(category.id)) {
-                            toggleTruthOrDareCategory(category.id);
-                          }
-                        }}
-                        disabled={!myPlayer.isHost}
-                        className={`w-full p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
-                          isOn
-                            ? 'bg-orange-500/20 border-orange-400 text-white shadow-lg'
-                            : 'bg-white/5 border-orange-400/20 text-gray-400 hover:border-orange-400/40'
-                        }`}
-                      >
-                        <span className="font-extrabold text-xs block">
-                          {category.emoji} {category.label} {isOn ? '— ON' : '— OFF'}
+                          {mode.players}
                         </span>
-                        <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{category.blurb}</span>
-                      </button>
-                    );
-                  })}
+                      </div>
+                    </button>
 
-                  <div>
-                    <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
-                      <Dices className="w-3.5 h-3.5 text-partyPink" /> SELECTION MECHANIC
-                    </h4>
-                    <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))] mt-2">
-                      {(Object.keys(TRUTH_OR_DARE_SELECTION_LABELS) as TruthOrDareSelectionMode[]).map((mode) => {
-                        const info = TRUTH_OR_DARE_SELECTION_LABELS[mode];
-                        const isOn = truthOrDareSettings.selectionModes.includes(mode);
+                  {/* The vibe only means anything to the AI Master, so it belongs
+                      behind that mode rather than sitting over the whole lobby. */}
+                  {mode.id === 'ai_master' && active && (
+                    <div className="rounded-2xl border border-partyYellow/30 bg-partyYellow/[0.06] p-3.5 space-y-3 animate-fadeIn">
+                      <div>
+                        <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-partyYellow" /> WHO IS IN THIS ROOM?
+                        </h4>
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          {myPlayer.isHost
+                            ? 'The AI Master reads this to pick its tone and its games.'
+                            : `${ROOM_VIBES[roomVibe].emoji} ${ROOM_VIBES[roomVibe].label} — set by the host.`}
+                        </p>
+                      </div>
+
+                      {myPlayer.isHost && (
+                        <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
+                          {Object.values(ROOM_VIBES).map((vibe) => {
+                            const isSelected = vibe.id === roomVibe;
+                            return (
+                              <button
+                                key={vibe.id}
+                                type="button"
+                                onClick={() => selectVibe(vibe.id)}
+                                className={`p-2.5 rounded-xl border text-left transition-all relative active:scale-95 ${
+                                  isSelected
+                                    ? 'bg-partyPink/20 border-partyPink text-white shadow-lg'
+                                    : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/30'
+                                }`}
+                              >
+                                {vibe.comingSoon && (
+                                  <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-0.5 bg-black/50 text-partyYellow text-[8px] font-black px-1.5 py-0.5 rounded-full border border-partyYellow/30">
+                                    <LockKeyhole className="w-2 h-2" /> SOON
+                                  </span>
+                                )}
+                                <GameIcon src={vibeArt(vibe.id)} emoji={vibe.emoji} className="w-7 h-7 text-lg mx-auto" />
+                                <span className="font-extrabold text-xs block mt-0.5">{vibe.label}</span>
+                                <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{vibe.blurb}</span>
+                                {isSelected && (
+                                  <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-partyPink/30 px-2 py-0.5 text-[9px] font-black text-partyPink">
+                                    <CheckCircle2 className="w-2.5 h-2.5" /> SELECTED
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* Setup only means anything to Truth or Dare, so it lives behind
+                      that mode card rather than sitting over the whole lobby. */}
+                  {mode.id === 'truth_or_dare' && active && (
+                    <div className="rounded-2xl border border-partyPink/30 bg-partyPink/[0.06] p-3.5 space-y-4 animate-fadeIn">
+                      <div>
+                        <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-partyPink" /> CATEGORIES
+                        </h4>
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          {myPlayer.isHost
+                            ? 'Pick what the room draws from. At least one stays on.'
+                            : 'Set by the host.'}
+                        </p>
+                      </div>
+
+                      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
+                        {TRUTH_OR_DARE_CATEGORIES.filter((c) => !c.spicy).map((category) => {
+                          const isOn = truthOrDareSettings.categories.includes(category.id);
+                          return (
+                            <button
+                              key={category.id}
+                              type="button"
+                              onClick={() => toggleTruthOrDareCategory(category.id)}
+                              disabled={!myPlayer.isHost}
+                              className={`p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
+                                isOn
+                                  ? 'bg-partyPink/20 border-partyPink text-white shadow-lg'
+                                  : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                              }`}
+                            >
+                              <span className="font-extrabold text-xs block">
+                                {category.emoji} {category.label}
+                              </span>
+                              <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{category.blurb}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {TRUTH_OR_DARE_CATEGORIES.filter((c) => c.spicy).map((category) => {
+                        const isOn = truthOrDareSettings.spicyEnabled && truthOrDareSettings.categories.includes(category.id);
                         return (
                           <button
-                            key={mode}
+                            key={category.id}
                             type="button"
-                            onClick={() => toggleTruthOrDareSelectionMode(mode)}
+                            onClick={() => {
+                              toggleTruthOrDareSpicy();
+                              if (!truthOrDareSettings.categories.includes(category.id)) {
+                                toggleTruthOrDareCategory(category.id);
+                              }
+                            }}
                             disabled={!myPlayer.isHost}
-                            className={`p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
+                            className={`w-full p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
                               isOn
-                                ? 'bg-partyCyan/20 border-partyCyan text-white shadow-lg'
-                                : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                                ? 'bg-orange-500/20 border-orange-400 text-white shadow-lg'
+                                : 'bg-white/5 border-orange-400/20 text-gray-400 hover:border-orange-400/40'
                             }`}
                           >
                             <span className="font-extrabold text-xs block">
-                              {info.emoji} {info.label}
+                              {category.emoji} {category.label} {isOn ? '— ON' : '— OFF'}
                             </span>
-                            <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{info.blurb}</span>
+                            <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{category.blurb}</span>
                           </button>
                         );
                       })}
+
+                      <div>
+                        <h4 className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                          <Dices className="w-3.5 h-3.5 text-partyPink" /> SELECTION MECHANIC
+                        </h4>
+                        <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))] mt-2">
+                          {(Object.keys(TRUTH_OR_DARE_SELECTION_LABELS) as TruthOrDareSelectionMode[]).map((mode) => {
+                            const info = TRUTH_OR_DARE_SELECTION_LABELS[mode];
+                            const isOn = truthOrDareSettings.selectionModes.includes(mode);
+                            return (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => toggleTruthOrDareSelectionMode(mode)}
+                                disabled={!myPlayer.isHost}
+                                className={`p-2.5 rounded-xl border text-left transition-all disabled:opacity-70 ${
+                                  isOn
+                                    ? 'bg-partyCyan/20 border-partyCyan text-white shadow-lg'
+                                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
+                                }`}
+                              >
+                                <span className="font-extrabold text-xs block">
+                                  {info.emoji} {info.label}
+                                </span>
+                                <span className="text-[10px] text-gray-400 block leading-tight mt-0.5">{info.blurb}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {truthOrDareSettings.selectionModes.length > 1 && (
+                          <p className="text-[10px] text-gray-500 mt-1.5">Both on — rounds alternate between them.</p>
+                        )}
+                      </div>
                     </div>
-                    {truthOrDareSettings.selectionModes.length > 1 && (
-                      <p className="text-[10px] text-gray-500 mt-1.5">Both on — rounds alternate between them.</p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* 5. Team Battle */}
-              <button
-                onClick={() => {
-                  setActiveMode('team_battle');
-                  audioSFX.playChoiSuccess();
-                }}
-                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
-                  activeMode === 'team_battle'
-                    ? 'bg-gradient-to-r from-red-950/80 via-slate-900/90 to-red-900/50 border-red-500 text-white shadow-xl glow-red'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
-                }`}
-              >
-                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-red-500/15 border border-red-500/30 shrink-0">
-                  <GameIcon src={modeArt('team_battle')} emoji="⚔️" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
-                    TEAM BATTLE
-                    {activeMode === 'team_battle' && (
-                      <span className="bg-red-500 text-white text-[9px] px-2 py-0.5 rounded-full font-black">
-                        SELECTED
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    Squad up! 2v2 or 3v3 sudden death voice duels. Pick your side!
-                  </p>
-                </div>
-              </button>
-
-              {/* 6. Chess Arena (1v1, 2v2 Consultation, vs AI) */}
-              <button
-                onClick={() => {
-                  setActiveMode('chess');
-                  audioSFX.playChoiSuccess();
-                }}
-                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
-                  activeMode === 'chess'
-                    ? 'bg-gradient-to-r from-sky-950/80 via-slate-900/90 to-indigo-900/50 border-cyan-400 text-white shadow-xl glow-cyan'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
-                }`}
-              >
-                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-cyan-500/15 border border-cyan-400/30 shrink-0">
-                  <GameIcon src={modeArt('chess')} emoji="♟️" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
-                    CHESS ARENA
-                    {activeMode === 'chess' && (
-                      <span className="bg-cyan-400 text-slate-950 text-[9px] px-2 py-0.5 rounded-full font-black">
-                        SELECTED
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    1v1 Duels, 2v2 Team Consultation with secret strategy voice, or Solo vs AI Bot!
-                  </p>
-                </div>
-              </button>
-
-              {/* 7. Ludo Party (2-4 Players, Bots & Music) */}
-              <button
-                onClick={() => {
-                  setActiveMode('ludo');
-                  audioSFX.playChoiSuccess();
-                }}
-                className={`p-3 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-2.5 sm:gap-3.5 ${
-                  activeMode === 'ludo'
-                    ? 'bg-gradient-to-r from-amber-950/80 via-slate-900/90 to-yellow-900/50 border-amber-400 text-white shadow-xl glow-yellow'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/30'
-                }`}
-              >
-                <div className="text-2xl sm:text-3xl p-2 sm:p-2.5 rounded-xl bg-amber-500/15 border border-amber-400/30 shrink-0">
-                  <GameIcon src={modeArt('ludo')} emoji="🎲" className="w-8 h-8 sm:w-9 sm:h-9 text-2xl sm:text-3xl" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1.5 flex-wrap">
-                    LUDO VOICE PARTY
-                    {activeMode === 'ludo' && (
-                      <span className="bg-amber-400 text-slate-950 text-[9px] px-2 py-0.5 rounded-full font-black">
-                        SELECTED
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-xs text-gray-300 mt-1 leading-snug">
-                    Classic 4-player Ludo with animated dice, background party music, and bot fill!
-                  </p>
-                </div>
-              </button>
+                  )}
+                  </React.Fragment>
+                );
+              })}
             </div>
           </div>
 
-          {/* Toggle Button for Custom Deck Settings (HIDDEN BY DEFAULT) */}
-          <div className="pt-2 flex flex-col gap-3 border-t border-white/10">
-            {/* Team Battle takes two presses on purpose: the first switches the
-                room into team mode so the crew roster appears above and people
-                can arrange sides, the second actually starts the series. */}
-            <button
-              onClick={() => (onSelectMode ? onSelectMode(activeMode) : onStartGame())}
-              className="w-full bg-gradient-to-r from-partyYellow via-terracotta to-partyPink text-partyDark font-black text-sm sm:text-base py-3 sm:py-3.5 px-6 sm:px-8 rounded-2xl flex items-center justify-center gap-2 sm:gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-2xl glow-yellow"
-            >
-              <Play className="w-5 h-5 fill-current" />
-              <span>
-                {activeMode === 'team_battle' && room.roomType !== 'team_battle'
-                  ? 'SET UP THE CREWS'
-                  : 'LAUNCH MATCH NOW'}
-              </span>
-            </button>
+          {/* The pinned bar covers a phone; this is the desktop's copy. */}
+          <div className="hidden lg:block pt-2 border-t border-white/10">{startControl}</div>
 
+          {/* Host-only: the deck settings are rejected for anyone else. */}
+          {isHost && (
             <button
               onClick={() => setShowCustomDecks(!showCustomDecks)}
               className="glass-pill hover:bg-white/15 text-partyCyan font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 border border-partyCyan/30 transition-all w-full justify-center"
@@ -966,12 +873,8 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               <Settings className="w-4 h-4 text-partyYellow" />
               <span>{showCustomDecks ? 'HIDE DECK SETTINGS ▲' : 'CUSTOMIZE GAME DECKS & TEAMS ▼'}</span>
             </button>
-          </div>
+          )}
 
-          {/* HIDDEN UNTIL USER OPENS DECK SETTINGS */}
-          {/* pb-8 so the last row clears the fixed mobile action bar. Without it
-              the bottom game in the deck list sat underneath the bar and could
-              not be tapped. */}
           {showCustomDecks && (
             <div className="space-y-6 pt-4 pb-8 border-t border-white/10 animate-fadeIn">
               {/* Language Decks */}
@@ -1042,6 +945,11 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
             </div>
           )}
         </div>
+      </div>
+
+      {/* Pinned above the phone's bottom bar (about 56px tall), so Start is always in reach. */}
+      <div className="lg:hidden fixed bottom-[56px] left-0 right-0 z-30 px-3 pt-4 pb-2 bg-gradient-to-t from-partyDark via-partyDark/95 to-transparent">
+        {startControl}
       </div>
     </div>
   );

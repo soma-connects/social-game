@@ -47,12 +47,16 @@ export default function LeftSidebar({
     <aside className="hidden lg:flex w-64 glass-card rounded-3xl p-5 border border-white/15 space-y-6 backdrop-blur-xl bg-slate-900/70 shadow-2xl flex-col justify-between shrink-0">
       <div className="space-y-5">
         <div className="space-y-2 pb-4 border-b border-white/10">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black text-partyCyan tracking-wider uppercase">ROOM CODE</span>
-            <span className="text-xs font-mono font-bold text-partyYellow bg-partyYellow/20 px-2.5 py-0.5 rounded-full border border-partyYellow/30">
-              {roomId}
-            </span>
-          </div>
+          {/* The lobby's invite card already leads with the code; a third copy
+              here made the same six characters appear on screen three times. */}
+          {inMatch && (
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black text-partyCyan tracking-wider uppercase">ROOM CODE</span>
+              <span className="text-xs font-mono font-bold text-partyYellow bg-partyYellow/20 px-2.5 py-0.5 rounded-full border border-partyYellow/30">
+                {roomId}
+              </span>
+            </div>
+          )}
           <h2 className="text-lg font-black text-white flex items-center gap-2">
             <Users className="w-5 h-5 text-partyYellow" /> PLAYERS ({players.length}/{MAX_PLAYERS})
           </h2>
@@ -105,8 +109,10 @@ export default function LeftSidebar({
                 <div className="flex items-center gap-3 min-w-0">
                   <AvatarIllustration avatar={player.avatar} size="sm" isSpeaking={isTurn} />
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <h4 className="font-extrabold text-xs text-white max-w-[80px] truncate">{player.name}</h4>
+                    {/* The name has its own line: sharing one with the YOU and HOST
+                        badges squeezed it to a single letter and an ellipsis. */}
+                    <h4 className="font-extrabold text-xs text-white truncate">{player.name}</h4>
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       {isMe && (
                         <span className="bg-partyCyan text-partyDark text-[8px] px-1 py-px rounded font-black">YOU</span>
                       )}

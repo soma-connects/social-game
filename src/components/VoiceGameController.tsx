@@ -290,9 +290,10 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-6 relative">
       <div className="glass-card rounded-3xl p-6 sm:p-8 border border-partyYellow/40 text-center relative overflow-hidden space-y-6 backdrop-blur-xl bg-slate-900/70 z-10">
-        {/* Top Arena Header */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5">
+        {/* Top Arena Header. Wraps: the player, the mic and the clock do not fit
+            on one line in a phone-width card, and the clock was being clipped. */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3.5 min-w-0">
             <AvatarIllustration
               avatar={activePlayer.avatar}
               size="lg"
@@ -307,7 +308,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0 mx-auto sm:mx-0">
             <button
               onClick={toggleMic}
               className={`p-2.5 rounded-2xl border font-bold text-xs flex items-center gap-1.5 transition-all shadow ${
@@ -318,7 +319,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
               title={isMicMuted ? 'Click to unmute mic' : 'Click to mute mic'}
             >
               {isMicMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              <span className="hidden sm:inline">{isMicMuted ? 'MUTED' : 'MIC ON'}</span>
+              <span className="hidden sm:inline">{isMicMuted ? 'MUTED' : 'GAME MIC ON'}</span>
             </button>
 
             <div

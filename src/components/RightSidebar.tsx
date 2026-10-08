@@ -14,9 +14,22 @@ interface RightSidebarProps {
   myPlayer: Player;
   events: EventLog[];
   onUsePowerup: (powerupId: string) => void;
+  /**
+   * Powerups are bought in the board game's shop and used on its turns. Chess,
+   * ludo, Truth or Dare and the rest have no shop, so their players were shown
+   * an "Inventory Empty — buy powerups in the shop" box for a shop that does
+   * not exist in their mode.
+   */
+  showInventory?: boolean;
 }
 
-export default function RightSidebar({ activePlayer, myPlayer, events, onUsePowerup }: RightSidebarProps) {
+export default function RightSidebar({
+  activePlayer,
+  myPlayer,
+  events,
+  onUsePowerup,
+  showInventory = true,
+}: RightSidebarProps) {
   const isMyTurn = activePlayer.id === myPlayer.id;
 
   // Read from MY inventory, not the active player's. The old version listed
@@ -33,6 +46,7 @@ export default function RightSidebar({ activePlayer, myPlayer, events, onUsePowe
 
   return (
     <aside className="hidden lg:block w-80 glass-card rounded-3xl p-5 border border-white/15 space-y-6 backdrop-blur-xl bg-slate-900/70 shadow-2xl shrink-0">
+      {showInventory && (
       <div className="space-y-3">
         <div className="flex items-center justify-between pb-2 border-b border-white/10">
           <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
@@ -56,8 +70,9 @@ export default function RightSidebar({ activePlayer, myPlayer, events, onUsePowe
           </div>
         )}
       </div>
+      )}
 
-      <div className="pt-2 border-t border-white/10">
+      <div className={showInventory ? 'pt-2 border-t border-white/10' : ''}>
         <EventFeed events={events} />
       </div>
     </aside>

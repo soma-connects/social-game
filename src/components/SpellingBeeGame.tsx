@@ -307,7 +307,7 @@ export default function SpellingBeeGame({ room, activePlayer, onCompleteTurn }: 
               }`}
             >
               {isMicMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              <span className="hidden sm:inline">{isMicMuted ? 'MUTED' : 'MIC ON'}</span>
+              <span className="hidden sm:inline">{isMicMuted ? 'MUTED' : 'GAME MIC ON'}</span>
             </button>
 
             <div

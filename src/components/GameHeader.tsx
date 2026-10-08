@@ -112,10 +112,14 @@ export default function GameHeader({
                 ? 'bg-red-500/30 text-red-400 border border-red-500/50'
                 : 'bg-emerald-500/30 text-emerald-400 border border-emerald-500/50'
             }`}
-            title={isMicMuted ? 'Unmute Microphone' : 'Mute Microphone'}
+            title={isMicMuted ? 'Unmute the game microphone' : 'Mute the game microphone'}
+            aria-label={isMicMuted ? 'Unmute the game microphone' : 'Mute the game microphone'}
           >
             {isMicMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-            <span className="hidden sm:inline">{isMicMuted ? 'MUTED' : 'MIC ON'}</span>
+            {/* This is the mic the voice games listen on, not the group call (that
+                has its own bar), so the label says so. On a phone only the muted
+                state gets words, because that is the one worth noticing. */}
+            <span className={isMicMuted ? 'inline' : 'hidden sm:inline'}>{isMicMuted ? 'MUTED' : 'GAME MIC ON'}</span>
           </button>
 
           {/* Sound Toggle — always visible */}
@@ -123,6 +127,7 @@ export default function GameHeader({
             onClick={toggleSound}
             className="glass-pill hover:bg-white/20 text-white p-1.5 sm:p-2 rounded-lg sm:rounded-xl transition-all"
             title={isAudioMuted ? 'Unmute Sound SFX' : 'Mute Sound SFX'}
+            aria-label={isAudioMuted ? 'Unmute sound effects' : 'Mute sound effects'}
           >
             {isAudioMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-partyYellow" />}
           </button>
@@ -165,6 +170,7 @@ export default function GameHeader({
               onClick={() => setShowMobileMenu(!showMobileMenu)}
               className="glass-pill hover:bg-white/20 text-white p-1.5 rounded-lg transition-all"
               title="More options"
+              aria-label="More options"
             >
               {showMobileMenu ? <X className="w-4 h-4" /> : <MoreVertical className="w-4 h-4" />}
             </button>

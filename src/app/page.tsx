@@ -100,13 +100,13 @@ export default function HomePage() {
           </div>
 
           <div className="inline-flex items-center gap-2 glass-pill px-4 py-1.5 rounded-full text-xs font-black tracking-widest text-partyYellow border border-partyYellow/40 shadow-lg">
-            <Sparkles className="w-4 h-4 text-partyYellow" /> NAIJA MULTIPLAYER VOICE ROADMAP
+            <Sparkles className="w-4 h-4 text-partyYellow" /> NAIJA MULTIPLAYER VOICE GAMES
           </div>
 
           <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-white leading-none drop-shadow-xl">
             VOICE PARTY <br />
             <span className="bg-gradient-to-r from-partyYellow via-terracotta to-partyPink bg-clip-text text-transparent">
-              ROADMAP GAME
+              ARCADE
             </span>
           </h1>
 
@@ -193,7 +193,7 @@ export default function HomePage() {
         )}
 
         <div className="flex items-center justify-center gap-6 text-xs text-gray-400 font-medium pt-2">
-          <span className="flex items-center gap-1.5"><Mic className="w-3.5 h-3.5" /> Web Speech STT</span>
+          <span className="flex items-center gap-1.5"><Mic className="w-3.5 h-3.5" /> Voice-controlled games</span>
           <span className="flex items-center gap-1.5"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp Invite</span>
           <span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5" /> Opponent Traps</span>
         </div>

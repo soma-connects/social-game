@@ -24,7 +24,7 @@ import { motion } from 'framer-motion';
 import { AVATARS } from '@/lib/gameContent';
 import { roomStore } from '@/lib/roomStore';
 import { AvatarStyle, LanguageCode, MiniGameId, Player, RoomState, TruthOrDareCategoryId, TruthOrDareSelectionMode } from '@/lib/types';
-import { MAX_PLAYERS, MINI_GAMES, TEAMS } from '@/lib/gameRules';
+import { BOARD_MINI_GAMES, MAX_PLAYERS, MINI_GAMES, TEAMS } from '@/lib/gameRules';
 import { DEFAULT_ROOM_VIBE, ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
 import { DEFAULT_TRUTH_OR_DARE_SETTINGS, TRUTH_OR_DARE_CATEGORIES, TRUTH_OR_DARE_SELECTION_LABELS } from '@/lib/truthOrDareContent';
 import { badgeArt, modeArt, vibeArt } from '@/lib/gameIcons';
@@ -262,11 +262,13 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   };
 
   const toggleMiniGame = (id: MiniGameId) => {
-    // At least one has to stay on, otherwise a turn has nothing to play.
+    // At least one *board* game has to stay on, otherwise a turn has nothing to
+    // play. Games the board cannot run are not listed here, but they stay in the
+    // saved selection untouched — Team Battle reads the same list.
     const updated = selectedGames.includes(id)
       ? selectedGames.filter((g) => g !== id)
       : [...selectedGames, id];
-    if (updated.length === 0) return;
+    if (!updated.some((g) => BOARD_MINI_GAMES.includes(g))) return;
     setSelectedGames(updated);
     roomStore.updateMiniGames(room.roomId, updated);
   };
@@ -353,10 +355,10 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
   );
 
   return (
-    // pb-52 on small screens keeps the whole lobby clear of the pinned Start bar
+    // pb-28 on small screens (plus the page's own pb-24) keeps the lobby clear of the pinned Start bar
     // and the fixed mobile action bar beneath it, which otherwise cover whatever
     // ends up last on the page.
-    <div className="max-w-5xl mx-auto px-2 sm:px-4 pt-4 pb-52 lg:pb-4 space-y-6 animate-fadeIn relative">
+    <div className="max-w-5xl mx-auto px-2 sm:px-4 pt-4 pb-28 lg:pb-4 space-y-6 animate-fadeIn relative">
       {/* Ambient Glow Blobs */}
       <div className="absolute top-10 left-10 w-72 h-72 bg-purple-600/15 blur-3xl rounded-full pointer-events-none" />
       <div className="absolute bottom-10 right-10 w-80 h-80 bg-emerald-500/15 blur-3xl rounded-full pointer-events-none" />
@@ -917,12 +919,16 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                     <Gamepad2 className="w-4 h-4 text-partyYellow" /> QUALIFYING MINI-GAMES
                   </h4>
                   <p className="text-xs text-gray-400">
-                    Pick mini-games to include in random turn rotation.
+                    Board-game turns are drawn at random from the games ticked here.
                   </p>
                 </div>
 
                 <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
-                  {MINI_GAMES.map((game) => {
+                  {/* Only what the board can actually run. The list used to offer all
+                      ten, but Spelling Bee, Story Builder, Debate and Guess the Voice
+                      are skipped by the board's turn picker, so ticking them did
+                      nothing. They are played in Team Battle, which has its own picker. */}
+                  {MINI_GAMES.filter((game) => BOARD_MINI_GAMES.includes(game.id)).map((game) => {
                     const isSelected = selectedGames.includes(game.id);
                     return (
                       <button

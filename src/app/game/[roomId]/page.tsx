@@ -49,7 +49,7 @@ import { aiGameMaster, AiHostPrompt } from '@/lib/aiGameMaster';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
-import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam, micIsLive, isStrangerRoom } from '@/lib/gameRules';
+import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam, micIsLive, isStrangerRoom, miniGamePhase, MINIGAME_ICONS, MINIGAME_LABELS } from '@/lib/gameRules';
 import PowerupTargetPicker from '@/components/PowerupTargetPicker';
 import MiniGameBriefing, { useMiniGameBriefing } from '@/components/MiniGameBriefing';
 import { MINIGAME_BRIEFINGS } from '@/lib/miniGameBriefings';
@@ -186,16 +186,22 @@ export default function GameRoomPage() {
    * Spectators get it too — they are about to play the same game next turn, and
    * watching something you do not understand is worse than playing it.
    *
-   * Never in the lobby: a new room carries a default `currentMiniGame` before
-   * anyone has picked a game, so without this check every first-time player
-   * was greeted by the rules of a game nobody had chosen.
+   * Only while that mini-game is the thing on screen. Every room carries a
+   * default `currentMiniGame` (Voice Arena) from the moment it is created, so
+   * checking the field alone put the Voice Arena rules over the lobby, and then
+   * over chess, ludo, Truth or Dare and the AI Master as well. The phase has to
+   * be the one that game runs in.
    */
   const inMiniGame =
-    !!room && room.phase !== 'lobby' && !!room.currentMiniGame && !!MINIGAME_BRIEFINGS[room.currentMiniGame];
+    !!room &&
+    !!room.currentMiniGame &&
+    !!MINIGAME_BRIEFINGS[room.currentMiniGame] &&
+    room.phase === miniGamePhase(room.currentMiniGame);
   const {
     showing: briefingGame,
     dismiss: dismissBriefing,
     open: openBriefing,
+    due: briefingDue,
   } = useMiniGameBriefing(room?.currentMiniGame, inMiniGame);
   const [reviewingBriefing, setReviewingBriefing] = useState(false);
 
@@ -327,6 +333,24 @@ export default function GameRoomPage() {
   const leaderPlayer = [...room.players].sort((a, b) => b.score - a.score)[0] || room.players[0];
   const currentTheme: MapTheme = room.theme || 'forest';
   const isMyTurn = activePlayer?.id === myPlayer.id;
+  /**
+   * The performer's game waits until they have read the rules. It used to mount
+   * straight away underneath the popup, so Karaoke's round clock and Trivia's
+   * countdown ran while the player was still reading — by the time they tapped
+   * "got it" they had lost a round. Spectators are not held: they have no clock.
+   */
+  const holdForBriefing = isMyTurn && briefingDue;
+
+  /**
+   * What the side panel and the phone's bottom bar offer in this mode.
+   *
+   * Both used to be the board game's, for every mode: chess and ludo showed an
+   * empty powerup inventory for a shop that does not exist there. Items belong
+   * to the board game alone; the feed stays wherever the mode writes events, but
+   * chess and ludo keep their own move log on the board itself.
+   */
+  const showInventory = room.roomType === 'board_game';
+  const showFeed = room.roomType !== 'chess' && room.roomType !== 'ludo';
 
   const handleStartMatch = () => {
     audioSFX.playNollywoodBrass();
@@ -454,7 +478,9 @@ export default function GameRoomPage() {
         </div>
       )}
 
-      <div className="max-w-[1700px] mx-auto w-full p-4 sm:p-6 flex flex-col lg:flex-row gap-5 xl:gap-6 flex-1">
+      {/* pb-24 on a phone: the fixed bottom bar is about 56px tall and would
+          otherwise sit on top of the last button on every screen. */}
+      <div className="max-w-[1700px] mx-auto w-full p-4 pb-24 sm:p-6 sm:pb-28 lg:pb-6 flex flex-col lg:flex-row gap-5 xl:gap-6 flex-1">
         <LeftSidebar
           roomId={roomId}
           players={room.players}
@@ -537,7 +563,15 @@ export default function GameRoomPage() {
             <TeamBattleRecap room={room} myPlayer={myPlayer} onGoHome={() => router.push('/')} />
           )}
 
-          {room.phase === 'qualifying_voice' && (
+          {holdForBriefing && room.currentMiniGame && (
+            <div className="glass-card rounded-3xl p-8 border border-white/10 text-center space-y-2">
+              <div className="text-5xl">{MINIGAME_ICONS[room.currentMiniGame]}</div>
+              <p className="text-lg font-black text-white">{MINIGAME_LABELS[room.currentMiniGame]}</p>
+              <p className="text-xs text-gray-400">Read the rules — your turn starts when you tap “Got it”.</p>
+            </div>
+          )}
+
+          {room.phase === 'qualifying_voice' && !holdForBriefing && (
             <div className="space-y-6">
               {isMyTurn ? (
                 <VoiceGameController
@@ -558,7 +592,7 @@ export default function GameRoomPage() {
             </div>
           )}
 
-          {room.phase === 'pitch_bird' && (
+          {room.phase === 'pitch_bird' && !holdForBriefing && (
             <div className="space-y-6">
               {isMyTurn ? (
                 <PitchBirdCanvas
@@ -592,7 +626,7 @@ export default function GameRoomPage() {
             </div>
           )}
 
-          {room.phase === 'solfege' && (
+          {room.phase === 'solfege' && !holdForBriefing && (
             <div className="space-y-6">
               {isMyTurn ? (
                 <SolfegeGame
@@ -613,7 +647,7 @@ export default function GameRoomPage() {
             </div>
           )}
 
-          {room.phase === 'spelling_bee' && (
+          {room.phase === 'spelling_bee' && !holdForBriefing && (
             <div className="space-y-6">
               {isMyTurn ? (
                 <SpellingBeeGame
@@ -630,11 +664,11 @@ export default function GameRoomPage() {
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
-              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
 
-          {room.phase === 'truth_or_bluff' && (
+          {room.phase === 'truth_or_bluff' && !holdForBriefing && (
             <div className="space-y-6">
               <TruthOrBluffGame
                 room={room}
@@ -648,7 +682,7 @@ export default function GameRoomPage() {
             </div>
           )}
 
-          {room.phase === 'story_builder' && (
+          {room.phase === 'story_builder' && !holdForBriefing && (
             <div className="space-y-6">
               <StoryBuilderGame
                 room={room}
@@ -661,7 +695,7 @@ export default function GameRoomPage() {
             </div>
           )}
 
-          {room.phase === 'debate' && (
+          {room.phase === 'debate' && !holdForBriefing && (
             <div className="space-y-6">
               <DebateGame
                 room={room}
@@ -674,7 +708,7 @@ export default function GameRoomPage() {
             </div>
           )}
 
-          {room.phase === 'guess_the_voice' && (
+          {room.phase === 'guess_the_voice' && !holdForBriefing && (
             <div className="space-y-6">
               <GuessTheVoiceGame
                 room={room}
@@ -687,7 +721,7 @@ export default function GameRoomPage() {
             </div>
           )}
 
-          {room.phase === 'trivia_showdown' && (
+          {room.phase === 'trivia_showdown' && !holdForBriefing && (
             <div className="space-y-6">
               {isMyTurn ? (
                 <TriviaShowdownGame
@@ -704,11 +738,11 @@ export default function GameRoomPage() {
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
-              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
 
-          {room.phase === 'asteroid_defense' && (
+          {room.phase === 'asteroid_defense' && !holdForBriefing && (
             <div className="space-y-6">
               {isMyTurn ? (
                 <AsteroidDefenseGame
@@ -725,7 +759,7 @@ export default function GameRoomPage() {
                 />
               )}
               <SocialVoicePanel room={room} activePlayer={activePlayer} myPlayer={myPlayer} />
-              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
 
@@ -911,12 +945,13 @@ export default function GameRoomPage() {
           })()}
         </main>
 
-        {room.phase !== 'lobby' && (
+        {room.phase !== 'lobby' && (showInventory || showFeed) && (
           <RightSidebar
             activePlayer={activePlayer}
             myPlayer={myPlayer}
             events={room.events ?? []}
             onUsePowerup={handleUsePowerup}
+            showInventory={showInventory}
           />
         )}
       </div>
@@ -931,28 +966,33 @@ export default function GameRoomPage() {
           <span className="text-[10px] font-black uppercase">ROSTER ({room.players.length})</span>
         </button>
 
-        <button
-          onClick={() => setShowMobileFeed(true)}
-          className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyCyan active:scale-95 transition-all"
-        >
-          <ScrollText className="w-5 h-5 text-partyCyan" />
-          <span className="text-[10px] font-black uppercase">FEED ({room.events?.length ?? 0})</span>
-        </button>
+        {showFeed && (
+          <button
+            onClick={() => setShowMobileFeed(true)}
+            className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyCyan active:scale-95 transition-all"
+          >
+            <ScrollText className="w-5 h-5 text-partyCyan" />
+            <span className="text-[10px] font-black uppercase">FEED ({room.events?.length ?? 0})</span>
+          </button>
+        )}
 
         {/* Replaces the old TRAPS shortcut. Traps are armed from the header and
             almost nobody used the button, while the inventory — which decides
             whether you can act on your turn — had no route at all on a phone:
-            RightSidebar is `hidden lg:block`, so below 1024px it never renders. */}
-        <button
-          onClick={() => setShowMobileInventory(true)}
-          className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyPink active:scale-95 transition-all relative"
-        >
-          <Package className="w-5 h-5 text-partyPink" />
-          <span className="text-[10px] font-black uppercase">ITEMS ({myPlayer.inventory.length})</span>
-          {myPlayer.inventory.length > 0 && (
-            <span className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-partyPink animate-pulse" />
-          )}
-        </button>
+            RightSidebar is `hidden lg:block`, so below 1024px it never renders.
+            Board game only: no other mode has a shop to fill it. */}
+        {showInventory && (
+          <button
+            onClick={() => setShowMobileInventory(true)}
+            className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyPink active:scale-95 transition-all relative"
+          >
+            <Package className="w-5 h-5 text-partyPink" />
+            <span className="text-[10px] font-black uppercase">ITEMS ({myPlayer.inventory.length})</span>
+            {myPlayer.inventory.length > 0 && (
+              <span className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-partyPink animate-pulse" />
+            )}
+          </button>
+        )}
       </div>
 
       {/* Mobile inventory. Same powerups and the same rules as the desktop

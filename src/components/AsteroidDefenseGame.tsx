@@ -730,12 +730,9 @@ export default function AsteroidDefenseGame({
               <p className="text-cyan-300 font-black tracking-[0.3em] text-xs sm:text-sm animate-pulse">
                 INCOMING METEOR SHOWER
               </p>
-              <p className="text-[11px] sm:text-sm text-gray-400 leading-relaxed">
-                Every rock carries a word. Say it out loud and the station fires.
-                They fall faster each wave — and anything that drops past the
-                <span className="text-cyan-400"> scan line</span> is out of the
-                turret&apos;s reach.
-              </p>
+              {/* The rules live in one place — the briefing popup, reachable
+                  again from the ? button. This card used to repeat them, so a
+                  first-time player read the same paragraph twice. */}
               {micError && (
                 <p className="text-[11px] text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
                   {micError}

@@ -195,7 +195,7 @@ export default function DebateGame({
       ) : (
         <div className="flex flex-col items-center py-8">
           <p className="text-2xl text-partyCyan font-bold mb-4 animate-pulse">
-            {activePlayer?.name || 'Player'} is explaining the topic...reparing the debate...
+            {activePlayer?.name || 'Player'} is getting the debate ready…
           </p>
         </div>
       )}

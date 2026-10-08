@@ -35,24 +35,41 @@ export function useMiniGameBriefing(game: MiniGameId | null | undefined, enabled
   // SSR and reading it in render would desync the first paint.
   const [seen, setSeen] = useState<Set<MiniGameId>>(() => new Set());
   const [ready, setReady] = useState(false);
+  const [skipAll, setSkipAll] = useState(false);
 
   useEffect(() => {
     setSeen(readSeen());
+    try {
+      setSkipAll(localStorage.getItem(SKIP_KEY) === '1');
+    } catch {
+      /* private mode — briefings stay on */
+    }
     setReady(true);
   }, []);
 
   useEffect(() => {
     if (!ready || !enabled || !game) return;
-    if (typeof window !== 'undefined' && localStorage.getItem(SKIP_KEY) === '1') return;
+    if (skipAll) return;
     if (seen.has(game)) return;
     setShowing(game);
-  }, [ready, enabled, game, seen]);
+  }, [ready, enabled, game, seen, skipAll]);
+
+  /**
+   * True from the first render of a game this player still has to be briefed on
+   * until they dismiss the briefing. `showing` alone is not enough for that: it
+   * only turns on after an effect, so a game that mounts straight away would run
+   * for a frame — long enough to start its mic or read its question aloud — and
+   * would keep running underneath the popup. Before localStorage has been read
+   * the answer is unknown, so it counts as due.
+   */
+  const due = enabled && !!game && (!ready || (!skipAll && !seen.has(game)));
 
   const dismiss = useCallback(
     (options: { skipAll?: boolean } = {}) => {
       const current = showing;
       setShowing(null);
       if (!current) return;
+      if (options.skipAll) setSkipAll(true);
 
       setSeen((prev) => {
         const next = new Set(prev).add(current);
@@ -71,7 +88,7 @@ export function useMiniGameBriefing(game: MiniGameId | null | undefined, enabled
   /** Lets a player pull the rules back up mid-game. */
   const open = useCallback((id: MiniGameId) => setShowing(id), []);
 
-  return { showing, dismiss, open };
+  return { showing, dismiss, open, due };
 }
 
 interface MiniGameBriefingProps {

@@ -15,6 +15,7 @@ import {
   boardProgress,
   forgiveMicFault,
   loseLife,
+  miniGamePhase,
   performanceToSteps,
   pickMiniGame,
   rememberMiniGame,
@@ -317,5 +318,20 @@ describe('forgiveMicFault', () => {
     const fresh = player({});
     const zeroed = player({ micFaults: 0 });
     expect(forgiveMicFault(fresh)).toBe(forgiveMicFault(zeroed));
+  });
+});
+
+describe('miniGamePhase', () => {
+  it('runs every mini-game on a screen of its own', () => {
+    // miniGamePhase falls back to Voice Arena's phase for any id it does not
+    // list, so a game missing from it silently plays as Voice Arena under its
+    // own name. Spelling Bee was exactly that: described, briefed and pickable
+    // in Team Battle, but every pick ran Voice Arena. Ten games, ten phases.
+    const phases = ALL_MINI_GAMES.map(miniGamePhase);
+    expect(new Set(phases).size).toBe(ALL_MINI_GAMES.length);
+  });
+
+  it('keeps Voice Arena on the qualifying phase', () => {
+    expect(miniGamePhase('voice_arena')).toBe('qualifying_voice');
   });
 });

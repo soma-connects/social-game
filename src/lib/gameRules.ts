@@ -577,6 +577,7 @@ export const BOARD_MINI_GAMES: MiniGameId[] = ['voice_arena', 'pitch_bird', 'sol
 export function miniGamePhase(game: MiniGameId): GamePhase {
   if (game === 'pitch_bird') return 'pitch_bird';
   if (game === 'solfege') return 'solfege';
+  if (game === 'spelling_bee') return 'spelling_bee';
   if (game === 'truth_or_bluff') return 'truth_or_bluff';
   if (game === 'story_builder') return 'story_builder';
   if (game === 'debate') return 'debate';

@@ -2000,7 +2000,6 @@ async function createRoom(
     theme: 'space',
     events: [],
     enabledMiniGames: ALL_MINI_GAMES,
-    currentMiniGame: 'voice_arena',
     turnResult: null,
     socialRound: null,
     roundNumber: 0,

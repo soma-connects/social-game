@@ -1,7 +1,15 @@
-import { MiniGameId } from './types';
+import { GamePhase, MiniGameId } from './types';
+
+export type BriefingId =
+  | MiniGameId
+  | 'ai_master'
+  | 'truth_or_dare'
+  | 'chess'
+  | 'ludo'
+  | 'team_battle';
 
 /**
- * What each mini-game actually asks of a player.
+ * What each mini-game or mode actually asks of a player.
  *
  * Play-testing turned up one problem above all the others: people could not
  * tell what they were supposed to do. The games announce themselves with a name
@@ -25,7 +33,7 @@ export interface MiniGameBriefing {
   tip?: string;
 }
 
-export const MINIGAME_BRIEFINGS: Record<MiniGameId, MiniGameBriefing> = {
+export const BRIEFINGS: Record<BriefingId, MiniGameBriefing> = {
   voice_arena: {
     goal: 'Say the word on screen before the timer runs out.',
     steps: [
@@ -75,15 +83,15 @@ export const MINIGAME_BRIEFINGS: Record<MiniGameId, MiniGameBriefing> = {
   },
 
   truth_or_bluff: {
-    goal: 'Tell the room two things about yourself. One is a lie. Do not get caught.',
+    goal: 'Speak two statements out loud — one truth and one bluff. Fool the room without getting caught!',
     steps: [
-      'Say your two claims out loud.',
-      'Mark which one was the lie.',
-      'Everyone else votes on which they think it was.',
+      'Privately choose which statement will be your bluff.',
+      'Tap to speak Statement 1, then Statement 2 into your microphone.',
+      'Open voting and see who was fooled by your bluff!',
     ],
-    scoring: 'You score for fooling people. They score for catching you.',
+    scoring: 'You score points for fooling players. Guessers score for catching your bluff.',
     usesMic: true,
-    tip: 'Make the true one sound unlikely. That is the whole trick.',
+    tip: 'Speak naturally and make your true statement sound wilder than your bluff!',
   },
 
   story_builder: {
@@ -145,4 +153,93 @@ export const MINIGAME_BRIEFINGS: Record<MiniGameId, MiniGameBriefing> = {
     usesMic: true,
     tip: 'Take the lowest one first. Height, not size, is what kills you.',
   },
+
+  ai_master: {
+    goal: "Survive the AI Game Master's challenges or bribe your way out!",
+    steps: [
+      'The AI calls on a player with a custom prompt or question.',
+      'Answer using your voice before the clock runs out.',
+      'The AI rules whether you pass or fail. Failures cost a life!',
+    ],
+    scoring: 'Survive rounds to gain points. Use coins in the shop for items and bribes.',
+    usesMic: true,
+    tip: 'Listen closely to the tone and respond with confidence!',
+  },
+
+  truth_or_dare: {
+    goal: 'Complete the truth or dare challenge chosen by the room or spinner!',
+    steps: [
+      'Spin the wheel or let the room pick who gets challenged.',
+      'Choose Truth or Dare.',
+      'Speak your truth or perform the dare live on mic!',
+    ],
+    scoring: 'Pass the challenge to win points and keep your streak going.',
+    usesMic: true,
+    tip: 'Truths require honesty; dares require pure commitment!',
+  },
+
+  chess: {
+    goal: "Checkmate your opponent's King before time expires!",
+    steps: [
+      'Tap a piece to see valid moves, then tap the square to move.',
+      'Keep an eye on your clock timer.',
+      'Confer with teammates in 2v2 or take on the bot in solo.',
+    ],
+    scoring: 'Win by checkmate, resignation, or opponent timeout.',
+    usesMic: false,
+    tip: 'Control the center and do not leave pieces undefended.',
+  },
+
+  ludo: {
+    goal: 'Navigate all 4 of your tokens around the board and into home!',
+    steps: [
+      'Roll the dice when it is your turn.',
+      'Roll a 6 to bring a new token out of your yard.',
+      'Land on opponents to send them back to start!',
+    ],
+    scoring: 'First player to get all four tokens home wins.',
+    usesMic: false,
+    tip: 'Star squares are safe zones where you cannot be captured.',
+  },
+
+  team_battle: {
+    goal: 'Compete in a series of mini-game duels to lead your crew to victory!',
+    steps: [
+      'Two crews (Red vs Blue) go head-to-head.',
+      'Players take turns performing in selected mini-games.',
+      'Earn points for your crew on each turn!',
+    ],
+    scoring: 'The crew with the highest combined score at the end of the series wins.',
+    usesMic: true,
+    tip: 'Cheer on your teammates — every single point counts toward victory!',
+  },
+};
+
+/** Backwards-compatibility alias for mini-games */
+export const MINIGAME_BRIEFINGS: Record<MiniGameId, MiniGameBriefing> = BRIEFINGS as Record<MiniGameId, MiniGameBriefing>;
+
+/**
+ * Maps the live room GamePhase to the briefing that explains it.
+ * If a phase has no briefing (e.g. lobby, roadmap_turn, branch_choice, powerup_shop),
+ * returns undefined so no guide card is shown.
+ */
+export const PHASE_TO_BRIEFING: Partial<Record<GamePhase, BriefingId>> = {
+  // Mini-games:
+  qualifying_voice: 'voice_arena',
+  pitch_bird: 'pitch_bird',
+  solfege: 'solfege',
+  spelling_bee: 'spelling_bee',
+  truth_or_bluff: 'truth_or_bluff',
+  story_builder: 'story_builder',
+  debate: 'debate',
+  guess_the_voice: 'guess_the_voice',
+  trivia_showdown: 'trivia_showdown',
+  asteroid_defense: 'asteroid_defense',
+
+  // Game modes:
+  ai_master_round: 'ai_master',
+  truth_or_dare_round: 'truth_or_dare',
+  chess_match: 'chess',
+  ludo_match: 'ludo',
+  team_battle_intro: 'team_battle',
 };

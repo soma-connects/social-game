@@ -3,37 +3,72 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, Play, Target, ListOrdered, Trophy, Lightbulb, X } from 'lucide-react';
-import { MiniGameId } from '@/lib/types';
+import { BriefingId, BRIEFINGS } from '@/lib/miniGameBriefings';
 import { MINIGAME_ICONS, MINIGAME_LABELS } from '@/lib/gameRules';
-import { MINIGAME_BRIEFINGS } from '@/lib/miniGameBriefings';
 
-/** Games a player has already been briefed on, across every room they join. */
-const SEEN_KEY = 'voice_party_seen_briefings';
+/** Games and modes a player has already been briefed on, across every room they join. */
+const SEEN_KEY = 'voice_party_seen_briefings_v2';
 /** Set once a player opts out entirely. */
 const SKIP_KEY = 'voice_party_skip_briefings';
 
-function readSeen(): Set<MiniGameId> {
+export const BRIEFING_ICONS: Record<BriefingId, string> = {
+  voice_arena: '🎙️',
+  pitch_bird: '🐦',
+  solfege: '🎵',
+  spelling_bee: '🐝',
+  truth_or_bluff: '🎭',
+  story_builder: '📖',
+  debate: '⚖️',
+  guess_the_voice: '🕵️',
+  trivia_showdown: '🧠',
+  asteroid_defense: '☄️',
+  ai_master: '🤖',
+  truth_or_dare: '🎲',
+  chess: '♟️',
+  ludo: '🎯',
+  team_battle: '⚔️',
+};
+
+export const BRIEFING_LABELS: Record<BriefingId, string> = {
+  voice_arena: 'Voice Arena',
+  pitch_bird: 'PitchBird',
+  solfege: 'Karaoke',
+  spelling_bee: 'Spelling Bee',
+  truth_or_bluff: 'Truth or Bluff',
+  story_builder: 'Story Builder',
+  debate: 'Debate',
+  guess_the_voice: 'Guess the Voice',
+  trivia_showdown: 'Trivia Showdown',
+  asteroid_defense: 'Asteroid Defense',
+  ai_master: 'AI Game Master',
+  truth_or_dare: 'Truth or Dare',
+  chess: 'Chess',
+  ludo: 'Ludo',
+  team_battle: 'Team Battle',
+};
+
+function readSeen(): Set<BriefingId> {
   if (typeof window === 'undefined') return new Set();
   try {
     const raw = localStorage.getItem(SEEN_KEY);
-    return new Set(raw ? (JSON.parse(raw) as MiniGameId[]) : []);
+    return new Set(raw ? (JSON.parse(raw) as BriefingId[]) : []);
   } catch {
     return new Set();
   }
 }
 
 /**
- * Decides whether to brief a player on the game in front of them.
+ * Decides whether to brief a player on the game or mode in front of them.
  *
  * Stored per browser rather than in room state: whether you have had a game
  * explained is a fact about you, not about the room, and it should hold the
  * next time you play with different people.
  */
-export function useMiniGameBriefing(game: MiniGameId | null | undefined, enabled: boolean) {
-  const [showing, setShowing] = useState<MiniGameId | null>(null);
+export function useMiniGameBriefing(game: BriefingId | null | undefined, enabled: boolean) {
+  const [showing, setShowing] = useState<BriefingId | null>(null);
   // Read after mount, never during render — localStorage does not exist during
   // SSR and reading it in render would desync the first paint.
-  const [seen, setSeen] = useState<Set<MiniGameId>>(() => new Set());
+  const [seen, setSeen] = useState<Set<BriefingId>>(() => new Set());
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -69,21 +104,24 @@ export function useMiniGameBriefing(game: MiniGameId | null | undefined, enabled
   );
 
   /** Lets a player pull the rules back up mid-game. */
-  const open = useCallback((id: MiniGameId) => setShowing(id), []);
+  const open = useCallback((id: BriefingId) => setShowing(id), []);
 
   return { showing, dismiss, open };
 }
 
 interface MiniGameBriefingProps {
-  game: MiniGameId;
+  game: BriefingId;
   /** Shown when re-opened deliberately rather than on first encounter. */
   isReview?: boolean;
   onDismiss: (options?: { skipAll?: boolean }) => void;
 }
 
 export default function MiniGameBriefing({ game, isReview = false, onDismiss }: MiniGameBriefingProps) {
-  const brief = MINIGAME_BRIEFINGS[game];
+  const brief = BRIEFINGS[game];
   if (!brief) return null;
+
+  const icon = BRIEFING_ICONS[game] || (MINIGAME_ICONS as Record<string, string>)[game] || '🎮';
+  const label = BRIEFING_LABELS[game] || (MINIGAME_LABELS as Record<string, string>)[game] || game;
 
   return (
     <AnimatePresence>
@@ -113,12 +151,12 @@ export default function MiniGameBriefing({ game, isReview = false, onDismiss }: 
                 <X className="w-4 h-4" />
               </button>
             )}
-            <div className="text-4xl mb-1">{MINIGAME_ICONS[game]}</div>
+            <div className="text-4xl mb-1">{icon}</div>
             <p className="text-[10px] font-black uppercase tracking-[0.25em] text-partyYellow">
-              {isReview ? 'How this works' : 'New game'}
+              {isReview ? 'How this works' : 'How to Play'}
             </p>
             <h2 className="text-2xl font-black text-white uppercase tracking-wide">
-              {MINIGAME_LABELS[game]}
+              {label}
             </h2>
           </div>
 

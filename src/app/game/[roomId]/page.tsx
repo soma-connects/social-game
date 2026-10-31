@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -53,7 +53,7 @@ import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam, m
 import { GameModeId, ModeLaunchOptions } from '@/components/ModeSetupModal';
 import PowerupTargetPicker from '@/components/PowerupTargetPicker';
 import MiniGameBriefing, { useMiniGameBriefing } from '@/components/MiniGameBriefing';
-import { MINIGAME_BRIEFINGS } from '@/lib/miniGameBriefings';
+import { BRIEFINGS, PHASE_TO_BRIEFING, BriefingId } from '@/lib/miniGameBriefings';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { voiceChat } from '@/lib/voiceChat';
@@ -199,17 +199,22 @@ export default function GameRoomPage() {
   }, [roomId, myPlayerId]);
 
   /**
-   * First-time explanation for whichever mini-game is on screen.
+   * First-time explanation for whichever mini-game or mode is on screen.
    *
    * Spectators get it too — they are about to play the same game next turn, and
    * watching something you do not understand is worse than playing it.
+   *
+   * Only active when the room is in an actual game or mode phase, NOT in lobby
+   * or board movement.
    */
-  const inMiniGame = !!room && !!room.currentMiniGame && !!MINIGAME_BRIEFINGS[room.currentMiniGame];
+  const activeBriefing: BriefingId | null =
+    room?.phase ? (PHASE_TO_BRIEFING[room.phase] ?? null) : null;
+  const inGameOrMode = !!activeBriefing && !!BRIEFINGS[activeBriefing];
   const {
     showing: briefingGame,
     dismiss: dismissBriefing,
     open: openBriefing,
-  } = useMiniGameBriefing(room?.currentMiniGame, inMiniGame);
+  } = useMiniGameBriefing(activeBriefing, inGameOrMode);
   const [reviewingBriefing, setReviewingBriefing] = useState(false);
 
   const handleLeaveGame = useCallback(async () => {
@@ -1202,11 +1207,11 @@ export default function GameRoomPage() {
 
       {/* Lets anyone pull the rules back up without waiting for the game to
           come round again. Hidden once the briefing itself is open. */}
-      {inMiniGame && !briefingGame && room.currentMiniGame && (
+      {inGameOrMode && !briefingGame && activeBriefing && (
         <button
           onClick={() => {
             setReviewingBriefing(true);
-            openBriefing(room.currentMiniGame!);
+            openBriefing(activeBriefing);
           }}
           aria-label="How does this game work?"
           title="How does this game work?"

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect } from 'react';
 import { RoomState, Player, TruthBluffState } from '@/lib/types';
@@ -7,7 +7,7 @@ import { speechEngine } from '@/lib/speechService';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, Send, Vote, Eye, Sparkles, Clock, CheckCircle2, XCircle } from 'lucide-react';
+import { Mic, MicOff, Send, Vote, Eye, Sparkles, Clock, CheckCircle2, XCircle, Volume2, Radio } from 'lucide-react';
 import { micStream } from '@/lib/micStream';
 import MicContentionNotice from './MicContentionNotice';
 
@@ -40,6 +40,8 @@ export default function TruthOrBluffGame({
   const [claim2, setClaim2] = useState('');
   const [isRecording1, setIsRecording1] = useState(false);
   const [isRecording2, setIsRecording2] = useState(false);
+  const [hasRecorded1, setHasRecorded1] = useState(false);
+  const [hasRecorded2, setHasRecorded2] = useState(false);
   /** Which claim is currently being recorded, so a mic-priority claim can restart it. */
   const activeClaimRef = React.useRef<1 | 2 | null>(null);
   const [selectedLieIndex, setSelectedLieIndex] = useState<0 | 1 | null>(null);
@@ -99,8 +101,13 @@ export default function TruthOrBluffGame({
     const isRec = claimNum === 1 ? isRecording1 : isRecording2;
     if (isRec) {
       speechEngine.stopListening();
-      if (claimNum === 1) setIsRecording1(false);
-      else setIsRecording2(false);
+      if (claimNum === 1) {
+        setIsRecording1(false);
+        setHasRecorded1(true);
+      } else {
+        setIsRecording2(false);
+        setHasRecorded2(true);
+      }
       return;
     }
     await beginRecording(claimNum);
@@ -108,8 +115,21 @@ export default function TruthOrBluffGame({
 
   /** The actual session start, unconditional — recordSpeech's toggle guard lives above it. */
   const beginRecording = async (claimNum: 1 | 2) => {
-    if (claimNum === 1) setIsRecording1(true);
-    else setIsRecording2(true);
+    if (claimNum === 1) {
+      setIsRecording1(true);
+      setHasRecorded1(true);
+      if (isRecording2) {
+        speechEngine.stopListening();
+        setIsRecording2(false);
+      }
+    } else {
+      setIsRecording2(true);
+      setHasRecorded2(true);
+      if (isRecording1) {
+        speechEngine.stopListening();
+        setIsRecording1(false);
+      }
+    }
     activeClaimRef.current = claimNum;
 
     try {
@@ -144,12 +164,12 @@ export default function TruthOrBluffGame({
         }
       });
 
-      // Stop automatically after 10s
+      // Stop automatically after 20s if still open
       setTimeout(() => {
         speechEngine.stopListening();
         if (claimNum === 1) setIsRecording1(false);
         else setIsRecording2(false);
-      }, 10000);
+      }, 20000);
 
     } catch (error) {
       console.error('Speech recognition error', error);
@@ -169,11 +189,13 @@ export default function TruthOrBluffGame({
 
   const handleSubmitClaims = async () => {
     if (selectedLieIndex === null) return;
+    const finalClaim1 = claim1.trim() || 'Statement 1 (Spoken live)';
+    const finalClaim2 = claim2.trim() || 'Statement 2 (Spoken live)';
     try {
       await roomStore.send(roomId, {
           action: 'truth_bluff_submit_claims',
           playerId: myPlayer.id,
-          claims: [claim1, claim2],
+          claims: [finalClaim1, finalClaim2],
           lieIndex: selectedLieIndex,
           // Sent because the round reads it back out of room state to show the
           // whole room. It never was, so every round displayed the literal
@@ -266,93 +288,145 @@ export default function TruthOrBluffGame({
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="w-full max-w-2xl bg-black/20 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 flex flex-col gap-6 mx-auto"
+        className="w-full max-w-2xl bg-black/30 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 flex flex-col gap-6 mx-auto shadow-2xl"
       >
-        <h3 className="text-2xl font-bold text-center text-white mb-2">Record Your Claims</h3>
+        <div className="text-center">
+          <span className="px-3 py-1 bg-partyYellow/20 text-partyYellow rounded-full text-xs font-bold tracking-widest uppercase border border-partyYellow/30">
+            Voice Mode
+          </span>
+          <h3 className="text-2xl font-black text-white mt-2">Speak Your 2 Statements</h3>
+          <p className="text-white/60 text-sm mt-1">
+            Say one truth and one bluff out loud. Tap each statement button while you speak.
+          </p>
+        </div>
 
         <MicContentionNotice active={isRecording1 || isRecording2} onClaimPriority={restartWithMicPriority} />
 
-        {/* Claim 1 */}
-        <div className="flex flex-col gap-2">
-          <label className="text-partyCyan font-bold tracking-wider text-sm">CLAIM #1</label>
-          <div className="flex flex-col md:flex-row gap-3">
-            <input
-              type="text"
-              value={claim1}
-              onChange={(e) => setClaim1(e.target.value)}
-              placeholder="Enter your first claim..."
-              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-partyCyan/50 transition-colors"
-            />
-            <button
-              onClick={() => recordSpeech(1)}
-              className={`p-3 rounded-xl flex items-center justify-center transition-all ${
-                isRecording1 
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/50 animate-pulse' 
-                  : 'bg-partyCyan/10 text-partyCyan hover:bg-partyCyan/20 border border-partyCyan/30'
-              }`}
-            >
-              <Mic className="w-6 h-6" />
-            </button>
-          </div>
-        </div>
-
-        {/* Claim 2 */}
-        <div className="flex flex-col gap-2">
-          <label className="text-partyPink font-bold tracking-wider text-sm">CLAIM #2</label>
-          <div className="flex flex-col md:flex-row gap-3">
-            <input
-              type="text"
-              value={claim2}
-              onChange={(e) => setClaim2(e.target.value)}
-              placeholder="Enter your second claim..."
-              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-partyPink/50 transition-colors"
-            />
-            <button
-              onClick={() => recordSpeech(2)}
-              className={`p-3 rounded-xl flex items-center justify-center transition-all ${
-                isRecording2 
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/50 animate-pulse' 
-                  : 'bg-partyPink/10 text-partyPink hover:bg-partyPink/20 border border-partyPink/30'
-              }`}
-            >
-              <Mic className="w-6 h-6" />
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-4 pt-6 border-t border-white/10">
-          <p className="text-center font-bold text-white mb-4">Which one is the LIE?</p>
-          <div className="flex justify-center gap-4">
+        {/* Secret Choice: Which one is the lie? */}
+        <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
+          <p className="text-center font-bold text-partyYellow text-sm tracking-wide uppercase mb-3 flex items-center justify-center gap-2">
+            <Eye className="w-4 h-4" /> Secret: Which statement is your BLUFF?
+          </p>
+          <div className="grid grid-cols-2 gap-3">
             <button
               onClick={() => setSelectedLieIndex(0)}
-              className={`px-6 py-2 rounded-full border-2 transition-all ${
+              className={`p-3 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-1 ${
                 selectedLieIndex === 0 
-                  ? 'bg-partyYellow text-black border-partyYellow font-bold' 
-                  : 'bg-transparent text-white/60 border-white/20 hover:border-white/50'
+                  ? 'bg-partyYellow text-black border-partyYellow font-bold shadow-lg shadow-partyYellow/20' 
+                  : 'bg-white/5 text-white/70 border-white/10 hover:border-white/30'
               }`}
             >
-              Claim 1 is false
+              <span className="text-xs uppercase font-extrabold tracking-wider">Statement 1</span>
+              <span className="text-sm font-black">Is the BLUFF 🤥</span>
             </button>
             <button
               onClick={() => setSelectedLieIndex(1)}
-              className={`px-6 py-2 rounded-full border-2 transition-all ${
+              className={`p-3 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-1 ${
                 selectedLieIndex === 1 
-                  ? 'bg-partyYellow text-black border-partyYellow font-bold' 
-                  : 'bg-transparent text-white/60 border-white/20 hover:border-white/50'
+                  ? 'bg-partyYellow text-black border-partyYellow font-bold shadow-lg shadow-partyYellow/20' 
+                  : 'bg-white/5 text-white/70 border-white/10 hover:border-white/30'
               }`}
             >
-              Claim 2 is false
+              <span className="text-xs uppercase font-extrabold tracking-wider">Statement 2</span>
+              <span className="text-sm font-black">Is the BLUFF 🤥</span>
             </button>
           </div>
         </div>
 
+        {/* Spoken Statement 1 */}
+        <div className="flex flex-col gap-2 p-4 rounded-2xl bg-white/5 border border-white/10">
+          <div className="flex items-center justify-between">
+            <span className="text-partyCyan font-black tracking-wider text-sm flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-partyCyan/20 text-partyCyan flex items-center justify-center text-xs">1</span>
+              STATEMENT #1
+            </span>
+            {hasRecorded1 && !isRecording1 && (
+              <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Spoken
+              </span>
+            )}
+          </div>
+
+          {/* Real-time transcribed text display */}
+          <div className="min-h-[56px] p-3 rounded-xl bg-black/40 border border-white/10 text-white/90 text-sm flex items-center">
+            {isRecording1 ? (
+              <div className="flex items-center gap-2 text-partyCyan">
+                <Radio className="w-4 h-4 animate-pulse text-red-400 shrink-0" />
+                <span className="italic">{claim1 || 'Listening... speak Statement 1 now!'}</span>
+              </div>
+            ) : claim1 ? (
+              <span>"{claim1}"</span>
+            ) : (
+              <span className="text-white/40 italic">Tap button below and speak Statement 1...</span>
+            )}
+          </div>
+
+          <button
+            onClick={() => recordSpeech(1)}
+            className={`w-full py-3.5 px-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md ${
+              isRecording1
+                ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-red-500/30'
+                : hasRecorded1
+                  ? 'bg-partyCyan/15 hover:bg-partyCyan/25 text-partyCyan border border-partyCyan/40'
+                  : 'bg-gradient-to-r from-partyCyan to-blue-500 hover:opacity-95 text-black'
+            }`}
+          >
+            <Mic className="w-5 h-5" />
+            {isRecording1 ? 'Done Speaking Statement 1 (Tap to Stop)' : hasRecorded1 ? 'Re-record Statement 1' : 'Speak Statement 1'}
+          </button>
+        </div>
+
+        {/* Spoken Statement 2 */}
+        <div className="flex flex-col gap-2 p-4 rounded-2xl bg-white/5 border border-white/10">
+          <div className="flex items-center justify-between">
+            <span className="text-partyPink font-black tracking-wider text-sm flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-partyPink/20 text-partyPink flex items-center justify-center text-xs">2</span>
+              STATEMENT #2
+            </span>
+            {hasRecorded2 && !isRecording2 && (
+              <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Spoken
+              </span>
+            )}
+          </div>
+
+          {/* Real-time transcribed text display */}
+          <div className="min-h-[56px] p-3 rounded-xl bg-black/40 border border-white/10 text-white/90 text-sm flex items-center">
+            {isRecording2 ? (
+              <div className="flex items-center gap-2 text-partyPink">
+                <Radio className="w-4 h-4 animate-pulse text-red-400 shrink-0" />
+                <span className="italic">{claim2 || 'Listening... speak Statement 2 now!'}</span>
+              </div>
+            ) : claim2 ? (
+              <span>"{claim2}"</span>
+            ) : (
+              <span className="text-white/40 italic">Tap button below and speak Statement 2...</span>
+            )}
+          </div>
+
+          <button
+            onClick={() => recordSpeech(2)}
+            className={`w-full py-3.5 px-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md ${
+              isRecording2
+                ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-red-500/30'
+                : hasRecorded2
+                  ? 'bg-partyPink/15 hover:bg-partyPink/25 text-partyPink border border-partyPink/40'
+                  : 'bg-gradient-to-r from-partyPink to-rose-500 hover:opacity-95 text-white'
+            }`}
+          >
+            <Mic className="w-5 h-5" />
+            {isRecording2 ? 'Done Speaking Statement 2 (Tap to Stop)' : hasRecorded2 ? 'Re-record Statement 2' : 'Speak Statement 2'}
+          </button>
+        </div>
+
+        {/* Submit to Open Voting */}
         <button
           onClick={handleSubmitClaims}
-          disabled={!claim1 || !claim2 || selectedLieIndex === null}
-          className="mt-6 w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-lg shadow-blue-500/20 transform hover:scale-[1.02] active:scale-95 transition-all text-lg flex justify-center items-center gap-2"
+          disabled={selectedLieIndex === null || (!hasRecorded1 && !claim1) || (!hasRecorded2 && !claim2)}
+          className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold rounded-2xl shadow-lg shadow-emerald-500/20 transform hover:scale-[1.01] active:scale-98 transition-all text-lg flex justify-center items-center gap-2"
         >
           <Send className="w-5 h-5" />
-          SUBMIT CLAIMS
+          {selectedLieIndex === null ? 'Select Which Is Your Bluff First' : 'Done Speaking — Open Voting'}
         </button>
       </motion.div>
     );

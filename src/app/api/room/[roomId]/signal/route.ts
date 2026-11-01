@@ -34,6 +34,10 @@ function isValidSignal(value: unknown): value is SignalMessage {
   );
 }
 
+// In-memory cache for room membership to avoid hammering Firestore on every 1s WebRTC poll.
+const memberCache = new Map<string, { members: Set<string>; cachedAt: number }>();
+const MEMBER_CACHE_TTL_MS = 12_000;
+
 export async function POST(request: Request, { params }: { params: { roomId: string } }) {
   const roomId = params.roomId.toUpperCase();
 
@@ -44,10 +48,29 @@ export async function POST(request: Request, { params }: { params: { roomId: str
     return NextResponse.json({ error: 'Malformed request body' }, { status: 400 });
   }
 
+  const playerId = String(body.playerId ?? '');
+
+  // Fast-path for WebRTC 1-second polling: if membership is already cached, return immediately
+  // without paying for an expensive Firestore read every single second.
+  if (body.action === 'poll') {
+    const cached = memberCache.get(roomId);
+    if (cached && Date.now() - cached.cachedAt < MEMBER_CACHE_TTL_MS && cached.members.has(playerId)) {
+      return NextResponse.json({
+        messages: drainSignals(roomId, playerId),
+        present: getVoicePresence(roomId),
+      });
+    }
+  }
+
   const room = await readRoom(roomId);
   if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
 
-  const playerId = String(body.playerId ?? '');
+  // Update cached membership
+  memberCache.set(roomId, {
+    members: new Set(room.players.map((p) => p.id)),
+    cachedAt: Date.now(),
+  });
+
   const isMember = room.players.some((p) => p.id === playerId);
   if (!isMember) {
     return NextResponse.json({ error: 'Not a player in this room' }, { status: 403 });

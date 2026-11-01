@@ -48,25 +48,32 @@ if (typeof window !== 'undefined' && siteKey) {
   }
 }
 
-/** Longest a request waits for a token before going without one. */
-const APP_CHECK_WAIT_MS = 2500;
+let appCheckFailed = false;
+/** Longest a request waits for an App Check token before proceeding without one (capped at 400ms to prevent game lag). */
+const APP_CHECK_WAIT_MS = 400;
 
 /**
  * The App Check header for a call to one of our paid API routes, or nothing.
  *
  * Never throws and never hangs: an ad blocker that stops the reCAPTCHA script
- * would otherwise freeze the game's voice. Without a token the server decides —
+ * or an unregistered domain will not freeze the game. Without a token the server decides —
  * in monitor mode it serves the request and logs it.
  */
 export async function appCheckHeaders(): Promise<Record<string, string>> {
-  if (!appCheck) return {};
+  if (!appCheck || appCheckFailed) return {};
   try {
     const result = await Promise.race([
       getToken(appCheck),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), APP_CHECK_WAIT_MS)),
     ]);
-    return result?.token ? { 'X-Firebase-AppCheck': result.token } : {};
+    if (!result?.token) {
+      // Mark failed so subsequent calls return immediately without a delay
+      appCheckFailed = true;
+      return {};
+    }
+    return { 'X-Firebase-AppCheck': result.token };
   } catch {
+    appCheckFailed = true;
     return {};
   }
 }

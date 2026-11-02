@@ -26,6 +26,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
   // Pinch zoom stays available. Locking it is a WCAG 1.4.4 failure, and this is
   // a game full of small type that people play on phones.
   themeColor: "#0d1117",

@@ -13,6 +13,8 @@ export type RollBonus = {
 
 interface DiceRollerProps {
   isRolling: boolean;
+  /** Changes once per server-confirmed roll; owns the reveal lifetime. */
+  rollId: number;
   /**
    * What the mini-game earned, shown on the two faces. Always 2-12, because it
    * comes from performanceToSteps — bonuses are NOT folded in here. Adding them
@@ -25,7 +27,7 @@ interface DiceRollerProps {
   onRollComplete: () => void;
 }
 
-export default function DiceRoller({ isRolling, value, bonuses = [], onRollComplete }: DiceRollerProps) {
+export default function DiceRoller({ isRolling, rollId, value, bonuses = [], onRollComplete }: DiceRollerProps) {
   const [die1, setDie1] = useState(1);
   const [die2, setDie2] = useState(1);
   const [visible, setVisible] = useState(false);
@@ -40,34 +42,33 @@ export default function DiceRoller({ isRolling, value, bonuses = [], onRollCompl
   const bonusCount = bonuses.length;
 
   useEffect(() => {
-    if (isRolling) {
-      setVisible(true);
+    if (rollId === 0) return;
+    setVisible(true);
 
-      // Calculate final faces at the start
-      let d1 = Math.floor(Math.random() * 6) + 1;
-      let d2 = value - d1;
-      if (d2 < 1) {
-        d2 = 1;
-        d1 = value - 1;
-      } else if (d2 > 6) {
-        d2 = 6;
-        d1 = value - 6;
-      }
-
-      setDie1(d1);
-      setDie2(d2);
-
-      // Wait 1.5s for rolling animation to finish, + 1.0s to view the result, then call onRollComplete
-      // 2.5s was tuned for the faces alone; each bonus chip lands 0.35s after
-      // the last and needs a beat to be read before the overlay clears.
-      const timer = setTimeout(() => {
-        setVisible(false);
-        completeRef.current();
-      }, 2500 + bonusCount * 400);
-
-      return () => clearTimeout(timer);
+    // Calculate final faces at the start.
+    let d1 = Math.floor(Math.random() * 6) + 1;
+    let d2 = value - d1;
+    if (d2 < 1) {
+      d2 = 1;
+      d1 = value - 1;
+    } else if (d2 > 6) {
+      d2 = 6;
+      d1 = value - 6;
     }
-  }, [isRolling, value, bonusCount]);
+
+    setDie1(d1);
+    setDie2(d2);
+
+    // The reveal outlives the cube spin. `isRolling` controls only the faces;
+    // tying this timer to it made the parent cancel the timer mid-reveal and
+    // leave the full-screen overlay visible indefinitely.
+    const timer = setTimeout(() => {
+      setVisible(false);
+      completeRef.current();
+    }, 2500 + bonusCount * 400);
+
+    return () => clearTimeout(timer);
+  }, [rollId, value, bonusCount]);
 
   if (!visible) return null;
 

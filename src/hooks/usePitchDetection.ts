@@ -28,6 +28,7 @@ interface CalibrationRange {
 
 export const CALIBRATION_MS = 3500;
 const MEDIAN_WINDOW = 5;
+const UI_UPDATE_INTERVAL_MS = 1000 / 30;
 
 function median(values: number[]): number {
   if (values.length === 0) return 0;
@@ -101,6 +102,7 @@ export function usePitchDetection() {
       detector.minVolumeDecibels = -45;
 
       const inputBuffer = new Float32Array(analyser.fftSize);
+      let lastUiUpdateAt = 0;
       const tick = () => {
         if (!activeRef.current || !analyserRef.current) return;
 
@@ -137,13 +139,19 @@ export function usePitchDetection() {
         // smoothing and would only add lag on top of that one.
         const lift = smootherRef.current.update(voiced ? detectedPitch : 0, performance.now());
 
-        setData({
-          pitch: Math.round(pitch),
-          volume,
-          lift,
-          isCalibrated: !calibratingRef.current,
-          isActive: true,
-        });
+        // Keep analysis at the display's animation cadence, but avoid forcing
+        // the whole mini-game tree through React at 60 fps on mid-range phones.
+        const now = performance.now();
+        if (now - lastUiUpdateAt >= UI_UPDATE_INTERVAL_MS) {
+          lastUiUpdateAt = now;
+          setData({
+            pitch: Math.round(pitch),
+            volume,
+            lift,
+            isCalibrated: !calibratingRef.current,
+            isActive: true,
+          });
+        }
 
         rafRef.current = requestAnimationFrame(tick);
       };

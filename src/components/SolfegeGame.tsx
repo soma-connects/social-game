@@ -50,6 +50,8 @@ import {
  * made a wildly wrong note and a slightly wrong one look nearly identical.
  */
 const METER_RANGE = 300;
+const METER_FOLLOW_TOWARD_TARGET = 0.55;
+const METER_FOLLOW_AWAY = 0.35;
 import AvatarIllustration from './AvatarIllustration';
 
 interface SolfegeGameProps {
@@ -175,7 +177,12 @@ export default function SolfegeGame({ player, roomId, onComplete }: SolfegeGameP
       // signal is fine for scoring but jitters far too fast to read.
       if (Number.isFinite(cents)) {
         const prev = smoothCentsRef.current;
-        smoothCentsRef.current = prev === null ? cents : prev + (cents - prev) * 0.28;
+        const follow = prev === null
+          ? 1
+          : Math.abs(cents) < Math.abs(prev)
+            ? METER_FOLLOW_TOWARD_TARGET
+            : METER_FOLLOW_AWAY;
+        smoothCentsRef.current = prev === null ? cents : prev + (cents - prev) * follow;
         setLiveCents(smoothCentsRef.current);
       } else {
         setLiveCents(null);

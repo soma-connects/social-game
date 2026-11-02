@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Gavel,
+  Loader2,
 } from 'lucide-react';
 import { ChallengeWord, LanguageCode, Player, RoomState } from '@/lib/types';
 import { LANGUAGE_DECKS, PIDGIN_FEEDBACK, getRandomMathProblem } from '@/lib/gameContent';
@@ -50,6 +51,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
   const [reactionMsg, setReactionMsg] = useState<string>('');
   const [error, setError] = useState<SpeechError | null>(null);
   const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [caps, setCaps] = useState<MicCapabilities | null>(null);
 
   // The attempt is the stretch after the tap, not the whole turn: the room's replay
@@ -58,6 +60,8 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sessionRef = useRef<ListenSession | null>(null);
+  const startInFlightRef = useRef(false);
+  const startGenerationRef = useRef(0);
   // The recognition callback is built once per round, so it cannot read timeLeft
   // from state without going stale. Scoring reads this instead.
   const timeLeftRef = useRef<number>(room.turnTimeLimit);
@@ -126,6 +130,9 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
 
   // New turn: reset the arena completely.
   useEffect(() => {
+    startGenerationRef.current += 1;
+    startInFlightRef.current = false;
+    setIsStarting(false);
     teardown();
     setStatus('idle');
     setTranscript('');
@@ -139,7 +146,11 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
   }, [room.activePlayerIndex]);
 
   // Release the microphone when the arena unmounts.
-  useEffect(() => teardown, [teardown]);
+  useEffect(() => () => {
+    startGenerationRef.current += 1;
+    startInFlightRef.current = false;
+    teardown();
+  }, [teardown]);
 
   const toggleMic = () => {
     const muted = speechEngine.toggleMicMute();
@@ -152,6 +163,9 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
 
   const finishRound = useCallback(
     (outcome: 'matched' | 'failed', confidence = 0) => {
+      startGenerationRef.current += 1;
+      startInFlightRef.current = false;
+      setIsStarting(false);
       teardown();
       setStatus(outcome);
 
@@ -169,70 +183,89 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
   );
 
   const handleStartAttempt = async () => {
-    if (!challenge) return;
+    if (!challenge || startInFlightRef.current || status !== 'idle') return;
+    const startGeneration = startGenerationRef.current;
+    startInFlightRef.current = true;
+    setIsStarting(true);
 
-    setError(null);
-    setTranscript('');
+    try {
+      setError(null);
+      setTranscript('');
 
-    if (isMicMuted) {
-      speechEngine.setMuted(false);
-      setIsMicMuted(false);
-    }
+      if (isMicMuted) {
+        speechEngine.setMuted(false);
+        setIsMicMuted(false);
+      }
 
-    // Ask for the microphone before starting the clock. A permission prompt that
-    // eats four of the eight seconds is the same as losing the round.
-    const accessError = await speechEngine.probeMicPermission();
-    if (accessError) {
-      setError(accessError);
-      return;
-    }
-
-    // A pronunciation challenge is its own answer; maths carries a separate
-    // one, so the prompt on screen is the sum rather than the sum and its result.
-    const target = challenge.answer ?? challenge.word;
-
-    let startFailed = false;
-    const session = speechEngine.listen({
-      roomId: room.roomId,
-      mode: 'command',
-      targetWord: target,
-      language: challenge.language,
-      onResult: (res: SpeechMatchResult) => {
-        setTranscript(res.transcript);
-        if (res.isMatch) finishRound('matched', res.confidence);
-      },
-      onError: (err) => {
-        startFailed = true;
-        setError(err);
-        teardown();
-        setStatus('idle');
-      },
-    });
-
-    if (startFailed) return;
-
-    sessionRef.current = session;
-    setStatus('listening');
-    setTimeLeft(room.turnTimeLimit);
-    timeLeftRef.current = room.turnTimeLimit;
-    audioSFX.playStreetVendorBell();
-
-    speechEngine.startAudioAnalyser(
-      (vol) => setMicVolume(vol),
-      (err) => setError(err)
-    );
-
-    timerRef.current = setInterval(() => {
-      const next = timeLeftRef.current - 1;
-      timeLeftRef.current = next;
-      setTimeLeft(next);
-
-      if (next <= 0) {
-        finishRound('failed');
+      // Ask for the microphone before starting the clock. A permission prompt
+      // that eats four of the eight seconds is the same as losing the round.
+      const accessError = await speechEngine.probeMicPermission();
+      if (startGeneration !== startGenerationRef.current) return;
+      if (accessError) {
+        setError(accessError);
         return;
       }
-      audioSFX.playTimerTick(next <= 3);
-    }, 1000);
+
+      // A pronunciation challenge is its own answer; maths carries a separate
+      // one, so the prompt on screen is the sum rather than the sum and its result.
+      const target = challenge.answer ?? challenge.word;
+
+      let startFailed = false;
+      const session = speechEngine.listen({
+        roomId: room.roomId,
+        mode: 'command',
+        targetWord: target,
+        language: challenge.language,
+        onResult: (res: SpeechMatchResult) => {
+          setTranscript(res.transcript);
+          if (res.isMatch) finishRound('matched', res.confidence);
+        },
+        onError: (err) => {
+          startFailed = true;
+          setError(err);
+          teardown();
+          setStatus('idle');
+        },
+      });
+
+      if (startFailed) return;
+
+      sessionRef.current = session;
+      setStatus('listening');
+      setTimeLeft(room.turnTimeLimit);
+      timeLeftRef.current = room.turnTimeLimit;
+      audioSFX.playStreetVendorBell();
+
+      speechEngine.startAudioAnalyser(
+        (vol) => setMicVolume(vol),
+        (err) => setError(err)
+      );
+
+      timerRef.current = setInterval(() => {
+        const next = timeLeftRef.current - 1;
+        timeLeftRef.current = next;
+        setTimeLeft(next);
+
+        if (next <= 0) {
+          finishRound('failed');
+          return;
+        }
+        audioSFX.playTimerTick(next <= 3);
+      }, 1000);
+    } catch (err) {
+      setError({
+        code: 'unknown',
+        message: err instanceof Error ? err.message : 'The microphone could not start. Try again.',
+        recoverable: true,
+      });
+      teardown();
+      setStatus('idle');
+    } finally {
+      if (startGeneration === startGenerationRef.current) {
+        startInFlightRef.current = false;
+        setIsStarting(false);
+      }
+    }
   };
 
   /**
@@ -294,11 +327,11 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
   const usesPhoneticFallback = challenge ? PHONETIC_FALLBACK_LANGUAGES.has(challenge.language) : false;
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 space-y-6 relative">
-      <div className="glass-card rounded-3xl p-6 sm:p-8 border border-partyYellow/40 text-center relative overflow-hidden space-y-6 backdrop-blur-xl bg-slate-900/70 z-10">
+    <div className="w-full max-w-3xl mx-auto px-2 sm:px-4 py-3 sm:py-6 space-y-4 sm:space-y-6 relative">
+      <div className="glass-card rounded-3xl p-4 sm:p-8 border border-partyYellow/40 text-center relative overflow-hidden space-y-4 sm:space-y-6 backdrop-blur-xl bg-slate-900/70 z-10">
         {/* Top Arena Header */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5">
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3.5">
             <AvatarIllustration
               avatar={activePlayer.avatar}
               size="lg"
@@ -313,10 +346,11 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-2 sm:justify-end">
             <button
               onClick={toggleMic}
-              className={`p-2.5 rounded-2xl border font-bold text-xs flex items-center gap-1.5 transition-all shadow ${
+              disabled={isStarting}
+              className={`min-h-11 p-2.5 rounded-2xl border font-bold text-xs flex items-center gap-1.5 transition-all shadow disabled:opacity-50 ${
                 isMicMuted
                   ? 'bg-red-500/30 text-red-400 border-red-500/50'
                   : 'bg-emerald-500/30 text-emerald-400 border-emerald-500/50'
@@ -328,7 +362,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
             </button>
 
             <div
-              className={`px-4 py-2 rounded-2xl border font-mono font-black text-lg transition-all flex items-center gap-2 ${
+              className={`px-3 sm:px-4 py-2 rounded-2xl border font-mono font-black text-lg transition-all flex items-center gap-2 ${
                 timeLeft <= 3 && status === 'listening'
                   ? 'bg-red-500/30 border-red-500 text-red-400 animate-pulse glow-terracotta'
                   : 'bg-partyDark border-partyYellow/40 text-partyYellow'
@@ -371,7 +405,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
 
         {/* Central Prompt Card */}
         {challenge && (
-          <div className="py-8 px-6 rounded-3xl bg-partyDark/95 border border-partyYellow/40 space-y-4 shadow-2xl relative">
+          <div className="py-6 sm:py-8 px-4 sm:px-6 rounded-3xl bg-partyDark/95 border border-partyYellow/40 space-y-4 shadow-2xl relative">
             <div className="flex justify-center items-center gap-2 flex-wrap">
               <span className="bg-partyPurple text-white text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-wider">
                 {challenge.language.toUpperCase()}
@@ -383,7 +417,7 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
               )}
             </div>
 
-            <h2 className="text-3xl sm:text-5xl font-black text-partyYellow tracking-tight drop-shadow-md">
+            <h2 className="text-3xl sm:text-5xl font-black text-partyYellow tracking-tight drop-shadow-md break-words">
               {challenge.word}
             </h2>
 
@@ -409,8 +443,8 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
         {/* Live Speech Wave & Audio Indicator */}
         {status === 'listening' && (
           <div className="space-y-2 pt-2">
-            <div className="flex items-center justify-between text-xs text-emerald-400 font-bold px-1">
-              <span className="flex items-center gap-1.5 animate-pulse">
+            <div className="flex flex-col gap-1.5 text-xs text-emerald-400 font-bold px-1 sm:flex-row sm:items-center sm:justify-between">
+              <span className="flex items-center gap-1.5 animate-pulse min-w-0">
                 <Mic className="w-4 h-4" /> LIVE MIC ACTIVE — SPEAK THE PROMPT CLEARLY!
               </span>
               <span>AUDIO WAVE: {micVolume}%</span>
@@ -443,11 +477,11 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
           <div className="space-y-3 pt-2">
             <button
               onClick={handleStartAttempt}
-              disabled={!challenge || sttUnavailable}
-              className="w-full bg-gradient-to-r from-emerald-500 via-emerald-400 to-partyYellow text-partyDark font-black text-lg py-4 rounded-2xl flex items-center justify-center gap-3 transition-all transform hover:scale-105 disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-2xl glow-emerald"
+              disabled={!challenge || sttUnavailable || isStarting}
+              className="w-full min-h-12 bg-gradient-to-r from-emerald-500 via-emerald-400 to-partyYellow text-partyDark font-black text-base sm:text-lg py-3.5 sm:py-4 px-3 rounded-2xl flex items-center justify-center gap-3 transition-all transform hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-2xl glow-emerald"
             >
-              <Mic className="w-6 h-6 fill-current" />
-              <span>START {room.turnTimeLimit}-SEC VOICE ARENA</span>
+              {isStarting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Mic className="w-6 h-6 fill-current" />}
+              <span>{isStarting ? 'OPENING MICROPHONE…' : `START ${room.turnTimeLimit}-SEC VOICE ARENA`}</span>
             </button>
             <p className="text-xs text-gray-400">
               Your browser asks for microphone access the first time. The clock starts once you allow it.
@@ -457,7 +491,8 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
                 trap words the recogniser will never transcribe. */}
             <button
               onClick={() => finishRound('matched', 0.9)}
-              className="w-full glass-pill hover:bg-white/20 text-gray-300 font-bold text-xs py-2.5 rounded-xl border border-white/20 flex items-center justify-center gap-2"
+              disabled={isStarting}
+              className="w-full min-h-11 glass-pill hover:bg-white/20 text-gray-300 font-bold text-[11px] sm:text-xs px-3 py-2.5 rounded-xl border border-white/20 flex items-center justify-center gap-2 text-center disabled:opacity-50"
             >
               <Gavel className="w-3.5 h-3.5" />
               <span>OPPONENTS JUDGE THIS ROUND MANUALLY (PASS)</span>
@@ -466,17 +501,17 @@ export default function VoiceGameController({ room, activePlayer, onCompleteTurn
         )}
 
         {status === 'listening' && (
-          <div className="pt-2 grid grid-cols-2 gap-3">
+          <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               onClick={() => finishRound('matched', 0.9)}
-              className="glass-pill hover:bg-white/20 text-emerald-300 font-bold text-xs py-2.5 rounded-xl border border-emerald-400/40 flex items-center justify-center gap-2"
+              className="min-h-11 glass-pill hover:bg-white/20 text-emerald-300 font-bold text-xs px-3 py-2.5 rounded-xl border border-emerald-400/40 flex items-center justify-center gap-2"
             >
               <Gavel className="w-3.5 h-3.5" />
               <span>JUDGE: PASS</span>
             </button>
             <button
               onClick={() => finishRound('failed')}
-              className="glass-pill hover:bg-white/20 text-red-300 font-bold text-xs py-2.5 rounded-xl border border-red-400/40 flex items-center justify-center gap-2"
+              className="min-h-11 glass-pill hover:bg-white/20 text-red-300 font-bold text-xs px-3 py-2.5 rounded-xl border border-red-400/40 flex items-center justify-center gap-2"
             >
               <XCircle className="w-3.5 h-3.5" />
               <span>JUDGE: FAIL</span>

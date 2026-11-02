@@ -29,6 +29,7 @@ const LudoGame = dynamic(() => import('@/components/ludo/LudoGame'), {
 });
 import PowerupShop from '@/components/PowerupShop';
 import RoadmapBoard from '@/components/RoadmapBoard';
+import MobileBoardActions from '@/components/MobileBoardActions';
 import TrapWordPicker from '@/components/TrapWordPicker';
 import PeerReviewDareModal from '@/components/PeerReviewDareModal';
 import AvatarIllustration from '@/components/AvatarIllustration';
@@ -86,6 +87,9 @@ export default function GameRoomPage() {
   const [rosterSafetyTarget, setRosterSafetyTarget] = useState<Player | null>(null);
   const [showMobileFeed, setShowMobileFeed] = useState(false);
   const [showMobileInventory, setShowMobileInventory] = useState(false);
+  const [showBoardActions, setShowBoardActions] = useState(false);
+  const [boardMicMuted, setBoardMicMuted] = useState(() => speechEngine.getIsMicMuted());
+  const [boardSoundMuted, setBoardSoundMuted] = useState(() => audioSFX.getMuted());
   const [showGeminiMode, setShowGeminiMode] = useState(false);
   const [comingSoonTitle, setComingSoonTitle] = useState<string | null>(null);
   const [activeDareTarget, setActiveDareTarget] = useState<Player | null>(null);
@@ -114,6 +118,12 @@ export default function GameRoomPage() {
   }, [roomId]);
 
   const { room, status, error } = snapshot;
+
+  useEffect(() => {
+    if (snapshot.room?.phase !== 'roadmap_turn' && snapshot.room?.phase !== 'branch_choice') {
+      setShowBoardActions(false);
+    }
+  }, [snapshot.room?.phase]);
 
   // ── Voice replay ──────────────────────────────────────────────────────────
   // Passed explicitly: identity is stored per room, and this reads during the
@@ -347,6 +357,9 @@ export default function GameRoomPage() {
   const isMyTurn = activePlayer?.id === myPlayer.id;
   /** Which of the roadmap's controls this phase actually has a use for. */
   const chrome = getPhaseChrome(room.phase, room.roomType);
+  const isImmersiveBoard =
+    (room.phase === 'roadmap_turn' || room.phase === 'branch_choice') &&
+    (room.roomType === 'board_game' || room.roomType == null);
 
   const handleStartMatch = () => {
     audioSFX.playNollywoodBrass();
@@ -459,51 +472,63 @@ export default function GameRoomPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-partyDark text-white">
-      <GameHeader
-        roomId={roomId}
-        currentTheme={currentTheme}
-        onSelectTheme={(t) => roomStore.setTheme(roomId, t)}
-        onOpenTrapPicker={() => setShowTrapPicker(true)}
-        onGoHome={() => router.push('/')}
-        onLeaveGame={handleLeaveGame}
-        onEndMatch={() => roomStore.endMatch(roomId)}
-        canEndMatch={myPlayer.isHost && room.phase !== 'lobby'}
-        showThemeSelector={chrome.themes}
-      />
+    <div className={isImmersiveBoard
+      ? 'relative flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden bg-partyDark text-white lg:min-h-screen lg:h-auto lg:overflow-visible'
+      : 'min-h-screen flex flex-col bg-partyDark text-white'}>
+      <div className={isImmersiveBoard ? 'hidden lg:block' : ''}>
+        <GameHeader
+          roomId={roomId}
+          currentTheme={currentTheme}
+          onSelectTheme={(t) => roomStore.setTheme(roomId, t)}
+          onOpenTrapPicker={() => setShowTrapPicker(true)}
+          onGoHome={() => router.push('/')}
+          onLeaveGame={handleLeaveGame}
+          onEndMatch={() => roomStore.endMatch(roomId)}
+          canEndMatch={myPlayer.isHost && room.phase !== 'lobby'}
+          showThemeSelector={chrome.themes}
+        />
+      </div>
 
       {status === 'error' && error && (
-        <div className="bg-amber-500/20 border-b border-amber-500/50 text-amber-200 text-xs font-bold px-4 py-2 text-center flex items-center justify-center gap-2">
+        <div className={`${isImmersiveBoard ? 'hidden lg:flex' : 'flex'} bg-amber-500/20 border-b border-amber-500/50 text-amber-200 text-xs font-bold px-4 py-2 text-center items-center justify-center gap-2`}>
           <AlertTriangle className="w-3.5 h-3.5" /> {error}
         </div>
       )}
 
-      <div className="max-w-[1700px] mx-auto w-full p-4 sm:p-6 flex flex-col lg:flex-row gap-5 xl:gap-6 flex-1">
-        <LeftSidebar
-          roomId={roomId}
-          players={room.players}
-          activePlayerId={activePlayer.id}
-          leaderId={leaderPlayer.id}
-          myPlayerId={myPlayer.id}
-          canManage={myPlayer.isHost}
-          roomType={room.roomType}
-          inMatch={room.phase !== 'lobby'}
-          onKickPlayer={(p) => roomStore.kickPlayer(roomId, p.id, myPlayer.id)}
-        />
-
-        <main className="flex-1 space-y-6">
-          <VoiceCallBar
+      <div className={isImmersiveBoard
+        ? 'mx-auto flex h-full min-h-0 w-full flex-1 flex-col gap-0 overflow-hidden p-0 lg:h-auto lg:min-h-0 lg:max-w-[1700px] lg:flex-row lg:gap-6 lg:p-6 lg:overflow-visible'
+        : 'max-w-[1700px] mx-auto w-full p-4 sm:p-6 flex flex-col lg:flex-row gap-5 xl:gap-6 flex-1'}>
+        <div className={isImmersiveBoard ? 'hidden lg:block' : ''}>
+          <LeftSidebar
             roomId={roomId}
             players={room.players}
-            myPlayer={myPlayer}
-            duckRemote={isAttemptPhase && isMyTurn}
-            autoMute={isAttemptPhase && !isMyTurn}
-            micLive={micIsLive(room, myPlayer)}
-            isStranger={isStrangerRoom(room)}
-            onMicOptIn={(optIn) => void roomStore.setMicOptIn(roomId, optIn)}
-            compact={isAttemptPhase}
-            autoJoin={room.players.length >= 2}
+            activePlayerId={activePlayer.id}
+            leaderId={leaderPlayer.id}
+            myPlayerId={myPlayer.id}
+            canManage={myPlayer.isHost}
+            roomType={room.roomType}
+            inMatch={room.phase !== 'lobby'}
+            onKickPlayer={(p) => roomStore.kickPlayer(roomId, p.id, myPlayer.id)}
           />
+        </div>
+
+        <main className={isImmersiveBoard
+          ? 'flex min-h-0 w-full flex-1 flex-col space-y-0 overflow-hidden lg:block lg:flex-none lg:space-y-6 lg:overflow-visible'
+          : 'flex-1 space-y-6'}>
+          <div className={isImmersiveBoard ? 'hidden lg:block' : ''}>
+            <VoiceCallBar
+              roomId={roomId}
+              players={room.players}
+              myPlayer={myPlayer}
+              duckRemote={isAttemptPhase && isMyTurn}
+              autoMute={isAttemptPhase && !isMyTurn}
+              micLive={micIsLive(room, myPlayer)}
+              isStranger={isStrangerRoom(room)}
+              onMicOptIn={(optIn) => void roomStore.setMicOptIn(roomId, optIn)}
+              compact={isAttemptPhase}
+              autoJoin={room.players.length >= 2}
+            />
+          </div>
 
           {showGeminiMode && (
             <GeminiAiMasterStage
@@ -792,6 +817,8 @@ export default function GameRoomPage() {
                 activePlayer={activePlayer}
                 canRoll={isMyTurn && room.phase === 'roadmap_turn'}
                 onNextTurn={handleFinishRoadmapTurn}
+                immersive={isImmersiveBoard}
+                onOpenActions={() => setShowBoardActions(true)}
               />
               {room.phase === 'branch_choice' && (
                 <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
@@ -922,17 +949,43 @@ export default function GameRoomPage() {
         </main>
 
         {chrome.inventory && (
-          <RightSidebar
-            activePlayer={activePlayer}
-            myPlayer={myPlayer}
-            events={room.events ?? []}
-            onUsePowerup={handleUsePowerup}
-          />
+          <div className={isImmersiveBoard ? 'hidden lg:block' : ''}>
+            <RightSidebar
+              activePlayer={activePlayer}
+              myPlayer={myPlayer}
+              events={room.events ?? []}
+              onUsePowerup={handleUsePowerup}
+            />
+          </div>
         )}
       </div>
 
+      <MobileBoardActions
+        open={showBoardActions && isImmersiveBoard}
+        roomId={roomId}
+        currentTheme={currentTheme}
+        showThemeSelector={chrome.themes}
+        showInventory={chrome.inventory}
+        inventory={myPlayer.inventory}
+        isMyTurn={isMyTurn}
+        canEndMatch={myPlayer.isHost && room.phase !== 'lobby'}
+        micMuted={boardMicMuted}
+        soundMuted={boardSoundMuted}
+        onClose={() => setShowBoardActions(false)}
+        onSelectTheme={(theme) => roomStore.setTheme(roomId, theme)}
+        onOpenRoster={() => setShowMobilePlayers(true)}
+        onOpenFeed={() => setShowMobileFeed(true)}
+        onUsePowerup={handleUsePowerup}
+        onOpenTrapPicker={() => setShowTrapPicker(true)}
+        onToggleMic={() => setBoardMicMuted(speechEngine.toggleMicMute())}
+        onToggleSound={() => setBoardSoundMuted(audioSFX.toggleMute())}
+        onGoHome={() => router.push('/')}
+        onLeave={handleLeaveGame}
+        onEndMatch={() => roomStore.endMatch(roomId)}
+      />
+
       {/* Mobile-Only Bottom Action Bar (Keeps mobile game view 100% clean & decluttered!) */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 border-t border-white/15 p-2 px-4 flex items-center justify-around backdrop-blur-xl shadow-2xl">
+      {!isImmersiveBoard && <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 border-t border-white/15 p-2 px-4 flex items-center justify-around backdrop-blur-xl shadow-2xl">
         <button
           onClick={() => setShowMobilePlayers(true)}
           className="flex flex-col items-center gap-0.5 text-gray-300 hover:text-partyYellow active:scale-95 transition-all"
@@ -967,7 +1020,7 @@ export default function GameRoomPage() {
           )}
         </button>
         )}
-      </div>
+      </div>}
 
       {/* Mobile inventory. Same powerups and the same rules as the desktop
           sidebar, including the target picker for the offensive items. */}

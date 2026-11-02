@@ -44,20 +44,23 @@ export function rangeFromSamples(samplesHz: number[], fallback: PitchRange = DEF
   return { lowSemi: low, highSemi: high };
 }
 
-/** Frames of pitch the median looks across — about a sixth of a second. */
-const MEDIAN_FRAMES = 9;
+/** Frames of pitch the median looks across — about 80 ms at 60 fps. */
+const MEDIAN_FRAMES = 5;
 /** A jump this big in one frame is far more likely a detector octave error than the singer. */
 const JUMP_SEMITONES = 7;
 /** Frames in a row a jump has to persist before it is believed. */
 const JUMP_CONFIRM_FRAMES = 3;
 /** How long a lost pitch is held before the bird starts to fall. Bridges consonants and breaths. */
 export const HOLD_MS = 220;
-/** Movements smaller than this share of the range are the wobble of a held note. */
-const DEADBAND = 0.03;
-/** How much of the remaining distance to the target is covered per frame. */
-const FOLLOW = 0.2;
+/** Tiny movements are detector noise; a wider deadband left a note stuck above its target. */
+const DEADBAND = 0.003;
+/** How much of the remaining distance to the target is covered in one 60 fps frame. */
+const FOLLOW_UP = 0.2;
+/** Descending is slightly quicker so a lower note promptly brings the bird down. */
+const FOLLOW_DOWN = 0.34;
 /** How fast the height fades once the voice has really stopped. */
 const FADE = 0.1;
+const REFERENCE_FRAME_MS = 1000 / 60;
 
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
@@ -69,6 +72,7 @@ export class PitchSmoother {
   private pendingJump: number[] = [];
   private lift = 0;
   private lastVoicedAt = -Infinity;
+  private lastUpdateAt: number | null = null;
 
   constructor(private range: PitchRange = DEFAULT_RANGE) {}
 
@@ -81,6 +85,7 @@ export class PitchSmoother {
     this.pendingJump = [];
     this.lift = 0;
     this.lastVoicedAt = -Infinity;
+    this.lastUpdateAt = null;
   }
 
   /**
@@ -88,11 +93,16 @@ export class PitchSmoother {
    * heard. Returns the height to use, 0..1.
    */
   update(hz: number, nowMs: number): number {
+    const elapsedMs = this.lastUpdateAt === null
+      ? REFERENCE_FRAME_MS
+      : Math.max(0, Math.min(100, nowMs - this.lastUpdateAt));
+    this.lastUpdateAt = nowMs;
+
     if (hz <= 0) {
       if (nowMs - this.lastVoicedAt <= HOLD_MS) return this.lift;
       this.history = [];
       this.pendingJump = [];
-      this.lift *= 1 - FADE;
+      this.lift *= Math.pow(1 - FADE, elapsedMs / REFERENCE_FRAME_MS);
       if (this.lift < 0.02) this.lift = 0;
       return this.lift;
     }
@@ -121,8 +131,18 @@ export class PitchSmoother {
     const span = Math.max(this.range.highSemi - this.range.lowSemi, MIN_RANGE_SEMITONES);
     const target = Math.max(0, Math.min(1, (median(this.history) - this.range.lowSemi) / span));
 
-    // A held note wobbles; a moved note does not. Only follow real movement.
-    if (Math.abs(target - this.lift) >= DEADBAND) this.lift += (target - this.lift) * FOLLOW;
+    // A held note wobbles; a moved note does not. Time-based follow keeps the
+    // same response on a phone that drops animation frames. Descending follows
+    // a little faster, and snapping inside the tiny noise band avoids stopping
+    // just above the requested pitch.
+    const distance = target - this.lift;
+    if (Math.abs(distance) < DEADBAND) {
+      this.lift = target;
+    } else {
+      const perFrameFollow = distance < 0 ? FOLLOW_DOWN : FOLLOW_UP;
+      const follow = 1 - Math.pow(1 - perFrameFollow, elapsedMs / REFERENCE_FRAME_MS);
+      this.lift += distance * follow;
+    }
     return this.lift;
   }
 }

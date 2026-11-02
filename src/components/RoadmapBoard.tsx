@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowRight, Dices } from 'lucide-react';
+import { ArrowRight, Dices, MoreVertical } from 'lucide-react';
 import { MapTheme, Player, RoomState } from '@/lib/types';
 import { audioSFX } from '@/lib/audioFeedback';
 import { roomStore } from '@/lib/roomStore';
@@ -19,10 +19,15 @@ interface RoadmapBoardProps {
   /** Only the player whose turn it is may roll. */
   canRoll: boolean;
   onNextTurn: () => void;
+  /** Expands the roadmap into the available viewport on small screens. */
+  immersive?: boolean;
+  /** Opens room actions from the mobile board edge button. */
+  onOpenActions?: () => void;
 }
 
-export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }: RoadmapBoardProps) {
+export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn, immersive = false, onOpenActions }: RoadmapBoardProps) {
   const [diceValue, setDiceValue] = useState<number | null>(null);
+  const [rollSequence, setRollSequence] = useState(0);
   // The breakdown behind the current dice overlay. Held in state rather than
   // read from the room so the faces and the chips always describe one roll.
   const [rollMove, setRollMove] = useState<RoomState['lastMove']>(null);
@@ -39,6 +44,7 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
   const [preRollPosition, setPreRollPosition] = useState<number | null>(null);
   /** True between sending our roll and finishing its reveal animation. */
   const rollInFlight = useRef(false);
+  const rollTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // ── shared board events ───────────────────────────────────────────────────
   //
@@ -91,6 +97,8 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
   // wipe the landing banner out from under whoever was reading it.
   const turnKey = `${room.roundNumber ?? 0}:${room.rollIndex ?? 0}:${activePlayer.id}`;
   useEffect(() => {
+    rollTimersRef.current.forEach(clearTimeout);
+    rollTimersRef.current = [];
     rollInFlight.current = false;
     setDiceValue(null);
     setIsRolling(false);
@@ -99,6 +107,10 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
     setShowOverlay(false);
     setRollError(null);
     setPreRollPosition(null);
+    return () => {
+      rollTimersRef.current.forEach(clearTimeout);
+      rollTimersRef.current = [];
+    };
   }, [turnKey]);
 
   // The server is the authority on whether this turn's roll already happened —
@@ -120,7 +132,16 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
     audioSFX.playDiceRoll();
 
     // Ask the server to roll random dice and resolve the landing tile.
-    const result = await roomStore.rollDice(room.roomId);
+    let result: Awaited<ReturnType<typeof roomStore.rollDice>>;
+    try {
+      result = await roomStore.rollDice(room.roomId);
+    } catch (error) {
+      rollInFlight.current = false;
+      setIsRolling(false);
+      setRollError(error instanceof Error ? error.message : 'The roll did not go through. Try again.');
+      setPreRollPosition(null);
+      return;
+    }
 
     if (result.error || result.roll === null) {
       rollInFlight.current = false;
@@ -136,6 +157,7 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
     // double-count the bonuses the overlay adds back on.
     setRollMove(result.move ?? null);
     setDiceValue(result.move?.base ?? result.roll);
+    setRollSequence((sequence) => sequence + 1);
 
     const outcome = result.outcome;
     if (!outcome && !result.waitingForBranch) {
@@ -146,17 +168,17 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
 
     // Hold the token in place while the dice lands, then let the map animate.
     const tokenMovementTime = result.roll * 500;
-    setTimeout(() => {
+    rollTimersRef.current.push(setTimeout(() => {
       setIsRolling(false);
       setPreRollPosition(null);
-    }, 1600);
+    }, 1600));
 
-    setTimeout(() => {
+    rollTimersRef.current.push(setTimeout(() => {
       rollInFlight.current = false;
       setHasRolled(true);
       if (result.waitingForBranch) return; // Branch UI will appear now
       setTileMessage(outcome.message);
-    }, 1700 + tokenMovementTime);
+    }, 1700 + tokenMovementTime));
   };
 
   const currentTheme: MapTheme = room.theme || 'forest';
@@ -190,7 +212,9 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
     : [];
 
   return (
-    <div className="max-w-5xl mx-auto px-2 sm:px-4 py-3 space-y-4 relative pb-28">
+    <div className={immersive
+      ? 'relative flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-slate-950 lg:block lg:h-auto lg:max-w-5xl lg:mx-auto lg:space-y-4 lg:px-4 lg:py-3 lg:pb-28 lg:overflow-visible lg:bg-transparent'
+      : 'max-w-5xl mx-auto px-2 sm:px-4 py-3 space-y-4 relative pb-28'}>
       {/* Background Ambient Glow */}
       <div className="absolute top-10 left-1/4 w-72 h-72 bg-cyan-500/15 blur-3xl rounded-full pointer-events-none" />
       <div className="absolute bottom-10 right-1/4 w-80 h-80 bg-partyYellow/15 blur-3xl rounded-full pointer-events-none" />
@@ -200,10 +224,20 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
 
       {/* Whose turn it is, and how long they have left. Without the clock the
           room has no idea whether to wait or whether the game has stalled. */}
-      <div className="flex items-center justify-between gap-3 z-20 relative">
+      <div
+        className={immersive
+          ? 'flex shrink-0 items-center justify-between gap-3 px-3 pb-2 pt-2 relative z-20 lg:px-0 lg:pt-0'
+          : 'flex items-center justify-between gap-3 z-20 relative'}
+        style={immersive ? { paddingTop: 'max(env(safe-area-inset-top), 0.5rem)' } : undefined}
+      >
         <p className="text-xs font-black text-white/80 truncate">
           {canRoll ? 'YOUR ROLL' : `${activePlayer.name.toUpperCase()} IS ROLLING`}
         </p>
+        {immersive && (
+          <span className="rounded-full border border-white/15 bg-slate-950/75 px-2.5 py-1 font-mono text-[10px] font-black text-partyYellow backdrop-blur lg:hidden">
+            {boardProgress(activePlayer.boardPosition)} / {TOTAL_TILES}
+          </span>
+        )}
         {secondsLeft !== null && !hasRolled && (
           <span
             className={`font-mono text-xs font-black px-2.5 py-1 rounded-full border ${
@@ -270,14 +304,25 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
         )}
         activePlayerId={activePlayer.id}
         totalTiles={TOTAL_TILES}
+        immersive={immersive}
       />
 
-      {/* STICKY FLOATING ACTION BUTTON (FAB) IN THE MIDDLE AT THE BOTTOM — MOBILE OPTIMIZED!
-          Sits above the mobile action bar rather than on top of it. The bar is
-          `lg:hidden`, so only below lg does the FAB need lifting — at bottom-6 it
-          covered ROSTER / FEED / ITEMS, and most of the time it is showing the
-          greyed-out WAITING FOR TURN state, so the nav looked broken. */}
-      <div className="fixed bottom-24 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-xs px-4 flex flex-col items-center gap-2">
+      {immersive && (
+        <button
+          type="button"
+          onClick={onOpenActions}
+          aria-label="Open board actions"
+          title="Board actions"
+          className="absolute right-3 bottom-[calc(env(safe-area-inset-bottom)+8rem)] z-[60] flex min-h-12 w-11 items-center justify-center rounded-full border border-white/20 bg-slate-950/85 text-white shadow-xl backdrop-blur active:scale-95 lg:hidden"
+          style={{ right: 'max(env(safe-area-inset-right), 0.5rem)' }}
+        >
+          <MoreVertical className="h-5 w-5 text-partyCyan" />
+        </button>
+      )}
+
+      {/* Keep the primary action clear of the camera controls and the system
+          navigation gesture area during immersive mobile play. */}
+      <div className={`fixed ${immersive ? 'bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] lg:bottom-6' : 'bottom-24 lg:bottom-6'} left-1/2 -translate-x-1/2 z-50 w-full max-w-xs px-4 flex flex-col items-center gap-2`}>
         {/* What the roll is already worth, before it is thrown.
             The dice reveals earned steps rather than a random number, so this
             is knowable in advance — and telling a trailing player the catch-up
@@ -328,6 +373,7 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn }
         {diceValue !== null && (
           <DiceRoller
             isRolling={isRolling}
+            rollId={rollSequence}
             value={diceValue}
             bonuses={rollBonuses}
             onRollComplete={() => {}}

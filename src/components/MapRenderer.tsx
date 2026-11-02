@@ -17,6 +17,8 @@ interface MapRendererProps {
   totalTiles?: number;
   /** Who the camera follows on a phone until the player chooses otherwise. */
   defaultFollow?: 'active' | 'me';
+  /** Uses the available mobile viewport as the camera window during board play. */
+  immersive?: boolean;
 }
 
 type Follow = 'active' | 'me' | 'map';
@@ -62,6 +64,7 @@ export default function MapRenderer({
   activePlayerId,
   totalTiles = TOTAL_TILES,
   defaultFollow = 'active',
+  immersive = false,
 }: MapRendererProps) {
   const themeConfig = THEMES[theme] || THEMES.forest;
   const activePlayer = players.find((player) => player.id === activePlayerId);
@@ -79,6 +82,41 @@ export default function MapRenderer({
   const focusNode = focusPlayer?.boardPosition ?? 0;
   const focusPoint = BOARD_GRAPH[focusNode] ?? { x: 50, y: 50 };
   const offset = viewportOffset(focusPoint, zoom);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (!immersive) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const measure = () => setViewportSize({ width: viewport.clientWidth, height: viewport.clientHeight });
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measure);
+      observer.observe(viewport);
+      return () => observer.disconnect();
+    }
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [immersive]);
+
+  // The map world stays square. In immersive mode it is sized from the visible
+  // phone viewport, then moved in pixels so the active token stays in view even
+  // when the portrait window is much taller than it is wide.
+  const immersiveWorldSize = follow === 'map'
+    ? Math.min(viewportSize.width, viewportSize.height)
+    : Math.max(viewportSize.width * screenZoom, viewportSize.height);
+  const clampOffset = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+  const immersiveOffset = viewportSize.width > 0 && viewportSize.height > 0 && immersiveWorldSize > 0
+    ? {
+        left: follow === 'map'
+          ? (viewportSize.width - immersiveWorldSize) / 2
+          : clampOffset(viewportSize.width / 2 - (focusPoint.x / 100) * immersiveWorldSize, viewportSize.width - immersiveWorldSize, 0),
+        top: follow === 'map'
+          ? (viewportSize.height - immersiveWorldSize) / 2
+          : clampOffset(viewportSize.height / 2 - (focusPoint.y / 100) * immersiveWorldSize, viewportSize.height - immersiveWorldSize, 0),
+      }
+    : { left: 0, top: 0 };
 
   // The camera takes as long over a move as the token does (half a second a
   // tile), so the token is still in view while it walks.
@@ -91,10 +129,14 @@ export default function MapRenderer({
   }, [focusNode]);
 
   return (
-    <section className="relative w-full overflow-hidden rounded-[28px] border border-white/15 bg-slate-950 shadow-2xl" aria-label="Roadmap board">
+    <section className={immersive
+      ? 'relative flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-slate-950 lg:h-auto lg:flex-none lg:min-h-0 lg:rounded-[28px] lg:border lg:border-white/15 lg:shadow-2xl'
+      : 'relative w-full overflow-hidden rounded-[28px] border border-white/15 bg-slate-950 shadow-2xl'} aria-label="Roadmap board">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_20%,rgba(0,240,255,0.10),transparent_32%),radial-gradient(circle_at_18%_80%,rgba(255,209,102,0.08),transparent_30%)] pointer-events-none" />
 
-      <header className="relative z-10 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
+      <header className={immersive
+        ? 'relative z-10 hidden flex-wrap items-end justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6 lg:flex'
+        : 'relative z-10 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6'}>
         <div>
           <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-200/75">Main game</p>
           <h2 className="mt-1 text-lg font-black tracking-tight text-white sm:text-xl">{themeConfig.name} roadmap</h2>
@@ -111,8 +153,15 @@ export default function MapRenderer({
         </div>
       </header>
 
-      <div className="relative z-10 px-2 py-3 sm:px-5 sm:py-5">
-        <div className="relative mx-auto aspect-square w-full max-w-[560px] overflow-hidden rounded-2xl border border-white/10 bg-[url('/images/galactic_background.jpg')] bg-cover bg-center p-1.5 sm:p-3">
+      <div className={immersive
+        ? 'relative z-10 min-h-0 flex-1 p-0 lg:flex-none lg:px-2 lg:py-3'
+        : 'relative z-10 px-2 py-3 sm:px-5 sm:py-5'}>
+        <div
+          ref={viewportRef}
+          className={immersive
+            ? "relative h-full min-h-0 w-full overflow-hidden bg-[url('/images/galactic_background.jpg')] bg-cover bg-center lg:mx-auto lg:aspect-square lg:h-auto lg:max-w-[560px] lg:rounded-2xl lg:border lg:border-white/10 lg:p-3"
+            : "relative mx-auto aspect-square w-full max-w-[560px] overflow-hidden rounded-2xl border border-white/10 bg-[url('/images/galactic_background.jpg')] bg-cover bg-center p-1.5 sm:p-3"}
+        >
           <div className="absolute inset-0 rounded-2xl bg-slate-950/55" />
           <div className="absolute inset-0 z-0 overflow-hidden rounded-2xl pointer-events-none">
             <img src="/images/planet_ringed.jpg" alt="" aria-hidden className="absolute -right-8 -top-8 w-36 opacity-35 mix-blend-screen sm:w-56" />
@@ -126,10 +175,10 @@ export default function MapRenderer({
             data-map-world
             className="absolute z-[1]"
             style={{
-              width: `${zoom * 100}%`,
-              height: `${zoom * 100}%`,
-              left: `${offset.left}%`,
-              top: `${offset.top}%`,
+              width: immersive ? `${immersiveWorldSize}px` : `${zoom * 100}%`,
+              height: immersive ? `${immersiveWorldSize}px` : `${zoom * 100}%`,
+              left: immersive ? `${immersiveOffset.left}px` : `${offset.left}%`,
+              top: immersive ? `${immersiveOffset.top}px` : `${offset.top}%`,
               // Size animates too: switching to the whole map shrinks it, and a map
               // that shrank at once while it slid back would be off screen for a second.
               transition: `left ${cameraSeconds}s ${hops > 1 ? 'linear' : 'ease-out'}, top ${cameraSeconds}s ${hops > 1 ? 'linear' : 'ease-out'}, width 0.7s ease-out, height 0.7s ease-out`,
@@ -167,7 +216,11 @@ export default function MapRenderer({
 
           {/* Who to follow. Only on a screen small enough to need it. */}
           {screenZoom > 1 && (
-            <div className="absolute bottom-2 left-2 z-30 flex gap-1 rounded-full border border-white/15 bg-slate-950/80 p-1 backdrop-blur">
+            <div className={`absolute left-2 z-30 flex gap-1 rounded-full border border-white/15 bg-slate-950/80 p-1 backdrop-blur ${
+              immersive
+                ? 'bottom-[calc(env(safe-area-inset-bottom)+8rem)]'
+                : 'bottom-2'
+            }`}>
               {([
                 ['me', '📍 Me'],
                 ['active', '▶ Turn'],
@@ -190,7 +243,9 @@ export default function MapRenderer({
         </div>
       </div>
 
-      <footer className="relative z-10 flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.1em] text-gray-400 sm:px-6">
+      <footer className={immersive
+        ? 'relative z-10 hidden items-center justify-between gap-3 border-t border-white/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.1em] text-gray-400 sm:px-6 lg:flex'
+        : 'relative z-10 flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.1em] text-gray-400 sm:px-6'}>
         <span>Launchpad</span>
         <span className="flex items-center gap-1.5 text-partyYellow">
           Finish line <Trophy className="h-3 w-3" aria-hidden />

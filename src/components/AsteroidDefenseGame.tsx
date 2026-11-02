@@ -481,16 +481,7 @@ export default function AsteroidDefenseGame({
 
   // ── start ─────────────────────────────────────────────────────────────────
 
-  const startGame = async () => {
-    const accessError = await speechEngine.probeMicPermission();
-    if (accessError) {
-      setMicError(
-        typeof accessError === 'string'
-          ? accessError
-          : 'Microphone access is needed to fire the laser.'
-      );
-      return;
-    }
+  const startGame = () => {
     setMicError(null);
     setStatus('playing');
 
@@ -516,7 +507,24 @@ export default function AsteroidDefenseGame({
     spawnAsteroid();
     rafRef.current = requestAnimationFrame(step);
 
-    await startListening();
+    // On Android, start browser speech directly from the START tap when no
+    // room call owns the microphone. This avoids waiting for cloud token and
+    // mic permission requests before SpeechRecognition.start(). If a call is
+    // active, keep the shared-mic streaming path first so the room still hears
+    // the player; an unavailable stream provider exposes the explicit handoff.
+    if (isMobileAudioPlatform() && !micStream.isCallActive()) {
+      startBrowserListening();
+    } else if (isMobileAudioPlatform()) {
+      void startListening();
+    } else {
+      void speechEngine.probeMicPermission().then((accessError) => {
+        if (accessError) {
+          setMicError(accessError.message);
+          return;
+        }
+        if (game.current.active) void startListening();
+      });
+    }
   };
 
   /** The old recogniser: its own private mic, so on a phone it fights the call. */
@@ -529,8 +537,8 @@ export default function AsteroidDefenseGame({
         setTranscript(res.transcript);
         handleSpeech(res.transcript);
       },
-      onError: () => {
-        /* the recogniser restarts itself; a dropped phrase is not fatal */
+      onError: (error) => {
+        setMicError(error.message);
       },
     });
   };
@@ -604,6 +612,7 @@ export default function AsteroidDefenseGame({
   const claimMicForGame = () => {
     micStream.setSpeechPriority(true);
     setSpeechPriority(true);
+    setMicError(null);
 
     if (status !== 'playing') return;
     sessionRef.current?.stop();
@@ -614,8 +623,8 @@ export default function AsteroidDefenseGame({
         setTranscript(res.transcript);
         handleSpeech(res.transcript);
       },
-      onError: () => {
-        /* the recogniser restarts itself; a dropped phrase is not fatal */
+      onError: (error) => {
+        setMicError(error.message);
       },
     });
   };
@@ -775,26 +784,47 @@ export default function AsteroidDefenseGame({
       </div>
 
       {status === 'playing' && (
-        <div className="flex items-center gap-2 text-[11px] font-mono">
-          <span className="text-gray-500 shrink-0">HEARD</span>
-          <span className="flex-1 truncate rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-cyan-300">
-            {transcript || '…'}
-          </span>
-          <span
-            title={
-              engine === 'browser'
-                ? 'Browser speech recognition — on a phone it cannot share the mic with the call'
-                : 'Streaming recognition on the shared mic — the call keeps your voice'
-            }
-            className={`shrink-0 rounded-md border px-1.5 py-1 text-[9px] font-black tracking-wider ${
-              engine === 'browser'
-                ? 'border-amber-500/40 text-amber-300'
-                : 'border-emerald-500/40 text-emerald-300'
-            }`}
-          >
-            {engine === 'deepgram' ? 'DEEPGRAM' : engine === 'gemini' ? 'GEMINI' : engine === 'browser' ? 'BROWSER' : 'CONNECTING'}
-          </span>
-        </div>
+        <>
+          <div className="flex items-center gap-2 text-[11px] font-mono">
+            <span className="text-gray-500 shrink-0">HEARD</span>
+            <span className="flex-1 truncate rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-cyan-300">
+              {transcript || '…'}
+            </span>
+            <span
+              title={
+                engine === 'browser'
+                  ? 'Browser speech recognition — on a phone it cannot share the mic with the call'
+                  : 'Streaming recognition on the shared mic — the call keeps your voice'
+              }
+              className={`shrink-0 rounded-md border px-1.5 py-1 text-[9px] font-black tracking-wider ${
+                engine === 'browser'
+                  ? 'border-amber-500/40 text-amber-300'
+                  : 'border-emerald-500/40 text-emerald-300'
+              }`}
+            >
+              {engine === 'deepgram' ? 'DEEPGRAM' : engine === 'gemini' ? 'GEMINI' : engine === 'browser' ? 'BROWSER' : 'CONNECTING'}
+            </span>
+          </div>
+
+          {micError && (
+            <p role="status" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-200">
+              {micError}
+            </p>
+          )}
+
+          {engine === 'browser' && isMobileAudioPlatform() && micStream.isCallActive() && !speechPriority && (
+            <div className="flex flex-col gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-[11px] text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+              <span>Your room call may be holding the phone mic. Give the mic to the game so it can hear your words.</span>
+              <button
+                type="button"
+                onClick={claimMicForGame}
+                className="min-h-10 shrink-0 rounded-lg border border-amber-300/60 bg-amber-300/15 px-3 py-2 text-[10px] font-black tracking-wide text-amber-50 active:scale-95"
+              >
+                LET THE GAME HEAR ME
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

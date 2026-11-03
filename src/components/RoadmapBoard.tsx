@@ -313,8 +313,8 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn, 
           onClick={onOpenActions}
           aria-label="Open board actions"
           title="Board actions"
-          className="absolute right-3 bottom-[calc(env(safe-area-inset-bottom)+8rem)] z-[60] flex min-h-12 w-11 items-center justify-center rounded-full border border-white/20 bg-slate-950/85 text-white shadow-xl backdrop-blur active:scale-95 lg:hidden"
-          style={{ right: 'max(env(safe-area-inset-right), 0.5rem)' }}
+          className="fixed top-[calc(env(safe-area-inset-top)+0.5rem)] right-3 z-[60] flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-slate-950/85 text-white shadow-xl backdrop-blur active:scale-95 lg:hidden"
+          style={{ right: 'max(env(safe-area-inset-right), 0.75rem)' }}
         >
           <MoreVertical className="h-5 w-5 text-partyCyan" />
         </button>

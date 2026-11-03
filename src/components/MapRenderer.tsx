@@ -104,8 +104,9 @@ export default function MapRenderer({
   // phone viewport, then moved in pixels so the active token stays in view even
   // when the portrait window is much taller than it is wide.
   const immersiveWorldSize = follow === 'map'
-    ? Math.min(viewportSize.width, viewportSize.height)
-    : Math.max(viewportSize.width * screenZoom, viewportSize.height);
+    ? Math.min(viewportSize.width, viewportSize.height) * 0.95
+    : Math.max(viewportSize.width, viewportSize.height) * 1.5;
+  const centerY = viewportSize.height * 0.42;
   const clampOffset = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
   const immersiveOffset = viewportSize.width > 0 && viewportSize.height > 0 && immersiveWorldSize > 0
     ? {
@@ -114,7 +115,7 @@ export default function MapRenderer({
           : clampOffset(viewportSize.width / 2 - (focusPoint.x / 100) * immersiveWorldSize, viewportSize.width - immersiveWorldSize, 0),
         top: follow === 'map'
           ? (viewportSize.height - immersiveWorldSize) / 2
-          : clampOffset(viewportSize.height / 2 - (focusPoint.y / 100) * immersiveWorldSize, viewportSize.height - immersiveWorldSize, 0),
+          : clampOffset(centerY - (focusPoint.y / 100) * immersiveWorldSize, viewportSize.height - immersiveWorldSize, 0),
       }
     : { left: 0, top: 0 };
 
@@ -218,8 +219,8 @@ export default function MapRenderer({
           {screenZoom > 1 && (
             <div className={`absolute left-2 z-30 flex gap-1 rounded-full border border-white/15 bg-slate-950/80 p-1 backdrop-blur ${
               immersive
-                ? 'bottom-[calc(env(safe-area-inset-bottom)+8rem)]'
-                : 'bottom-2'
+                ? 'top-[calc(env(safe-area-inset-top)+3.25rem)] left-3'
+                : 'bottom-2 left-2'
             }`}>
               {([
                 ['me', '📍 Me'],

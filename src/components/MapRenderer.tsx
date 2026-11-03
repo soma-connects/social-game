@@ -16,7 +16,7 @@ interface MapRendererProps {
   activePlayerId: string;
   totalTiles?: number;
   /** Who the camera follows on a phone until the player chooses otherwise. */
-  defaultFollow?: 'active' | 'me';
+  defaultFollow?: 'active' | 'me' | 'map';
   /** Uses the available mobile viewport as the camera window during board play. */
   immersive?: boolean;
 }

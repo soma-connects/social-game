@@ -190,27 +190,37 @@ export type RoomSecrets = {
 const EMPTY_SECRETS: RoomSecrets = { tokens: {} };
 
 /**
- * Cached per room, because almost every request needs the token map and it
- * changes only when somebody joins. A miss falls through to Firestore, so a
- * cold container or a second instance still authenticates correctly.
+ * Always read from Firestore, never from an in-process cache.
+ *
+ * This used to be cached per instance, which held on Cloud Run pinned to one
+ * container and broke on Vercel, where every request can land on a different
+ * function instance. An instance that cached the token map before a player
+ * joined elsewhere kept answering that player's heartbeat with `no_session`,
+ * the client cleared its credentials and showed the join screen, and each
+ * rejoin created another player — six seats for one laptop.
  */
-const secretsCache: Map<string, RoomSecrets> = ((
-  globalThis as unknown as { __voicePartySecrets?: Map<string, RoomSecrets> }
-).__voicePartySecrets ??= new Map());
-
 export async function readSecrets(roomId: string): Promise<RoomSecrets> {
-  const cached = secretsCache.get(roomId);
-  if (cached) return cached;
-
   const doc = await privateRef(roomId).get();
-  const secrets = doc.exists ? ({ ...EMPTY_SECRETS, ...(doc.data() as RoomSecrets) }) : { ...EMPTY_SECRETS };
-  secretsCache.set(roomId, secrets);
-  return secrets;
+  return doc.exists ? ({ ...EMPTY_SECRETS, ...(doc.data() as RoomSecrets) }) : { ...EMPTY_SECRETS };
 }
 
+/**
+ * Replaces the private document, except that tokens are only ever added.
+ *
+ * Callers read, change and write the whole document, so two requests that
+ * overlap — two people joining at once, or a trivia question being set while
+ * somebody joins — each write back the token map they read. A plain `set`
+ * let the later one erase the earlier one's new token, and that player was
+ * logged out on their next request. Tokens are never revoked, so merging the
+ * stored map under ours inside a transaction cannot resurrect anything.
+ */
 export async function writeSecrets(roomId: string, secrets: RoomSecrets): Promise<void> {
-  secretsCache.set(roomId, secrets);
-  await privateRef(roomId).set(secrets);
+  const ref = privateRef(roomId);
+  await adminDb.runTransaction(async (tx) => {
+    const current = await tx.get(ref);
+    const stored = current.exists ? ((current.data() as RoomSecrets).tokens ?? {}) : {};
+    tx.set(ref, { ...secrets, tokens: { ...stored, ...secrets.tokens } });
+  });
 }
 
 // ─── Guess the Voice clips ──────────────────────────────────────────────────

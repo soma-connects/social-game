@@ -305,6 +305,9 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn, 
         activePlayerId={activePlayer.id}
         totalTiles={TOTAL_TILES}
         immersive={immersive}
+        // Arriving on the board shows the whole map first; the camera pill
+        // switches to following a player from there.
+        defaultFollow="map"
       />
 
       {immersive && (

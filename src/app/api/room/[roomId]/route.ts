@@ -2087,15 +2087,21 @@ export async function POST(request: Request, { params }: { params: { roomId: str
   // another. With six players heartbeating, reacting and voting, that is not a
   // rare race — it is the normal case.
   for (let attempt = 1; ; attempt++) {
-    const room = await readRoom(roomId);
+    // Read side by side: each is a round trip to Firestore, and every
+    // authenticated action needs both.
+    const needsAuth = !UNAUTHENTICATED_ACTIONS.has(action);
+    const [room, secrets] = await Promise.all([
+      readRoom(roomId),
+      needsAuth ? readSecrets(roomId) : null,
+    ]);
     if (!room) {
       // Every other action needs a room that already exists. Silently creating
       // one here is what used to make a guest the host of an empty room.
       return NextResponse.json({ error: 'Room not found', roomId }, { status: 404 });
     }
 
-    if (!UNAUTHENTICATED_ACTIONS.has(action)) {
-      const { tokens } = await readSecrets(roomId);
+    if (needsAuth && secrets) {
+      const { tokens } = secrets;
       const auth = authorize(room, action, String(body.token ?? ''), tokens);
       if ('error' in auth) return refusal(roomId, action, auth.error);
       const callerId = auth.caller.player.id;

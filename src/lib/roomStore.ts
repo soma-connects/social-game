@@ -725,9 +725,13 @@ class RoomStoreManager {
     });
   }
 
-  public leaveRoom(roomId: string, playerId: string) {
+  public async leaveRoom(roomId: string, playerId: string) {
+    // Forgotten only after the request: post() reads the token from storage,
+    // and clearing it first sent no token, so leave_room was always refused
+    // and the player lingered in the room until the presence timeout.
+    const result = await this.post(roomId, { action: 'leave_room', playerId });
     this.clearSession(roomId);
-    return this.post(roomId, { action: 'leave_room', playerId });
+    return result;
   }
 
   public kickPlayer(roomId: string, playerId: string, requesterId: string) {

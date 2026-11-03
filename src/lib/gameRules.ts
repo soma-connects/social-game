@@ -928,9 +928,10 @@ export const PRESENCE_TIMEOUT_MS = 25000;
 
 /** Whether a player is still in the room, by connection flag and heartbeat. */
 export function isPresent(
-  player: { connected?: boolean; lastSeen?: number },
+  player: { connected?: boolean; lastSeen?: number; isLocal?: boolean },
   now: number = Date.now()
 ): boolean {
+  if (player.isLocal) return player.connected !== false;
   return player.connected !== false && now - (player.lastSeen ?? now) < PRESENCE_TIMEOUT_MS;
 }
 

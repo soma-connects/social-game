@@ -187,11 +187,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
     if (!name) return;
 
     setAddError(null);
-    // Adding a pass-and-play player must not steal this browser's identity, so
-    // the returned playerId is deliberately ignored here.
-    const myId = roomStore.getMyPlayerId(room.roomId);
-    const result = await roomStore.joinRoom(room.roomId, name);
-    if (myId) roomStore.setMyPlayerId(myId, room.roomId);
+    const result = await roomStore.addLocalPlayer(room.roomId, name);
 
     if (result.error) {
       setAddError(result.error);
@@ -292,9 +288,22 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               </h3>
               <p className="text-xs text-gray-400">Local hangout spot for joined avatars</p>
             </div>
-            <span className="text-xs text-partyYellow font-mono font-bold bg-partyYellow/20 px-3 py-1 rounded-full border border-partyYellow/30">
-              {room.roomId}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-partyYellow font-mono font-bold bg-partyYellow/20 px-3 py-1 rounded-full border border-partyYellow/30">
+                {room.roomId}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  roomStore.clearSession(room.roomId);
+                  window.location.reload();
+                }}
+                className="text-[11px] text-gray-400 hover:text-white px-2 py-1 rounded-lg border border-white/10 hover:border-white/30 transition-all font-semibold"
+                title="Leave this seat and join as a new guest or switch profile"
+              >
+                SWITCH SEAT
+              </button>
+            </div>
           </div>
 
           {/* Compact Profile & Avatar Bar (No page clutter!) */}
@@ -422,6 +431,16 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                           className="glass-pill rounded-2xl p-4 space-y-3 border transition-all text-center relative overflow-hidden flex flex-col items-center"
                           style={{ borderColor: `${team.color}50` }}
                         >
+                          {myPlayer.isHost && !player.isHost && (
+                            <button
+                              type="button"
+                              onClick={() => roomStore.kickPlayer(room.roomId, player.id, myPlayer.id)}
+                              title={`Remove ${player.name}`}
+                              className="absolute top-2 left-2 text-[10px] bg-red-500/20 hover:bg-red-500/60 text-red-300 p-1 rounded-full z-10 transition-colors"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {myPlayer.isHost && (
                             <button
                               onClick={() => roomStore.switchTeam(room.roomId, player.id, team.id === 'red' ? 'blue' : 'red')}
@@ -436,6 +455,9 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                               {player.name}
                               {player.id === myPlayer.id && (
                                 <span className="bg-white text-partyDark text-[9px] px-1.5 py-0.5 rounded-full font-black">YOU</span>
+                              )}
+                              {player.isLocal && (
+                                <span className="bg-emerald-500/30 text-emerald-300 text-[9px] px-1.5 py-0.5 rounded-full font-black">LOCAL</span>
                               )}
                             </h4>
                           </div>
@@ -485,6 +507,16 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   key={player.id}
                   className="glass-pill rounded-2xl p-4 space-y-3 border border-white/15 hover:border-partyYellow/50 transition-all text-center relative overflow-hidden flex flex-col items-center"
                 >
+                  {myPlayer.isHost && !player.isHost && (
+                    <button
+                      type="button"
+                      onClick={() => roomStore.kickPlayer(room.roomId, player.id, myPlayer.id)}
+                      title={`Remove ${player.name}`}
+                      className="absolute top-2 right-2 text-[10px] bg-red-500/20 hover:bg-red-500/60 text-red-300 p-1.5 rounded-full z-10 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <AvatarIllustration avatar={player.avatar} variant="card" size="md" />
 
                   <div>
@@ -498,6 +530,11 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                       {player.isHost && (
                         <span className="bg-partyYellow text-partyDark text-[9px] px-1.5 py-0.5 rounded-full font-black">
                           HOST
+                        </span>
+                      )}
+                      {player.isLocal && (
+                        <span className="bg-emerald-500/30 text-emerald-300 text-[9px] px-1.5 py-0.5 rounded-full font-black">
+                          LOCAL
                         </span>
                       )}
                     </h4>

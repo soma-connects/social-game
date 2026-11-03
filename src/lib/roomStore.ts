@@ -78,13 +78,22 @@ class RoomStoreManager {
   public getMyPlayerId(roomId?: string): string | null {
     if (typeof window === 'undefined') return null;
     const key = this.roomKey(MY_PLAYER_ID_KEY, roomId);
-    return key ? localStorage.getItem(key) : null;
+    if (!key) return null;
+    try {
+      return sessionStorage.getItem(key) ?? localStorage.getItem(key);
+    } catch {
+      return null;
+    }
   }
 
   public setMyPlayerId(id: string, roomId?: string): void {
     if (typeof window === 'undefined') return;
     const key = this.roomKey(MY_PLAYER_ID_KEY, roomId);
-    if (key) localStorage.setItem(key, id);
+    if (!key) return;
+    try {
+      sessionStorage.setItem(key, id);
+      localStorage.setItem(key, id);
+    } catch {}
   }
 
   /**
@@ -101,13 +110,22 @@ class RoomStoreManager {
   public getMyToken(roomId?: string): string | null {
     if (typeof window === 'undefined') return null;
     const key = this.roomKey(MY_TOKEN_KEY, roomId);
-    return key ? localStorage.getItem(key) : null;
+    if (!key) return null;
+    try {
+      return sessionStorage.getItem(key) ?? localStorage.getItem(key);
+    } catch {
+      return null;
+    }
   }
 
   public setMyToken(token: string, roomId?: string): void {
     if (typeof window === 'undefined') return;
     const key = this.roomKey(MY_TOKEN_KEY, roomId);
-    if (key) localStorage.setItem(key, token);
+    if (!key) return;
+    try {
+      sessionStorage.setItem(key, token);
+      localStorage.setItem(key, token);
+    } catch {}
   }
 
   /** Forgets who this browser was in one room, so it offers a fresh join. */
@@ -115,8 +133,16 @@ class RoomStoreManager {
     if (typeof window === 'undefined') return;
     const idKey = this.roomKey(MY_PLAYER_ID_KEY, roomId);
     const tokenKey = this.roomKey(MY_TOKEN_KEY, roomId);
-    if (idKey) localStorage.removeItem(idKey);
-    if (tokenKey) localStorage.removeItem(tokenKey);
+    try {
+      if (idKey) {
+        sessionStorage.removeItem(idKey);
+        localStorage.removeItem(idKey);
+      }
+      if (tokenKey) {
+        sessionStorage.removeItem(tokenKey);
+        localStorage.removeItem(tokenKey);
+      }
+    } catch {}
   }
 
   public generateRoomCode(): string {
@@ -324,6 +350,15 @@ class RoomStoreManager {
     if (data.error) return { room: null, error: data.error };
     if (data.playerId) this.setMyPlayerId(String(data.playerId), roomId);
     return { room: (data.room as RoomState) ?? null };
+  }
+
+  /**
+   * Adds a pass-and-play local player to the room on the host's device.
+   * Deliberately does NOT update this browser's myPlayerId or myToken,
+   * keeping the host identity and authentication completely untouched.
+   */
+  public async addLocalPlayer(roomId: string, playerName: string): Promise<{ room?: RoomState; error?: string }> {
+    return this.post(roomId, { action: 'add_local_player', playerName });
   }
 
   public addTrapWord(roomId: string, word: string, authorId: string, authorName: string, targetPlayerId?: string) {
@@ -691,6 +726,7 @@ class RoomStoreManager {
   }
 
   public leaveRoom(roomId: string, playerId: string) {
+    this.clearSession(roomId);
     return this.post(roomId, { action: 'leave_room', playerId });
   }
 

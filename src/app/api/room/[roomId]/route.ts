@@ -225,8 +225,13 @@ function prunePresence(room: RoomState): boolean {
   const now = Date.now();
   let changed = false;
 
+  // Lobby timeout is extended to 120 seconds (2 mins) so players aren't dropped
+  // if they switch tabs, invite friends, or chat briefly in the lounge.
+  const timeoutMs = room.phase === 'lobby' ? 120_000 : PRESENCE_TIMEOUT_MS;
+
   for (const player of room.players) {
-    const gone = now - (player.lastSeen ?? now) >= PRESENCE_TIMEOUT_MS;
+    if (player.isLocal) continue; // Pass-and-play players are local and never time out
+    const gone = now - (player.lastSeen ?? now) >= timeoutMs;
     if (gone && player.connected !== false) {
       // Two players were dropped within a minute or two of the AI Master
       // starting. Whether the tab was hidden or simply frozen decides the fix.
@@ -607,6 +612,7 @@ const UNAUTHENTICATED_ACTIONS = new Set(['create', 'join']);
 
 /** Actions only the host may send. */
 const HOST_ONLY_ACTIONS = new Set([
+  'add_local_player',
   'update_settings',
   'set_theme',
   'update_minigames',
@@ -744,7 +750,8 @@ function authorize(
 
   if (ACTIVE_PLAYER_ACTIONS.has(action)) {
     const active = room.players[room.activePlayerIndex];
-    if (!active || active.id !== player.id) {
+    const isLocalOnHost = active?.isLocal && isHost;
+    if (!active || (active.id !== player.id && !isLocalOnHost)) {
       return {
         error: NextResponse.json({ error: 'It is not your turn' }, { status: 403 }),
       };
@@ -2239,6 +2246,36 @@ async function applyAction(
       await writeSecrets(roomId, secrets);
 
       return NextResponse.json({ room: saved, playerId: player.id, token });
+    }
+
+    case 'add_local_player': {
+      if (room.players.length >= MAX_PLAYERS) {
+        return NextResponse.json({ error: `Room is full (max ${MAX_PLAYERS} players)` }, { status: 409 });
+      }
+
+      const rawName = playerText(body.playerName, 24);
+      let displayName = rawName || `Local Player ${room.players.length + 1}`;
+      for (let n = 2; room.players.some((p) => p.name.toLowerCase() === displayName.toLowerCase()); n++) {
+        displayName = `${rawName} (${n})`;
+      }
+
+      const player = makePlayer(displayName, room.players.length, false);
+      player.isLocal = true;
+      player.lastSeen = Date.now();
+      player.connected = true;
+
+      if (room.roomType === 'team_battle') {
+        const red = room.players.filter((p) => p.teamId === 'red').length;
+        const blue = room.players.filter((p) => p.teamId === 'blue').length;
+        player.teamId = red <= blue ? 'red' : 'blue';
+      }
+
+      room.players.push(player);
+      pushEvent(room, `🎮 ${player.name} added to pass & play`, 'system');
+
+      // Room is saved, and no token is issued or returned so the host's credentials remain untouched.
+      const saved = await writeRoom(room);
+      return NextResponse.json({ room: saved, playerId: player.id });
     }
 
     case 'add_trap': {

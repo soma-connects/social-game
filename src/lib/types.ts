@@ -123,6 +123,8 @@ export type Player = {
   skipNextTurn?: boolean;
   inventory: string[];
   isHost: boolean;
+  /** Whether this player is a pass-and-play local player on the host's device. */
+  isLocal?: boolean;
   isReady: boolean;
   isSpeaking?: boolean;
   ping?: number;

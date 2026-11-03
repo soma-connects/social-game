@@ -129,8 +129,9 @@ export default function GameRoomPage() {
   // Passed explicitly: identity is stored per room, and this reads during the
   // first render, before the effect below tells the store which room we watch.
   const myPlayerId = roomStore.getMyPlayerId(roomId);
+  const myPlayerEarly = room?.players.find((p) => p.id === myPlayerId) ?? null;
   const performer = room?.players[room.activePlayerIndex] ?? null;
-  const isPerformer = !!performer && performer.id === myPlayerId;
+  const isPerformer = !!performer && (performer.id === myPlayerId || Boolean(performer.isLocal && myPlayerEarly?.isHost));
   const isAttemptPhase =
     room?.phase === 'qualifying_voice' || room?.phase === 'pitch_bird' || room?.phase === 'solfege';
 
@@ -354,7 +355,7 @@ export default function GameRoomPage() {
   const activePlayer = room.players[room.activePlayerIndex] || room.players[0];
   const leaderPlayer = [...room.players].sort((a, b) => b.score - a.score)[0] || room.players[0];
   const currentTheme: MapTheme = room.theme || 'forest';
-  const isMyTurn = activePlayer?.id === myPlayer.id;
+  const isMyTurn = activePlayer?.id === myPlayer.id || Boolean(activePlayer?.isLocal && myPlayer.isHost);
   /** Which of the roadmap's controls this phase actually has a use for. */
   const chrome = getPhaseChrome(room.phase, room.roomType);
   const isImmersiveBoard =

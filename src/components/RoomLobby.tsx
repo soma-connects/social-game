@@ -37,6 +37,7 @@ import { badgeArt, modeArt } from '@/lib/gameIcons';
 import GameIcon from './GameIcon';
 import ModeSetupModal, { GameModeId, ModeLaunchOptions } from './ModeSetupModal';
 import MicCheck from './MicCheck';
+import LobbyChecklist from './LobbyChecklist';
 
 import { audioSFX } from '@/lib/audioFeedback';
 import AvatarIllustration from './AvatarIllustration';
@@ -47,7 +48,16 @@ interface RoomLobbyProps {
   myPlayer: Player;
   onStartGame: () => void;
   onSelectMode?: (mode: GameModeId, options?: ModeLaunchOptions) => void;
+  /** Opens the "How it works" walkthrough. */
+  onOpenGuide?: () => void;
 }
+
+/**
+ * Karaoke & Pitch Arcade and the 15s Roast Hangout only ever opened a
+ * "coming soon" sheet. A playtest group tapping them hit a dead end, so they
+ * stay out of the menu until they exist. Flip to show them again.
+ */
+const SHOW_UNFINISHED_MODES = false;
 
 const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
   { id: 'english', name: 'English', flag: '🇬🇧' },
@@ -57,7 +67,7 @@ const LANGUAGES: { id: LanguageCode; name: string; flag: string }[] = [
   { id: 'korean', name: 'Korean', flag: '🇰🇷' },
 ];
 
-export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }: RoomLobbyProps) {
+export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode, onOpenGuide }: RoomLobbyProps) {
   const [selectedLangs, setSelectedLangs] = useState<LanguageCode[]>(room.selectedLanguages);
   const [mathEnabled, setMathEnabled] = useState(room.mathEnabled);
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -208,6 +218,11 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
       {/* Ambient Dashboard Background Music */}
       <BackgroundMusic screen="lobby" />
 
+      {/* What to do next: guests wait for the host, the host gets three steps. */}
+      <div className="relative z-10">
+        <LobbyChecklist room={room} myPlayer={myPlayer} onOpenGuide={onOpenGuide} />
+      </div>
+
       {/* Compact WhatsApp Direct Invite Banner */}
       <div className="glass-card rounded-2xl p-3.5 sm:p-4 border border-emerald-400/20 relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-3">
@@ -277,7 +292,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
       )}
 
       {/* Two-up grid for Lounging Area & Mode Hub */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 relative z-10">
+      <div className={`grid grid-cols-1 ${myPlayer.isHost ? 'xl:grid-cols-2' : ''} gap-6 relative z-10`}>
         {/* Player Lounging Area */}
         <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 border border-white/5 shadow-2xl">
           <div className="flex items-center justify-between">
@@ -336,8 +351,9 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
 
           {/* Before the match, not during a scored round. Half this game is
               voice, and the first thing that used to tell a player their mic
-              was blocked was a mini-game they had just scored zero in. */}
-          <MicCheck />
+              was blocked was a mini-game they had just scored zero in.
+              Guests have it as step 2 of their waiting card instead. */}
+          {myPlayer.isHost && <MicCheck />}
 
           {/* Avatar Selection Pop-up Modal */}
           {showAvatarModal && (
@@ -567,8 +583,9 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
             </div>
           )}
 
-          {/* Quick Add Player Form */}
-          {room.players.length < MAX_PLAYERS && (
+          {/* Quick Add Player Form. Host only: the server refuses it from
+              anyone else, so a guest typing a name here got nothing. */}
+          {myPlayer.isHost && room.players.length < MAX_PLAYERS && (
             <form onSubmit={handleAddPlayer} className="pt-2 space-y-3">
               <label className="text-xs font-bold text-gray-300 block">ADD LOCAL HANGOUT PLAYER (PASS & PLAY):</label>
               <div className="flex gap-2">
@@ -593,7 +610,9 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
           )}
         </div>
 
-        {/* Cosmic App Feature Mode Selector Hub */}
+        {/* Cosmic App Feature Mode Selector Hub. Host only: guests used to get
+            the whole menu and a LAUNCH button the server refused for them. */}
+        {myPlayer.isHost && (
         <div className="glass-card rounded-3xl p-4 sm:p-6 space-y-5 border border-white/5 shadow-2xl">
           <div className="space-y-2">
             <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
@@ -635,6 +654,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
               </button>
 
               {/* 2. Karaoke Arcade */}
+              {SHOW_UNFINISHED_MODES && (
               <button
                 onClick={() => {
                   setActiveMode('karaoke');
@@ -664,8 +684,10 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   </p>
                 </div>
               </button>
+              )}
 
               {/* 3. Hangout Lounge */}
+              {SHOW_UNFINISHED_MODES && (
               <button
                 onClick={() => {
                   setActiveMode('hangout');
@@ -695,6 +717,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
                   </p>
                 </div>
               </button>
+              )}
 
               {/* 4. AI Game Master Mode */}
               <button
@@ -871,6 +894,7 @@ export default function RoomLobby({ room, myPlayer, onStartGame, onSelectMode }:
             </button>
           </div>
         </div>
+        )}
       </div>
 
       {setupMode && (

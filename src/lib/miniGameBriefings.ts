@@ -6,7 +6,10 @@ export type BriefingId =
   | 'truth_or_dare'
   | 'chess'
   | 'ludo'
-  | 'team_battle';
+  | 'team_battle'
+  // The board game's own steps, which first-timers met with no explanation:
+  | 'board'
+  | 'shop';
 
 /**
  * What each mini-game or mode actually asks of a player.
@@ -213,6 +216,30 @@ export const BRIEFINGS: Record<BriefingId, MiniGameBriefing> = {
     usesMic: true,
     tip: 'Cheer on your teammates — every single point counts toward victory!',
   },
+
+  board: {
+    goal: 'Be the first to reach the finish line of the roadmap.',
+    steps: [
+      'When it is your turn, press ROLL DICE.',
+      'You move as far as your mini-game earned: the better you played, the further you go.',
+      'Then press NEXT TURN so the next player can roll.',
+    ],
+    scoring: 'Special tiles can boost you, set you back or start a duel. A buried mine costs a life.',
+    usesMic: false,
+    tip: 'Falling behind? Players at the back get free SLIPSTREAM steps to catch up.',
+  },
+
+  shop: {
+    goal: 'Spend the coins you won in the mini-game on powerups.',
+    steps: [
+      'Tap a powerup to buy it. The price is on the card.',
+      'Use it later, on your turn, from your items: some help you, some hit a rival.',
+      'Press DONE when you are finished. The board opens once everyone is done.',
+    ],
+    scoring: 'Coins you do not spend stay with you for the next round.',
+    usesMic: false,
+    tip: 'Everyone shops at the same time, so press DONE quickly and do not keep the room waiting.',
+  },
 };
 
 /** Backwards-compatibility alias for mini-games */
@@ -220,8 +247,8 @@ export const MINIGAME_BRIEFINGS: Record<MiniGameId, MiniGameBriefing> = BRIEFING
 
 /**
  * Maps the live room GamePhase to the briefing that explains it.
- * If a phase has no briefing (e.g. lobby, roadmap_turn, branch_choice, powerup_shop),
- * returns undefined so no guide card is shown.
+ * If a phase has no briefing (e.g. lobby, branch_choice), returns undefined so
+ * no guide card is shown.
  */
 export const PHASE_TO_BRIEFING: Partial<Record<GamePhase, BriefingId>> = {
   // Mini-games:
@@ -242,4 +269,8 @@ export const PHASE_TO_BRIEFING: Partial<Record<GamePhase, BriefingId>> = {
   chess_match: 'chess',
   ludo_match: 'ludo',
   team_battle_intro: 'team_battle',
+
+  // The board game's own steps:
+  roadmap_turn: 'board',
+  powerup_shop: 'shop',
 };

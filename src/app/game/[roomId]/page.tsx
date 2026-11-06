@@ -53,6 +53,10 @@ import { MapTheme, MiniGameId, Player } from '@/lib/types';
 import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam, micIsLive, isStrangerRoom, getPhaseChrome } from '@/lib/gameRules';
 import { GameModeId, ModeLaunchOptions } from '@/components/ModeSetupModal';
 import PowerupTargetPicker from '@/components/PowerupTargetPicker';
+import LatecomerBanner from '@/components/LatecomerBanner';
+import VoicePill from '@/components/VoicePill';
+import HowItWorks, { useHowItWorks } from '@/components/HowItWorks';
+import { isSittingOut, latecomerPass, latecomerWhen, matchInProgress } from '@/lib/latecomers';
 import MiniGameBriefing, { useMiniGameBriefing } from '@/components/MiniGameBriefing';
 import { BRIEFINGS, PHASE_TO_BRIEFING, BriefingId } from '@/lib/miniGameBriefings';
 import { audioSFX } from '@/lib/audioFeedback';
@@ -210,13 +214,23 @@ export default function GameRoomPage() {
   }, [roomId, myPlayerId]);
 
   /**
+   * The whole-game walkthrough, opened by itself on a first visit.
+   *
+   * Only once this browser has a seat, and only in the lobby or while watching
+   * a match it joined late: never over the join form, never over a live turn.
+   */
+  const guide = useHowItWorks(
+    !!room && !!myPlayerEarly && (room.phase === 'lobby' || isSittingOut(room, myPlayerEarly))
+  );
+
+  /**
    * First-time explanation for whichever mini-game or mode is on screen.
    *
    * Spectators get it too — they are about to play the same game next turn, and
    * watching something you do not understand is worse than playing it.
    *
-   * Only active when the room is in an actual game or mode phase, NOT in lobby
-   * or board movement.
+   * Only active when the room is in a game or mode phase, or on the board game's
+   * board and shop; never in the lobby. Held back while the walkthrough is open.
    */
   const activeBriefing: BriefingId | null =
     room?.phase ? (PHASE_TO_BRIEFING[room.phase] ?? null) : null;
@@ -225,7 +239,7 @@ export default function GameRoomPage() {
     showing: briefingGame,
     dismiss: dismissBriefing,
     open: openBriefing,
-  } = useMiniGameBriefing(activeBriefing, inGameOrMode);
+  } = useMiniGameBriefing(activeBriefing, inGameOrMode && guide.settled && !guide.open);
   const [reviewingBriefing, setReviewingBriefing] = useState(false);
 
   const handleLeaveGame = useCallback(async () => {
@@ -295,6 +309,10 @@ export default function GameRoomPage() {
 
   if (!myPlayer) {
     const isFull = room.players.length >= MAX_PLAYERS;
+    const hostName = room.players.find((p) => p.isHost)?.name || room.players[0]?.name || 'The host';
+    // Said before they join, not discovered after: someone arriving mid-match
+    // watches until the next round or match. See latecomers.ts.
+    const lateTicket = matchInProgress(room) ? latecomerPass(room) : null;
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-partyDark relative overflow-hidden">
         <div className="glass-card max-w-md w-full rounded-3xl p-6 sm:p-8 border border-partyYellow/40 space-y-6 text-center shadow-2xl relative z-10 backdrop-blur-xl bg-slate-900/80">
@@ -304,9 +322,19 @@ export default function GameRoomPage() {
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white">JOIN AS GUEST PLAYER</h2>
             <p className="text-xs text-gray-300">
-              {room.players[0]?.name || 'The host'} invited you to the Voice Party Roadmap Game.
+              {hostName} invited you to the Voice Party Roadmap Game.
             </p>
           </div>
+
+          {lateTicket && !isFull && (
+            <div className="p-4 rounded-2xl bg-partyCyan/10 border border-partyCyan/40 text-left space-y-1">
+              <p className="text-sm font-black text-white">⏳ A MATCH IS ALREADY ON</p>
+              <p className="text-xs text-cyan-100/85 leading-snug">
+                You can join now and watch. You&apos;ll get your first turn {latecomerWhen(lateTicket)} — the
+                game brings you in by itself.
+              </p>
+            </div>
+          )}
 
           {isFull ? (
             <div className="p-4 rounded-2xl bg-amber-500/15 border border-amber-500/50 text-sm text-amber-200">
@@ -341,11 +369,24 @@ export default function GameRoomPage() {
                 className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl glow-emerald"
               >
                 <UserPlus className="w-5 h-5" />
-                <span>{isJoining ? 'JOINING…' : `JOIN AS PLAYER ${room.players.length + 1}`}</span>
+                <span>
+                  {isJoining ? 'JOINING…' : lateTicket ? 'JOIN & WATCH' : `JOIN AS PLAYER ${room.players.length + 1}`}
+                </span>
               </button>
             </form>
           )}
+
+          {/* People arriving from a WhatsApp link never see the home page, so
+              the walkthrough is offered here too. */}
+          <button
+            type="button"
+            onClick={guide.show}
+            className="w-full text-xs font-black text-partyCyan hover:text-white transition"
+          >
+            ❓ NEW HERE? SEE HOW IT WORKS (30 SEC)
+          </button>
         </div>
+        <HowItWorks open={guide.open} onClose={guide.close} />
       </div>
     );
   }
@@ -487,6 +528,7 @@ export default function GameRoomPage() {
           onEndMatch={() => roomStore.endMatch(roomId)}
           canEndMatch={myPlayer.isHost && room.phase !== 'lobby'}
           showThemeSelector={chrome.themes}
+          onOpenGuide={guide.show}
         />
       </div>
 
@@ -531,6 +573,9 @@ export default function GameRoomPage() {
             />
           </div>
 
+          {/* On the board the same notice sits above the roll button instead. */}
+          {!isImmersiveBoard && <LatecomerBanner room={room} player={myPlayer} />}
+
           {showGeminiMode && (
             <GeminiAiMasterStage
               room={room}
@@ -564,6 +609,7 @@ export default function GameRoomPage() {
               myPlayer={myPlayer}
               onStartGame={handleStartMatch}
               onSelectMode={handleSelectMode}
+              onOpenGuide={guide.show}
             />
           )}
 
@@ -820,6 +866,17 @@ export default function GameRoomPage() {
                 onNextTurn={handleFinishRoadmapTurn}
                 immersive={isImmersiveBoard}
                 onOpenActions={() => setShowBoardActions(true)}
+                notice={<LatecomerBanner room={room} player={myPlayer} variant="pill" />}
+                cornerControls={
+                  <VoicePill
+                    roomId={roomId}
+                    players={room.players}
+                    myPlayer={myPlayer}
+                    micLive={micIsLive(room, myPlayer)}
+                    isStranger={isStrangerRoom(room)}
+                    onMicOptIn={(optIn) => void roomStore.setMicOptIn(roomId, optIn)}
+                  />
+                }
               />
               {room.phase === 'branch_choice' && (
                 <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
@@ -983,6 +1040,7 @@ export default function GameRoomPage() {
         onGoHome={() => router.push('/')}
         onLeave={handleLeaveGame}
         onEndMatch={() => roomStore.endMatch(roomId)}
+        onOpenGuide={guide.show}
       />
 
       {/* Mobile-Only Bottom Action Bar (Keeps mobile game view 100% clean & decluttered!) */}
@@ -1244,6 +1302,8 @@ export default function GameRoomPage() {
         />
       )}
 
+      <HowItWorks open={guide.open} onClose={guide.close} />
+
       {privateNotice && (
         <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] w-full max-w-xs px-4">
           <button
@@ -1260,7 +1320,9 @@ export default function GameRoomPage() {
       )}
 
       {/* Lets anyone pull the rules back up without waiting for the game to
-          come round again. Hidden once the briefing itself is open. */}
+          come round again. Hidden once the briefing itself is open, and on the
+          phone board, where it would sit on the roll button's stack; the
+          board's ⋮ menu has the guide instead. */}
       {inGameOrMode && !briefingGame && activeBriefing && (
         <button
           onClick={() => {
@@ -1269,7 +1331,7 @@ export default function GameRoomPage() {
           }}
           aria-label="How does this game work?"
           title="How does this game work?"
-          className="fixed bottom-24 right-4 lg:bottom-6 z-40 w-11 h-11 rounded-full bg-slate-900/90 border border-partyYellow/50 text-partyYellow font-black text-lg shadow-xl backdrop-blur-md hover:bg-slate-800 active:scale-95 transition"
+          className={`${isImmersiveBoard ? 'hidden lg:block' : ''} fixed bottom-24 right-4 lg:bottom-6 z-40 w-11 h-11 rounded-full bg-slate-900/90 border border-partyYellow/50 text-partyYellow font-black text-lg shadow-xl backdrop-blur-md hover:bg-slate-800 active:scale-95 transition`}
         >
           ?
         </button>
@@ -1278,7 +1340,9 @@ export default function GameRoomPage() {
       {pendingPowerup && (
         <PowerupTargetPicker
           item={pendingPowerup}
-          candidates={room.players.filter((p) => p.id !== myPlayer.id && p.connected !== false)}
+          candidates={room.players.filter(
+            (p) => p.id !== myPlayer.id && p.connected !== false && !isSittingOut(room, p)
+          )}
           onPick={handlePickTarget}
           onCancel={() => setPendingPowerup(null)}
         />

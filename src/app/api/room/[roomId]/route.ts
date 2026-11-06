@@ -70,6 +70,7 @@ import {
   walkBack,
   walkForward,
 } from '@/lib/gameRules';
+import { isSittingOut, latecomerPass, latecomerWhen } from '@/lib/latecomers';
 import {
   RoomConflictError,
   newToken,
@@ -209,15 +210,42 @@ function pickSocialBadge(round: SocialRound | null, performance: number): string
  */
 const MAX_CLIP_CHARS = 300_000;
 
+/** Everyone still connected, whether or not they are playing this match. */
+function presentPlayers(room: RoomState): Player[] {
+  const now = Date.now();
+  return room.players.filter((p) => isPresent(p, now));
+}
+
 /**
  * Players the game should still wait for.
  *
  * Anyone who closed the tab stops sending heartbeats. Without this the room
- * sits forever on a turn belonging to somebody who is not there.
+ * sits forever on a turn belonging to somebody who is not there. Latecomers
+ * who are watching until the next round or match are left out too: they are
+ * never handed a turn, never waited on in the shop and never picked as a target.
  */
 function activePlayers(room: RoomState): Player[] {
-  const now = Date.now();
-  return room.players.filter((p) => isPresent(p, now));
+  return presentPlayers(room).filter((p) => !isSittingOut(room, p));
+}
+
+/** Clears every latecomer's pass. Called wherever a match begins or ends. */
+function seatLatecomers(room: RoomState): void {
+  for (const player of room.players) delete player.latecomer;
+}
+
+/**
+ * Lets the watchers play when nobody from the match itself is left.
+ *
+ * Without this a room whose original players had all gone would stall on a
+ * round nobody can finish, with the newcomers watching an empty board.
+ */
+function admitWatchersIfAlone(room: RoomState): boolean {
+  if (activePlayers(room).length > 0) return false;
+  const watchers = presentPlayers(room).filter((p) => isSittingOut(room, p));
+  if (watchers.length === 0) return false;
+  for (const player of watchers) delete player.latecomer;
+  pushEvent(room, `🙌 Everyone from the match has gone — ${watchers.map((p) => p.name).join(', ')} take over`, 'system');
+  return true;
 }
 
 /** Drops players who have gone quiet, and hands the host role on if needed. */
@@ -251,7 +279,8 @@ function prunePresence(room: RoomState): boolean {
   // If the host vanished, promote someone so the room is not left unstartable.
   const host = room.players.find((p) => p.id === room.hostId);
   if (host?.connected === false) {
-    const heir = activePlayers(room)[0];
+    // Someone playing the match first; a watcher only if nobody else is here.
+    const heir = activePlayers(room)[0] ?? presentPlayers(room)[0];
     if (heir) {
       host.isHost = false;
       heir.isHost = true;
@@ -300,8 +329,10 @@ function skipAbsentLudoSeat(room: RoomState): void {
  * Called whenever the player set changes.
  */
 function unstickPhase(room: RoomState): void {
+  if (room.phase === 'lobby' || room.phase === 'game_over') return;
+  admitWatchersIfAlone(room);
   const live = activePlayers(room);
-  if (live.length === 0 || room.phase === 'lobby' || room.phase === 'game_over') return;
+  if (live.length === 0) return;
 
   if (room.phase === 'ludo_match') {
     skipAbsentLudoSeat(room);
@@ -1468,7 +1499,8 @@ async function startAiMasterRound(room: RoomState): Promise<void> {
   // still IN, not from who happens to be connected this second. It counted
   // present players, so a phone that had been in the background for a moment
   // left "one survivor" and the match ended before its first round.
-  const alive = room.players.filter((p) => !p.eliminated);
+  // Somebody watching until the next match was never in it, so is not standing.
+  const alive = room.players.filter((p) => !p.eliminated && !isSittingOut(room, p));
   if (alive.length <= 1) {
     if (alive[0]) declareWinner(room, alive[0], 'last_standing');
     return;
@@ -1522,7 +1554,9 @@ async function startAiMasterRound(room: RoomState): Promise<void> {
 
   // What to ask comes from the room's own menu, never the style just used.
   const style = pickChallengeStyle(roomVibeOf(room), previous?.styleId, random);
-  const others = room.players.filter((p) => p.id !== target!.id && !p.eliminated).map((p) => p.name);
+  const others = room.players
+    .filter((p) => p.id !== target!.id && !p.eliminated && !isSittingOut(room, p))
+    .map((p) => p.name);
 
   const { challenge, hostLine } = await once(
     `${room.roomId}|challenge|${round}|${target.id}|${style.id}|${extra.length}`,
@@ -2239,8 +2273,15 @@ async function applyAction(
         const blue = room.players.filter((p) => p.teamId === 'blue').length;
         player.teamId = red <= blue ? 'red' : 'blue';
       }
+      // Mid-match, they watch until the next round or match. See latecomers.ts.
+      const pass = latecomerPass(room);
+      if (pass) player.latecomer = pass;
       room.players.push(player);
-      pushEvent(room, `🎮 ${player.name} joined the room`, 'system');
+      pushEvent(
+        room,
+        pass ? `👀 ${player.name} joined mid-match and plays ${latecomerWhen(pass)}` : `🎮 ${player.name} joined the room`,
+        'system'
+      );
 
       // The room is written first. If that loses a write race the whole action
       // is replayed, and issuing the token beforehand would leave a credential
@@ -2276,8 +2317,17 @@ async function applyAction(
         player.teamId = red <= blue ? 'red' : 'blue';
       }
 
+      // Same rule as someone joining on their own phone mid-match.
+      const pass = latecomerPass(room);
+      if (pass) player.latecomer = pass;
       room.players.push(player);
-      pushEvent(room, `🎮 ${player.name} added to pass & play`, 'system');
+      pushEvent(
+        room,
+        pass
+          ? `👀 ${player.name} added to pass & play — plays ${latecomerWhen(pass)}`
+          : `🎮 ${player.name} added to pass & play`,
+        'system'
+      );
 
       // Room is saved, and no token is issued or returned so the host's credentials remain untouched.
       const saved = await writeRoom(room);
@@ -3336,6 +3386,12 @@ async function applyAction(
         if (target.connected === false) {
           return NextResponse.json({ error: `${target.name} has dropped out` }, { status: 409 });
         }
+        if (isSittingOut(room, target)) {
+          return NextResponse.json(
+            { error: `${target.name} is only watching this round — pick someone who is playing` },
+            { status: 409 }
+          );
+        }
       } else if (item.target === 'leader') {
         target = [...activePlayers(room)].sort((a, b) => b.score - a.score)[0];
         if (!target) return NextResponse.json({ error: 'Nobody to target' }, { status: 409 });
@@ -3544,6 +3600,8 @@ async function applyAction(
       }
       // Nobody may sit the series out teamless — their points would vanish.
       ensureTeams(room);
+      // A new series is a new match: anyone who arrived during the last one plays.
+      seatLatecomers(room);
 
       room.phase = 'team_battle_intro';
       room.teamBattleState = {
@@ -3626,6 +3684,7 @@ async function applyAction(
       room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       room.matchStartedAt = Date.now();
       room.matchArchived = false;
+      seatLatecomers(room);
       room.winner = null;
       room.aiMasterState = null;
       await recordSessionStarted(room);
@@ -3704,7 +3763,10 @@ async function applyAction(
       state.votes = { ...(state.votes ?? {}), [voter.id]: verdict };
 
       // Close automatically once everybody entitled to a say has had one.
-      const eligible = activePlayers(room).filter((p) => p.id !== state.targetId).length;
+      // Watchers who joined mid-match may vote like everyone else in the room,
+      // so they are counted; leaving them out would let their votes close the
+      // round before the players had voted.
+      const eligible = presentPlayers(room).filter((p) => p.id !== state.targetId).length;
       if (Object.keys(state.votes).length >= eligible) await resolveAiMasterRound(room);
 
       return NextResponse.json({ room: await writeRoom(room) });
@@ -3960,6 +4022,7 @@ async function applyAction(
       room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       room.matchStartedAt = Date.now();
       room.matchArchived = false;
+      seatLatecomers(room);
       room.winner = null;
       room.truthOrDareState = null;
       if (!room.truthOrDareSettings) room.truthOrDareSettings = DEFAULT_TRUTH_OR_DARE_SETTINGS;
@@ -4117,6 +4180,8 @@ async function applyAction(
       room.matchId = `${room.roomId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       room.matchStartedAt = Date.now();
       room.matchArchived = false;
+      // Everyone in the room is in a match that starts now.
+      seatLatecomers(room);
 
       // This action starts the board game and Team Battle only — chess, ludo
       // and AI Master each have their own. Without this a room that had just
@@ -4204,6 +4269,7 @@ async function applyAction(
         delete player.skipNextTurn;
         delete player.remainingSteps;
         delete player.eliminated;
+        delete player.latecomer;
         resetMatchStats(player);
       }
 
@@ -4428,6 +4494,7 @@ async function applyAction(
         for (let i = 4; i < room.players.length; i++) spectators.push(room.players[i].id);
       }
 
+      seatLatecomers(room);
       room.roomType = 'chess';
       room.phase = 'chess_match';
       room.chessState = {
@@ -4685,6 +4752,7 @@ async function applyAction(
         blue: [0, 1, 2, 3].map((id) => ({ id, color: 'blue', position: -1 })),
       };
 
+      seatLatecomers(room);
       room.roomType = 'ludo';
       room.phase = 'ludo_match';
       room.ludoState = {

@@ -9,9 +9,12 @@ import { AVATARS } from '@/lib/gameContent';
 import AvatarIllustration from '@/components/AvatarIllustration';
 import PublicRoomBrowser from '@/components/PublicRoomBrowser';
 import PublicRoomGate, { hasAcknowledged } from '@/components/PublicRoomGate';
+import HowItWorks, { useHowItWorks } from '@/components/HowItWorks';
 
 export default function HomePage() {
   const router = useRouter();
+  // Opens by itself the first time this browser visits; the button reopens it.
+  const guide = useHowItWorks(true);
   const [hostName, setHostName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -113,6 +116,14 @@ export default function HomePage() {
           <p className="text-gray-300 text-sm sm:text-base max-w-lg mx-auto px-4 sm:px-0">
             High-speed voice challenges in <span className="text-partyYellow font-extrabold">English</span> and other languages! Win mini-games, drop traps & roll 3D dice to victory!
           </p>
+
+          <button
+            type="button"
+            onClick={guide.show}
+            className="inline-flex items-center gap-2 glass-pill px-4 py-2 rounded-full text-xs font-black text-partyCyan border border-partyCyan/40 hover:text-white hover:border-white/40 transition"
+          >
+            ❓ NEW HERE? SEE HOW IT WORKS (30 SEC)
+          </button>
         </div>
 
         {/* 2D Vector Caricatures Lineup */}
@@ -180,6 +191,8 @@ export default function HomePage() {
         </div>
 
         <PublicRoomBrowser onJoin={handleJoinPublicRoom} busy={busy} />
+
+        <HowItWorks open={guide.open} onClose={guide.close} />
 
         {pendingPublicRoom && (
           <PublicRoomGate

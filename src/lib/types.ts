@@ -51,6 +51,14 @@ export type Player = {
   /** Set when they left on purpose, or were dropped for going quiet. */
   connected?: boolean;
   /**
+   * Set on someone who joined while a match was already being played.
+   *
+   * They watch first instead of being dropped into a turn they know nothing
+   * about. `fromRound` is the board-game round they come in on; null means they
+   * wait for the next match. Cleared whenever a match starts. See latecomers.ts.
+   */
+  latecomer?: { fromRound: number | null };
+  /**
    * Whether this player has opted in to sending their microphone.
    *
    * Undefined reads as "yes" in a private room and "no" in a public one. In a

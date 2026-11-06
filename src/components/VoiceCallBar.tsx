@@ -4,6 +4,7 @@ import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { Mic, MicOff, PhoneCall, PhoneOff, Loader2, AlertTriangle, Volume2, VolumeX } from 'lucide-react';
 import { Player } from '@/lib/types';
 import { voiceChat, VoiceState } from '@/lib/voiceChat';
+import { joinVoiceCall, toggleVoiceMute } from '@/lib/voiceCallActions';
 import { isMuted, safetyServerVersion, safetyVersion, shouldSilence, subscribeSafety } from '@/lib/safety';
 import AvatarIllustration from './AvatarIllustration';
 import PlayerSafetyMenu from './PlayerSafetyMenu';
@@ -122,12 +123,11 @@ export default function VoiceCallBar({
 
   const handleJoin = async () => {
     setJoining(true);
-    voiceChat.resumeAudio();
-    await voiceChat.join(roomId, myPlayer.id, players.map((p) => p.id));
-    // Joining a stranger room connects you so you can hear the others. It does
-    // not open your microphone — that takes a separate, deliberate tap.
-    voiceChat.setMicConsent(micLive);
-    setJoining(false);
+    try {
+      await joinVoiceCall(roomId, myPlayer.id, players.map((p) => p.id), micLive);
+    } finally {
+      setJoining(false);
+    }
   };
 
   /**
@@ -212,7 +212,26 @@ export default function VoiceCallBar({
           </span>
         )}
         <span className="text-[11px] font-black flex items-center gap-1 shrink-0">
-          {state.muted ? (
+          {!isLive ? (
+            // Off the call mid-round used to be a dead end: this line said
+            // "Group voice off" with nothing to press. The performer is left
+            // alone, since connecting mid-attempt would fight their scoring mic.
+            !duckRemote && (
+              <button
+                type="button"
+                onClick={handleJoin}
+                disabled={joining || state.status === 'connecting' || players.length < 2}
+                className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-partyDark px-2.5 py-1 rounded-lg flex items-center gap-1 active:scale-95 transition"
+              >
+                {joining || state.status === 'connecting' ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <PhoneCall className="w-3 h-3" />
+                )}
+                JOIN CALL
+              </button>
+            )
+          ) : state.muted ? (
             <span className="text-amber-300 flex items-center gap-1">
               <MicOff className="w-3 h-3" /> MUTED
             </span>
@@ -354,14 +373,7 @@ export default function VoiceCallBar({
               // Un-muting by hand IS opting in, so it records consent rather
               // than slipping past the public-room default. Muting by hand
               // withdraws it, so the end of the next round cannot re-open it.
-              const nowMuted = voiceChat.toggleMuted();
-              if (!isStranger) return;
-              // In a public room the button carries consent both ways, so an
-              // explicit un-mute is an opt-in rather than a way around the
-              // default, and an explicit mute cannot be undone by the end of
-              // the next round.
-              if (!nowMuted && !micLive) onMicOptIn?.(true);
-              if (nowMuted && micLive) onMicOptIn?.(false);
+              toggleVoiceMute({ isStranger, micLive, onMicOptIn });
             }}
             className={`px-3 py-2 rounded-xl border font-black text-xs flex items-center gap-1.5 transition-all ${
               state.muted

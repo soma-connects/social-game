@@ -23,9 +23,13 @@ interface RoadmapBoardProps {
   immersive?: boolean;
   /** Opens room actions from the mobile board edge button. */
   onOpenActions?: () => void;
+  /** A line for this viewer shown just above the roll button, such as "you're watching". */
+  notice?: React.ReactNode;
+  /** Extra controls pinned to the top-right corner on phones, under the actions button. */
+  cornerControls?: React.ReactNode;
 }
 
-export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn, immersive = false, onOpenActions }: RoadmapBoardProps) {
+export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn, immersive = false, onOpenActions, notice, cornerControls }: RoadmapBoardProps) {
   const [diceValue, setDiceValue] = useState<number | null>(null);
   const [rollSequence, setRollSequence] = useState(0);
   // The breakdown behind the current dice overlay. Held in state rather than
@@ -323,9 +327,22 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn, 
         </button>
       )}
 
+      {/* Level with the camera pill on the left, so the two corners balance and
+          neither covers the road. */}
+      {immersive && cornerControls && (
+        <div
+          className="fixed top-[calc(env(safe-area-inset-top)+3.25rem)] z-[60] lg:hidden"
+          style={{ right: 'max(env(safe-area-inset-right), 0.75rem)' }}
+        >
+          {cornerControls}
+        </div>
+      )}
+
       {/* Keep the primary action clear of the camera controls and the system
           navigation gesture area during immersive mobile play. */}
       <div className={`fixed ${immersive ? 'bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] lg:bottom-6' : 'bottom-24 lg:bottom-6'} left-1/2 -translate-x-1/2 z-50 w-full max-w-xs px-4 flex flex-col items-center gap-2`}>
+        {notice}
+
         {/* What the roll is already worth, before it is thrown.
             The dice reveals earned steps rather than a random number, so this
             is knowable in advance — and telling a trailing player the catch-up

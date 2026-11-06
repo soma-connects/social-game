@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Volume2, VolumeX, Mic, MicOff, Share2, Home, LogOut, MoreVertical, X, Flag } from 'lucide-react';
+import { Volume2, VolumeX, Mic, MicOff, Share2, Home, LogOut, MoreVertical, X, Flag, HelpCircle } from 'lucide-react';
 import { audioSFX } from '@/lib/audioFeedback';
 import { speechEngine } from '@/lib/speechService';
 import { micStream } from '@/lib/micStream';
@@ -22,6 +22,8 @@ interface GameHeaderProps {
   /** True when a match is actually running and the caller may end it. */
   canEndMatch?: boolean;
   showThemeSelector?: boolean;
+  /** Opens the "How it works" walkthrough. */
+  onOpenGuide?: () => void;
 }
 
 export default function GameHeader({
@@ -34,6 +36,7 @@ export default function GameHeader({
   onEndMatch,
   canEndMatch = false,
   showThemeSelector = true,
+  onOpenGuide,
 }: GameHeaderProps) {
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -126,6 +129,20 @@ export default function GameHeader({
           >
             {isAudioMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-partyYellow" />}
           </button>
+
+          {/* The whole-game walkthrough, from anywhere. Always visible: the one
+              thing a lost player needs is a way back to the instructions. */}
+          {onOpenGuide && (
+            <button
+              onClick={onOpenGuide}
+              className="glass-pill hover:bg-white/20 text-white px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg sm:rounded-xl transition-all flex items-center gap-1 font-black text-[10px] sm:text-xs"
+              title="How it works"
+              aria-label="How it works"
+            >
+              <HelpCircle className="w-4 h-4 text-partyCyan" />
+              <span className="hidden sm:inline">GUIDE</span>
+            </button>
+          )}
 
           {/* Desktop-only inline buttons */}
           <div className="hidden sm:flex items-center gap-2">

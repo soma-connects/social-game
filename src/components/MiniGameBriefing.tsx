@@ -27,6 +27,8 @@ export const BRIEFING_ICONS: Record<BriefingId, string> = {
   chess: '♟️',
   ludo: '🎯',
   team_battle: '⚔️',
+  board: '🎲',
+  shop: '🛒',
 };
 
 export const BRIEFING_LABELS: Record<BriefingId, string> = {
@@ -45,6 +47,8 @@ export const BRIEFING_LABELS: Record<BriefingId, string> = {
   chess: 'Chess',
   ludo: 'Ludo',
   team_battle: 'Team Battle',
+  board: 'The Board',
+  shop: 'The Powerup Shop',
 };
 
 function readSeen(): Set<BriefingId> {

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import {
   Flag,
+  HelpCircle,
   Home,
   LogOut,
   Mic,
@@ -43,6 +44,8 @@ interface MobileBoardActionsProps {
   onGoHome: () => void;
   onLeave: () => void;
   onEndMatch: () => void;
+  /** Opens the "How it works" walkthrough. */
+  onOpenGuide?: () => void;
 }
 
 /** Room actions reached from the roadmap's edge button on small screens. */
@@ -68,6 +71,7 @@ export default function MobileBoardActions({
   onGoHome,
   onLeave,
   onEndMatch,
+  onOpenGuide,
 }: MobileBoardActionsProps) {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
 
@@ -213,6 +217,7 @@ export default function MobileBoardActions({
               <ActionButton icon={<Mic />} label={micMuted ? 'Unmute mic' : 'Mute mic'} onClick={onToggleMic} />
               <ActionButton icon={soundMuted ? <VolumeX /> : <Volume2 />} label={soundMuted ? 'Unmute sound' : 'Mute sound'} onClick={onToggleSound} />
               <ActionButton icon={<Share2 />} label="Share room" onClick={shareRoom} />
+              {onOpenGuide && <ActionButton icon={<HelpCircle />} label="How it works" onClick={() => openPanel(onOpenGuide)} />}
             </div>
 
             {showThemeSelector && (

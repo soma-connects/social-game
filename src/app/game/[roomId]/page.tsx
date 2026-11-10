@@ -50,7 +50,7 @@ import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { useAttemptOpen } from '@/hooks/useAttemptWindow';
 import { roomStore, RoomSnapshot } from '@/lib/roomStore';
 import { MapTheme, MiniGameId, Player } from '@/lib/types';
-import { MAX_PLAYERS, BOARD_GRAPH, SHOP_ITEMS, ShopItem, getShopItem, getTeam, micIsLive, isStrangerRoom, getPhaseChrome } from '@/lib/gameRules';
+import { MAX_PLAYERS, BOARD_GRAPH, BOARD_LENGTH, boardProgress, SHOP_ITEMS, ShopItem, getShopItem, getTeam, micIsLive, isStrangerRoom, getPhaseChrome } from '@/lib/gameRules';
 import { GameModeId, ModeLaunchOptions } from '@/components/ModeSetupModal';
 import PowerupTargetPicker from '@/components/PowerupTargetPicker';
 import LatecomerBanner from '@/components/LatecomerBanner';
@@ -239,7 +239,13 @@ export default function GameRoomPage() {
     showing: briefingGame,
     dismiss: dismissBriefing,
     open: openBriefing,
+    holding: briefingHolding,
   } = useMiniGameBriefing(activeBriefing, inGameOrMode && guide.settled && !guide.open);
+  /**
+   * Keeps a self-starting mini-game from running under its own rules card.
+   * See `holding` in useMiniGameBriefing.
+   */
+  const holdForBriefing = inGameOrMode && (briefingHolding || !guide.settled);
   const [reviewingBriefing, setReviewingBriefing] = useState(false);
 
   const handleLeaveGame = useCallback(async () => {
@@ -636,11 +642,15 @@ export default function GameRoomPage() {
           {room.phase === 'qualifying_voice' && (
             <div className="space-y-6">
               {isMyTurn ? (
-                <VoiceGameController
-                  room={room}
-                  activePlayer={activePlayer}
-                  onCompleteTurn={handleMiniGameComplete('voice_arena')}
-                />
+                holdForBriefing ? (
+                  <BriefingHold />
+                ) : (
+                  <VoiceGameController
+                    room={room}
+                    activePlayer={activePlayer}
+                    onCompleteTurn={handleMiniGameComplete('voice_arena')}
+                  />
+                )
               ) : (
                 <SpectatorView
                   activePlayer={activePlayer}
@@ -656,11 +666,15 @@ export default function GameRoomPage() {
           {room.phase === 'pitch_bird' && (
             <div className="space-y-6">
               {isMyTurn ? (
-                <PitchBirdCanvas
-                  player={activePlayer}
-                  roomId={roomId}
-                  onComplete={handleMiniGameComplete('pitch_bird')}
-                />
+                holdForBriefing ? (
+                  <BriefingHold />
+                ) : (
+                  <PitchBirdCanvas
+                    player={activePlayer}
+                    roomId={roomId}
+                    onComplete={handleMiniGameComplete('pitch_bird')}
+                  />
+                )
               ) : (
                 <SpectatorView
                   activePlayer={activePlayer}
@@ -689,11 +703,15 @@ export default function GameRoomPage() {
           {room.phase === 'solfege' && (
             <div className="space-y-6">
               {isMyTurn ? (
-                <SolfegeGame
-                  player={activePlayer}
-                  roomId={roomId}
-                  onComplete={handleMiniGameComplete('solfege')}
-                />
+                holdForBriefing ? (
+                  <BriefingHold />
+                ) : (
+                  <SolfegeGame
+                    player={activePlayer}
+                    roomId={roomId}
+                    onComplete={handleMiniGameComplete('solfege')}
+                  />
+                )
               ) : (
                 <SpectatorView
                   activePlayer={activePlayer}
@@ -709,11 +727,15 @@ export default function GameRoomPage() {
           {room.phase === 'spelling_bee' && (
             <div className="space-y-6">
               {isMyTurn ? (
-                <SpellingBeeGame
-                  room={room}
-                  activePlayer={activePlayer}
-                  onCompleteTurn={handleMiniGameComplete('spelling_bee')}
-                />
+                holdForBriefing ? (
+                  <BriefingHold />
+                ) : (
+                  <SpellingBeeGame
+                    room={room}
+                    activePlayer={activePlayer}
+                    onCompleteTurn={handleMiniGameComplete('spelling_bee')}
+                  />
+                )
               ) : (
                 <SpectatorView
                   activePlayer={activePlayer}
@@ -722,7 +744,7 @@ export default function GameRoomPage() {
                   label="is spelling in the Spelling Bee 🐝"
                 />
               )}
-              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
 
@@ -778,11 +800,15 @@ export default function GameRoomPage() {
           {room.phase === 'trivia_showdown' && (
             <div className="space-y-6">
               {isMyTurn ? (
-                <TriviaShowdownGame
-                  room={room}
-                  activePlayer={activePlayer}
-                  onCompleteTurn={handleMiniGameComplete('trivia_showdown')}
-                />
+                holdForBriefing ? (
+                  <BriefingHold />
+                ) : (
+                  <TriviaShowdownGame
+                    room={room}
+                    activePlayer={activePlayer}
+                    onCompleteTurn={handleMiniGameComplete('trivia_showdown')}
+                  />
+                )
               ) : (
                 <SpectatorView
                   activePlayer={activePlayer}
@@ -791,18 +817,22 @@ export default function GameRoomPage() {
                   label="is answering Trivia in Trivia Showdown 🧠"
                 />
               )}
-              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
 
           {room.phase === 'asteroid_defense' && (
             <div className="space-y-6">
               {isMyTurn ? (
-                <AsteroidDefenseGame
-                  room={room}
-                  activePlayer={activePlayer}
-                  onCompleteTurn={handleMiniGameComplete('asteroid_defense')}
-                />
+                holdForBriefing ? (
+                  <BriefingHold />
+                ) : (
+                  <AsteroidDefenseGame
+                    room={room}
+                    activePlayer={activePlayer}
+                    onCompleteTurn={handleMiniGameComplete('asteroid_defense')}
+                  />
+                )
               ) : (
                 <SpectatorView
                   activePlayer={activePlayer}
@@ -811,7 +841,7 @@ export default function GameRoomPage() {
                   label="is defending the station from ASTEROIDS ☄️"
                 />
               )}
-              <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />
+              {room.roomType !== 'team_battle' && <BoardPeek theme={currentTheme} players={room.players} activePlayerId={activePlayer.id} />}
             </div>
           )}
 
@@ -1189,7 +1219,11 @@ export default function GameRoomPage() {
                           {isMe && <span className="bg-partyCyan text-partyDark text-[8px] px-1 rounded font-black">YOU</span>}
                           {isLeader && <span>👑</span>}
                         </div>
-                        <p className="text-[10px] text-partyYellow font-mono">Node #{player.boardPosition + 1}</p>
+                        {chrome.inventory && (
+                          <p className="text-[10px] text-partyYellow font-mono">
+                            {boardProgress(player.boardPosition)}/{BOARD_LENGTH} on the road
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -1385,6 +1419,16 @@ function BoardPeek({
           <MapRenderer theme={theme} players={players} activePlayerId={activePlayerId} defaultFollow="me" />
         </div>
       )}
+    </div>
+  );
+}
+
+/** Stands in for a mini-game while its first-time rules card is being read. */
+function BriefingHold() {
+  return (
+    <div className="glass-card rounded-3xl p-8 border border-white/15 text-center space-y-2">
+      <p className="text-sm font-black text-white">Read the rules first</p>
+      <p className="text-xs text-gray-400">Your turn starts when you close the card.</p>
     </div>
   );
 }

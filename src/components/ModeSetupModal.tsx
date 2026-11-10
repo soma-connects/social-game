@@ -11,7 +11,7 @@ import {
   TruthOrDareSelectionMode,
   TruthOrDareSettings,
 } from '@/lib/types';
-import { MINI_GAMES, TRUTH_OR_DARE_BLOCKED_MESSAGE, truthOrDareAllowed } from '@/lib/gameRules';
+import { BOARD_MINI_GAMES, MINI_GAMES, TRUTH_OR_DARE_BLOCKED_MESSAGE, truthOrDareAllowed } from '@/lib/gameRules';
 import { ROOM_VIBES, RoomVibeId } from '@/lib/roomVibes';
 import {
   TRUTH_OR_DARE_CATEGORIES,
@@ -561,6 +561,16 @@ export default function ModeSetupModal({
                 </div>
               </div>
 
+              {/* Board game only. The board can run six of the ten games — the
+                  other four need the whole room at once and belong to Team
+                  Battle — so listing all ten let a host pick a rotation the
+                  board would silently swap for Voice Arena. Team Battle drafts
+                  its own series on the next screen and never reads this list. */}
+              {mode === 'team_battle' ? (
+                <p className="text-xs text-gray-400 px-1">
+                  You pick the games for the series on the next screen.
+                </p>
+              ) : (
               <div className="space-y-3">
                 <SectionHeading
                   icon={<Gamepad2 className="w-4 h-4 text-partyYellow" />}
@@ -568,7 +578,7 @@ export default function ModeSetupModal({
                   hint="Pick which games can come up in the turn rotation."
                 />
                 <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
-                  {MINI_GAMES.map((game) => (
+                  {MINI_GAMES.filter((game) => BOARD_MINI_GAMES.includes(game.id)).map((game) => (
                     <OptionTile
                       key={game.id}
                       accent="yellow"
@@ -582,6 +592,7 @@ export default function ModeSetupModal({
                   ))}
                 </div>
               </div>
+              )}
             </>
           )}
         </div>

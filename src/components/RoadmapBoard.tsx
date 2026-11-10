@@ -11,7 +11,7 @@ import MapRenderer from './MapRenderer';
 import BackgroundMusic from './BackgroundMusic';
 import DiceRoller, { type RollBonus } from './DiceRoller';
 import TileEventOverlay from './TileEventOverlay';
-import { TOTAL_TILES, boardProgress, heatTier, leaderProgressOf, slipstreamSteps } from '@/lib/gameRules';
+import { TOTAL_TILES, BOARD_LENGTH, boardProgress, heatTier, leaderProgressOf, slipstreamSteps } from '@/lib/gameRules';
 
 interface RoadmapBoardProps {
   room: RoomState;
@@ -239,7 +239,7 @@ export default function RoadmapBoard({ room, activePlayer, canRoll, onNextTurn, 
         </p>
         {immersive && (
           <span className="rounded-full border border-white/15 bg-slate-950/75 px-2.5 py-1 font-mono text-[10px] font-black text-partyYellow backdrop-blur lg:hidden">
-            {boardProgress(activePlayer.boardPosition)} / {TOTAL_TILES}
+            {boardProgress(activePlayer.boardPosition)} / {BOARD_LENGTH}
           </span>
         )}
         {secondsLeft !== null && !hasRolled && (

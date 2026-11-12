@@ -195,7 +195,7 @@ export default function DebateGame({
       ) : (
         <div className="flex flex-col items-center py-8">
           <p className="text-2xl text-partyCyan font-bold mb-4 animate-pulse">
-            {activePlayer?.name || 'Player'} is explaining the topic...reparing the debate...
+            {activePlayer?.name || 'Player'} is preparing the debate...
           </p>
         </div>
       )}
@@ -390,7 +390,6 @@ export default function DebateGame({
           <h2 className="text-3xl font-black mb-2">
             {winnerId === null ? "It's a draw!" : `${winnerName} Wins!`}
           </h2>
-          <div className="text-4xl font-bold text-partyYellow my-4">{timeLeft}</div>
         </div>
 
         <div className="flex gap-8 items-end">

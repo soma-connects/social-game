@@ -183,3 +183,83 @@ describe('the board’s trivia', () => {
     }
   });
 });
+
+describe('passing the turn', () => {
+  it('is refused while a fork is still waiting on a choice', async () => {
+    const { roomId, host } = await boardMatch();
+    const stored = room(roomId);
+    stored.phase = 'branch_choice';
+    stored.rollOrder = stored.players.map((p: any) => p.id);
+    stored.rollIndex = 0;
+    stored.activePlayerIndex = 0;
+
+    const res = await call(roomId, { action: 'advance_turn' }, host);
+
+    // Accepting it left the next player on a fork they were not standing at.
+    expect(res.status).toBe(409);
+    expect(room(roomId).phase).toBe('branch_choice');
+    expect(room(roomId).rollIndex).toBe(0);
+  });
+
+  it('cannot skip a round by landing after the next one has begun', async () => {
+    const { roomId, host } = await boardMatch();
+    // The match opens on the host's mini-game: exactly where a second tap on
+    // NEXT TURN lands when the last roller is also first up next round.
+    expect(room(roomId).roundNumber).toBe(1);
+
+    const res = await call(roomId, { action: 'advance_turn' }, host);
+
+    expect(res.status).toBe(409);
+    expect(room(roomId).roundNumber).toBe(1);
+  });
+});
+
+describe('a wait on the board that nobody answers', () => {
+  /** Puts the room's current wait past its deadline, the way the heartbeat would find it. */
+  function expire(roomId: string) {
+    const stored = room(roomId);
+    stored.phaseDeadline = Date.now() - 1000;
+    stored.phaseDeadlineKey = `${stored.phase}:${stored.activePlayerIndex}:${stored.roundNumber ?? 0}`;
+  }
+
+  it('waves an unjudged dare through instead of holding the room on it', async () => {
+    const { roomId, host, ada } = await boardMatch();
+    const stored = room(roomId);
+    stored.phase = 'peer_dare';
+    stored.currentDare = { dareText: 'Sing it', targetPlayerId: host.id, challengerPlayerId: ada.id };
+    const scoreBefore = player(roomId, host.id).score;
+    expire(roomId);
+
+    await call(roomId, { action: 'heartbeat' }, ada);
+
+    expect(room(roomId).phase).toBe('roadmap_turn');
+    expect(room(roomId).currentDare).toBeNull();
+    // Nothing won, nothing lost: the silence was the judges', not the target's.
+    expect(player(roomId, host.id).score).toBe(scoreBefore);
+    expect(player(roomId, host.id).skipNextTurn).toBeFalsy();
+  });
+
+  it('hands the board back from an abandoned duel without reopening the shop', async () => {
+    const { roomId, host, ada } = await boardMatch();
+    const stored = room(roomId);
+    stored.phase = 'debate';
+    stored.rollOrder = [host.id, ada.id];
+    stored.rollIndex = 0;
+    stored.activePlayerIndex = 0;
+    stored.roundResults = [
+      { playerId: host.id, playerName: 'Host', game: 'voice_arena', pointsEarned: 40, performance: 0.5, steps: 5, rolled: true },
+      { playerId: ada.id, playerName: 'Ada', game: 'voice_arena', pointsEarned: 20, performance: 0.3, steps: 3, rolled: false },
+    ];
+    stored.debateState = {
+      player1Id: host.id, player2Id: ada.id, topic: 't', side1: 'For', side2: 'Against',
+      phase: 'p1_speaking', votes: {}, source: 'trap',
+    };
+    expire(roomId);
+
+    await call(roomId, { action: 'heartbeat' }, ada);
+
+    expect(room(roomId).phase).toBe('roadmap_turn');
+    // The roll the duel interrupted is still the host's, and still banked.
+    expect(room(roomId).roundResults.find((r: any) => r.playerId === host.id).steps).toBe(5);
+  });
+});

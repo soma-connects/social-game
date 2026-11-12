@@ -110,7 +110,27 @@ export function useMiniGameBriefing(game: BriefingId | null | undefined, enabled
   /** Lets a player pull the rules back up mid-game. */
   const open = useCallback((id: BriefingId) => setShowing(id), []);
 
-  return { showing, dismiss, open };
+  /**
+   * True while a first-time briefing is on screen or about to be.
+   *
+   * Several games start by themselves the moment they mount — PitchBird takes
+   * off, the trivia clock runs, karaoke plays its note — and the briefing is
+   * only an overlay, so a first-timer's turn used to play out and end
+   * underneath the card explaining it. The page holds the game back while this
+   * is true. A briefing re-opened from the "?" button is a review of a game
+   * already seen, so it never holds anything.
+   */
+  const skipped =
+    ready && typeof window !== 'undefined' && (() => {
+      try {
+        return localStorage.getItem(SKIP_KEY) === '1';
+      } catch {
+        return false;
+      }
+    })();
+  const holding = !!game && (!ready || (enabled && !skipped && !seen.has(game)));
+
+  return { showing, dismiss, open, holding };
 }
 
 interface MiniGameBriefingProps {

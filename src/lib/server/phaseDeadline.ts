@@ -48,6 +48,15 @@ export const MINIGAME_DEADLINE_MS = 180_000;
 export const ROAST_DEADLINE_MS = 60_000;
 /** Everyone shops at once, so this is a whole-room wait rather than one player's. */
 export const SHOP_DEADLINE_MS = 120_000;
+/**
+ * How long a dare may sit unjudged.
+ *
+ * A dare is resolved by somebody else tapping PASS or FAIL, and until this
+ * existed nothing resolved it if nobody did — the target cannot judge their own
+ * dare, so a room whose other players had put their phones down, or dropped,
+ * sat on the dare for good. Long enough to perform one and be laughed at.
+ */
+export const DARE_DEADLINE_MS = 90_000;
 
 /** How long a phase may wait on somebody, or undefined if it never stalls. */
 export function phaseWaitMs(phase: GamePhase): number | undefined {
@@ -55,6 +64,7 @@ export function phaseWaitMs(phase: GamePhase): number | undefined {
   // fixed 25s on the client, not an open-ended attempt.
   if (phase === 'roast_intermission') return ROAST_DEADLINE_MS;
   if (phase === 'powerup_shop') return SHOP_DEADLINE_MS;
+  if (phase === 'peer_dare') return DARE_DEADLINE_MS;
   if (PERFORMER_PHASES.has(phase)) return MINIGAME_DEADLINE_MS;
   return undefined;
 }

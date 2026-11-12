@@ -132,7 +132,11 @@ export default function RoastIntermission({
               </span>
               <h3 className="font-extrabold text-2xl text-white">{activePlayer.name}&apos;s Turn Recap</h3>
               <p className="text-xs text-partyCyan font-bold">
-                {turnResult ? `${turnResult.pointsEarned} points banked • ${turnResult.steps} steps earned` : 'Voice round complete'}
+                {turnResult
+                  ? room.roomType === 'team_battle'
+                    ? `${turnResult.pointsEarned} points for the crew`
+                    : `${turnResult.pointsEarned} points banked • ${turnResult.steps} steps earned`
+                  : 'Voice round complete'}
               </p>
             </div>
           </div>
@@ -257,7 +261,9 @@ export default function RoastIntermission({
               onClick={onFinishRoast}
               className="w-full bg-gradient-to-r from-emerald-500 via-partyYellow to-emerald-400 text-partyDark font-black text-base py-4 rounded-2xl flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] shadow-2xl glow-emerald"
             >
-              <span>PROCEED TO POWER-UP SHOP &amp; ROADMAP BOARD</span>
+              {/* Team Battle has no shop and no board; the next thing is the
+                  next performer. */}
+              <span>{room.roomType === 'team_battle' ? 'CONTINUE' : 'PROCEED TO POWER-UP SHOP & ROADMAP BOARD'}</span>
               <ArrowRight className="w-5 h-5" />
             </button>
           ) : (

@@ -42,6 +42,8 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
   const amEliminated = !!myPlayer.eliminated;
 
   const [transcript, setTranscript] = useState('');
+  /** The keyboard stays hidden until somebody asks for it. */
+  const [showTyping, setShowTyping] = useState(false);
   const [listening, setListening] = useState(false);
   const [showBribe, setShowBribe] = useState(false);
   /** The answer has been sent and the AI Master is ruling on it. */
@@ -332,9 +334,11 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
                 <p className="text-xs font-bold text-gray-300 text-center">
                   Answer out loud — the room decides whether you got away with it.
                 </p>
-                <div className="min-h-[52px] rounded-2xl bg-black/40 border border-white/10 px-4 py-3 text-sm text-white">
-                  {transcript || <span className="text-gray-500">Tap the mic and speak…</span>}
-                </div>
+                {!showTyping && (
+                  <div className="min-h-[52px] rounded-2xl bg-black/40 border border-white/10 px-4 py-3 text-sm text-white">
+                    {transcript || <span className="text-gray-500">Tap the mic and speak…</span>}
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <button
                     onClick={toggleMic}
@@ -354,6 +358,29 @@ export default function AiMasterGame({ room, myPlayer, roomId }: AiMasterGamePro
                     <Send className="w-4 h-4" /> {submitting ? 'JUDGING…' : 'DONE'}
                   </button>
                 </div>
+                {/* Same escape hatch Debate and Story Builder have. Without it
+                    a player whose mic the transcriber could not follow had no
+                    way to answer at all: DONE stays greyed out until there is
+                    text, the round timed out, and the host scored it as a
+                    dodge — which costs a life the second time. */}
+                {showTyping ? (
+                  <textarea
+                    value={transcript}
+                    onChange={(e) => setTranscript(e.target.value)}
+                    maxLength={600}
+                    rows={2}
+                    autoFocus
+                    placeholder="Type your answer…"
+                    className="w-full rounded-2xl bg-black/40 border border-white/15 px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-partyCyan"
+                  />
+                ) : (
+                  <button
+                    onClick={() => setShowTyping(true)}
+                    className="block mx-auto text-xs text-gray-400 hover:text-partyCyan underline underline-offset-4"
+                  >
+                    Mic not catching it? Type instead
+                  </button>
+                )}
                 <MicContentionNotice active={listening} onClaimPriority={restartWithMicPriority} />
               </>
             ) : (

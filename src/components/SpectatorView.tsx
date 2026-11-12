@@ -49,13 +49,27 @@ const SHOW_COUNTDOWN_WITHIN_MS = 90_000;
 const STALE_MS = 6000;
 
 export default function SpectatorView({ activePlayer, live, label, movingOnAt }: SpectatorViewProps) {
-  const fresh = !!live && live.playerId === activePlayer.id && Date.now() - (live.at ?? 0) < STALE_MS;
+  const mine = !!live && live.playerId === activePlayer.id;
+  const quiet = !mine || Date.now() - (live?.at ?? 0) >= STALE_MS;
+  /**
+   * Silence is not a dropout.
+   *
+   * The performer's browser only reports when something a spectator can see
+   * has changed (see pushLiveState), so a player reading the prompt, waiting to
+   * tap START or looking at their result sends nothing at all — and treating
+   * six quiet seconds as a lost connection told the room "lost their signal"
+   * about somebody who was simply thinking. Presence is the server's job: it
+   * marks a player disconnected when their heartbeat stops, and that is the
+   * only thing that means they have gone.
+   */
+  const dropped = activePlayer.connected === false;
+  const fresh = mine && !dropped;
   const game = live?.game;
 
   // Only once the performer has actually gone quiet: a countdown running under
   // somebody who is mid-attempt would read as a threat rather than an update.
   const secondsLeft = useCountdown(movingOnAt, SHOW_COUNTDOWN_WITHIN_MS);
-  const showCountdown = !fresh && secondsLeft !== null;
+  const showCountdown = quiet && secondsLeft !== null;
 
   return (
     <div className="glass-card rounded-3xl p-5 sm:p-6 border border-partyCyan/40 bg-slate-900/70 space-y-4">
@@ -68,9 +82,11 @@ export default function SpectatorView({ activePlayer, live, label, movingOnAt }:
               <Radio className="w-3 h-3 animate-pulse" /> WATCHING LIVE
             </span>
             <h3 className="font-extrabold text-lg text-white truncate">{activePlayer.name}</h3>
-            <p className="text-[11px] text-gray-400">
-              {game ? `${MINIGAME_ICONS[game]} ${MINIGAME_LABELS[game]}` : label}
-            </p>
+            {game && (
+              <p className="text-[11px] text-gray-400">
+                {MINIGAME_ICONS[game]} {MINIGAME_LABELS[game]}
+              </p>
+            )}
           </div>
         </div>
 
@@ -117,18 +133,19 @@ export default function SpectatorView({ activePlayer, live, label, movingOnAt }:
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-center space-y-2">
           <Mic className="w-8 h-8 text-gray-500 mx-auto animate-pulse" />
           <p className="text-sm font-bold text-gray-300">{label}</p>
-          {live && !fresh && !showCountdown && (
+          {dropped && !showCountdown && (
             <p className="text-[11px] text-amber-300 flex items-center justify-center gap-1.5">
               <AlertTriangle className="w-3 h-3" /> Lost their signal for a moment…
             </p>
           )}
-          {showCountdown && (
-            <p className="text-[11px] text-amber-300 flex items-center justify-center gap-1.5 font-bold">
-              <AlertTriangle className="w-3 h-3" />
-              No answer — moving on in {secondsLeft}s
-            </p>
-          )}
         </div>
+      )}
+
+      {showCountdown && (
+        <p className="text-[11px] text-amber-300 flex items-center justify-center gap-1.5 font-bold">
+          <AlertTriangle className="w-3 h-3" />
+          No answer — moving on in {secondsLeft}s
+        </p>
       )}
 
       {/* How far through the attempt they are */}
@@ -142,7 +159,7 @@ export default function SpectatorView({ activePlayer, live, label, movingOnAt }:
       )}
 
       <p className="text-[10px] text-gray-500 text-center">
-        Listen on the group call — react below while they go
+        Listen in on the group call while they go
       </p>
     </div>
   );

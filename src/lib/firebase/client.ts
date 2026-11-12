@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { initializeAppCheck, getToken, ReCaptchaEnterpriseProvider, type AppCheck } from 'firebase/app-check';
 
 const firebaseConfig = {
@@ -79,3 +79,16 @@ export async function appCheckHeaders(): Promise<Record<string, string>> {
 }
 
 export const db = getFirestore(app, 'default');
+
+// Local development against the Firebase emulators (see DEPLOY.md). Opt-in via
+// NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 and never in a production
+// build, so a stray variable cannot point live players at a laptop.
+const emulatorHost = process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST;
+if (emulatorHost && process.env.NODE_ENV !== 'production') {
+  const [host, port] = emulatorHost.split(':');
+  try {
+    connectFirestoreEmulator(db, host, Number(port) || 8080);
+  } catch {
+    /* a hot reload re-runs this against an already-connected instance */
+  }
+}

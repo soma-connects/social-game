@@ -2,6 +2,7 @@ import { getApp, getApps, initializeApp } from 'firebase/app';
 import {
   getAuth,
   signInAnonymously,
+  connectAuthEmulator,
   onAuthStateChanged,
   type User,
 } from 'firebase/auth';
@@ -59,6 +60,16 @@ export function ensureSignedIn(): Promise<User | null> {
   signInPromise = (async () => {
     try {
       const auth = getAuth(app());
+
+      // Local development against the Auth emulator; never in production.
+      const emulatorHost = process.env.NEXT_PUBLIC_AUTH_EMULATOR_HOST;
+      if (emulatorHost && process.env.NODE_ENV !== 'production') {
+        try {
+          connectAuthEmulator(auth, `http://${emulatorHost}`, { disableWarnings: true });
+        } catch {
+          /* already connected */
+        }
+      }
 
       // Firebase restores a previous anonymous session from IndexedDB, but not
       // synchronously — so wait for the first auth state before deciding

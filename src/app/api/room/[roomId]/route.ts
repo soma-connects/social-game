@@ -881,6 +881,31 @@ function expireStalledPhase(room: RoomState, now: number): void {
     return;
   }
 
+  if (room.phase === 'peer_dare') {
+    // Nobody judged it. Waved through with nothing won or lost: the target may
+    // well have performed to a room that never tapped, and punishing them for
+    // the judges' silence would be the wrong way round.
+    const dared = room.players.find((p) => p.id === room.currentDare?.targetPlayerId);
+    pushEvent(room, `⏳ Nobody judged ${dared?.name ?? 'the'} dare — the board moves on`, 'system');
+    room.currentDare = null;
+    room.phase = 'roadmap_turn';
+    armRollDeadline(room);
+    return;
+  }
+
+  if (room.phase === 'debate' && room.roomType !== 'team_battle') {
+    // Outside Team Battle a debate is never a qualifying round — it is a duel
+    // or a sudden-death trap that interrupted somebody's move on the board.
+    // Falling through to the forfeit below banked a zero over the result they
+    // had already rolled on and reopened the shop in the middle of the round.
+    // An abandoned duel just hands the board back.
+    pushEvent(room, `⏳ The duel fizzled out — back to the board`, 'system');
+    room.debateState = null;
+    room.phase = 'roadmap_turn';
+    armRollDeadline(room);
+    return;
+  }
+
   const performer = room.players[room.activePlayerIndex];
   if (!performer) {
     advanceRoundOrOpenShop(room);
@@ -3037,6 +3062,10 @@ async function applyAction(
       }
 
       room.phase = 'roadmap_turn';
+      // The duel ran on the clock the roll started, which has long since run
+      // out — without a fresh one the next heartbeat announces that the player
+      // "ran out of time to roll" the moment they are handed the board back.
+      armRollDeadline(room);
       return NextResponse.json({ room: await writeRoom(room) });
     }
 
@@ -4312,6 +4341,18 @@ async function applyAction(
 
     /** Hands the dice to the next player in the round's roll order. */
     case 'advance_turn': {
+      // Only from the board, and only once the move is finished. This used to
+      // run from any phase, which broke the round in two ways. Passing the turn
+      // while a fork was still waiting on a choice handed the next player a
+      // "choose your path" screen for a node they were not standing on, with
+      // no branch the server would accept — the room was stuck until the roll
+      // timer rescued it. And a second tap on NEXT TURN landing after the first
+      // had already started the next round was accepted whenever the tapper
+      // also happened to be first up in it, which threw that round away and
+      // skipped the room straight to the one after.
+      if (room.phase !== 'roadmap_turn') {
+        return NextResponse.json({ error: 'There is no turn to pass right now' }, { status: 409 });
+      }
       advanceRoll(room);
       return NextResponse.json({ room: await writeRoom(room) });
     }

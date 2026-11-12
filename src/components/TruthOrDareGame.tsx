@@ -171,7 +171,7 @@ export default function TruthOrDareGame({ room, myPlayer, roomId }: TruthOrDareG
               </>
             ) : (
               <p className="text-sm font-bold text-gray-300 text-center py-2">
-                {target?.name ?? 'They'} are choosing Truth or Dare…
+                {target?.name ? `${target.name} is` : 'They are'} choosing Truth or Dare…
               </p>
             )}
           </motion.div>
@@ -227,7 +227,7 @@ export default function TruthOrDareGame({ room, myPlayer, roomId }: TruthOrDareG
             {amTarget || myPlayer.isHost ? (
               <div className="glass-card rounded-3xl p-4 border border-white/10 space-y-2">
                 <p className="text-xs font-bold text-gray-300 text-center">
-                  {amTarget ? 'Did you do it?' : `Mark ${target?.name ?? 'their'} round for them:`}
+                  {amTarget ? 'Did you do it?' : target?.name ? `Mark ${target.name}'s round for them:` : 'Mark their round for them:'}
                 </p>
                 <div className="flex gap-3">
                   <button
